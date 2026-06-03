@@ -1,0 +1,250 @@
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0;
+  border-radius: 999px !important;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.icon-btn:hover {
+  transform: rotate(45deg);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+.request-bubbles-panel {
+  padding: 10px 14px 12px;
+  gap: 8px;
+  background:
+    radial-gradient(circle at 8% 10%, color-mix(in srgb, #7dd3fc 13%, transparent) 0 118px, transparent 119px),
+    radial-gradient(circle at 92% 2%, color-mix(in srgb, #f0abfc 11%, transparent) 0 140px, transparent 141px),
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, #ecfeff), var(--panel));
+}
+.request-bubbles-panel .request-head {
+  align-items: center;
+}
+.request-head .action-row {
+  gap: 6px;
+}
+.request-head .action-row button,
+.request-page-size,
+.request-toggle,
+.request-page-size select,
+.request-filter-field input,
+.request-filter-field select {
+  border-radius: 999px;
+}
+.request-page-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 7px 0 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  background: color-mix(in srgb, var(--panel) 88%, #f8fbff);
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+.request-page-size select {
+  min-height: 22px;
+  width: 64px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-weight: 800;
+}
+.request-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, #a7f3d0 42%, var(--border));
+  background: color-mix(in srgb, #ecfdf5 72%, var(--panel));
+  color: #047857;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.request-toggle input {
+  width: 14px;
+  height: 14px;
+  accent-color: #10b981;
+}
+.request-quick-note {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  margin-top: 0;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, #67e8f9 28%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, #ecfeff 72%, var(--panel));
+  color: var(--text-soft);
+  font-size: 12px;
+}
+/* request-filter-bar styles removed in favor of clean settings modal */
+.request-table-wrap {
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  overflow-x: auto;
+  width: 100%;
+}
+.request-table {
+  min-width: 980px;
+  border-collapse: separate;
+  border-spacing: 0 5px;
+}
+.request-table thead th {
+  position: sticky;
+  top: 0;
+  border: 0;
+  background: color-mix(in srgb, var(--panel) 88%, #eef6ff);
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.request-table th,
+.request-table td {
+  border-bottom: 0;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.request-table tbody tr {
+  background: color-mix(in srgb, var(--panel) 88%, #f8fbff);
+  box-shadow: 0 4px 14px rgba(31, 41, 55, 0.05);
+}
+.request-table tbody tr:hover {
+  background: color-mix(in srgb, var(--panel) 76%, #ecfeff);
+}
+.request-table tbody td {
+  padding: 8px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 10%, var(--border));
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 10%, var(--border));
+}
+.request-table tbody td:first-child {
+  border-left: 1px solid color-mix(in srgb, var(--accent) 10%, var(--border));
+  border-radius: 12px 0 0 12px;
+}
+.request-table tbody td:last-child {
+  border-right: 1px solid color-mix(in srgb, var(--accent) 10%, var(--border));
+  border-radius: 0 12px 12px 0;
+}
+.request-time-cell {
+  white-space: nowrap;
+}
+.request-time {
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.15;
+}
+.request-day,
+.request-model-sub,
+.request-usage small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.15;
+}
+.request-path-cell {
+  max-width: 300px;
+}
+.request-path-line code,
+.request-model-main code,
+.request-model-sub code {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.request-path-line code {
+  display: inline-block;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 9px;
+  background: color-mix(in srgb, #dbeafe 42%, var(--panel));
+}
+.request-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.request-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 19px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.request-chip.ip {
+  background: color-mix(in srgb, #ccfbf1 72%, var(--panel));
+  color: #0f766e;
+  border-color: color-mix(in srgb, #14b8a6 28%, var(--border));
+}
+.request-chip.method {
+  background: color-mix(in srgb, #ede9fe 72%, var(--panel));
+  color: #6d28d9;
+  border-color: color-mix(in srgb, #8b5cf6 26%, var(--border));
+}
+.request-chip.provider {
+  background: color-mix(in srgb, #ffedd5 70%, var(--panel));
+  color: #9a3412;
+  border-color: color-mix(in srgb, #fb923c 28%, var(--border));
+}
+.request-chip.route {
+  background: color-mix(in srgb, #e0f2fe 72%, var(--panel));
+  color: #075985;
+  border-color: color-mix(in srgb, #38bdf8 28%, var(--border));
+}
+.request-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+.request-status.ok {
+  background: color-mix(in srgb, #dcfce7 76%, var(--panel));
+  color: #15803d;
+  border: 1px solid color-mix(in srgb, #22c55e 30%, var(--border));
+}
+.request-status.warn {
+  background: color-mix(in srgb, #fee2e2 76%, var(--panel));
+  color: #b91c1c;
+  border: 1px solid color-mix(in srgb, #ef4444 30%, var(--border));
+}
+.request-status.off {
+  background: color-mix(in srgb, #fef3c7 76%, var(--panel));
+  color: #92400e;
+  border: 1px solid color-mix(in srgb, #f59e0b 30%, var(--border));
+}
+.request-usage {
+  display: grid;
+  gap: 1px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.request-usage span {
+  font-weight: 800;
+}
+.request-error-cell {
+  max-width: 400px;
+  color: var(--text-soft);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.request-error-cell:empty {
+  color: var(--text-muted);
+}

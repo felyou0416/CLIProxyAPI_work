@@ -1,0 +1,84 @@
+<section id="section-api-key-intake" class="panel panel-scroll section-view api-key-intake-panel" hidden>
+  <div class="panel-head">
+    <div>
+      <div class="section-kicker">上游 Provider</div>
+      <h2 class="section-title">API Key 接入</h2>
+      <div class="tool-desc-zh">把新的上游 API Key 保存到 storage/auth；保存后会重建运行配置，并自动排队检测模型。</div>
+    </div>
+    <div class="action-row">
+      <button class="secondary" type="button" onclick="loadApiKeyIntakePanel(true)">刷新预设</button>
+    </div>
+  </div>
+
+  <div class="api-key-flow-note">
+    <span>1 选择 Provider</span>
+    <span>2 填写连接信息</span>
+    <span>3 粘贴模型清单</span>
+    <strong>保存并检测</strong>
+  </div>
+
+  <div class="settings-grid api-key-intake-grid">
+    <div class="settings-card api-key-card">
+      <div class="api-key-card-head">
+        <span class="api-key-step">01</span>
+        <div>
+          <div class="log-label">选择接入方式</div>
+          <div class="metric-note">已有 Provider 更快，自定义适合新渠道。</div>
+        </div>
+      </div>
+      <div class="provider-model-categories api-key-mode-switch">
+        <button type="button" class="provider-category-btn is-active" id="api-key-mode-existing" onclick="setApiKeyIntakeMode('existing')">已有 Provider</button>
+        <button type="button" class="provider-category-btn" id="api-key-mode-custom" onclick="setApiKeyIntakeMode('custom')">完全自定义</button>
+      </div>
+      <label class="form-label">Provider</label>
+      <select id="api-key-provider-select" class="form-input" onchange="selectApiKeyPreset(this.value)"></select>
+      <input id="api-key-provider-custom" class="form-input" type="text" placeholder="例如: my-provider" hidden />
+      <div class="metric-note" id="api-key-provider-note">选择已有 provider 后会自动填入默认 Base URL。</div>
+    </div>
+
+    <div class="settings-card api-key-card">
+      <div class="api-key-card-head">
+        <span class="api-key-step">02</span>
+        <div>
+          <div class="log-label">连接配置</div>
+          <div class="metric-note">API Key 只用于写入认证文件，页面不会回显原文。</div>
+        </div>
+      </div>
+      <label class="form-label">Base URL</label>
+      <input id="api-key-base-url" class="form-input" type="text" placeholder="https://api.example.com/v1" />
+      <label class="form-label">API Key</label>
+      <div class="input-row">
+        <input id="api-key-secret" class="form-input" type="password" placeholder="sk-..." autocomplete="off" />
+        <button class="secondary api-key-ghost-btn" id="api-key-secret-toggle" type="button" onclick="toggleApiKeyIntakeSecret()">显示</button>
+      </div>
+      <label class="form-label">备注</label>
+      <input id="api-key-remark" class="form-input" type="text" placeholder="用于识别该账号" />
+    </div>
+
+    <div class="settings-card api-key-card api-key-model-card">
+      <div class="api-key-card-head">
+        <span class="api-key-step">03</span>
+        <div>
+          <div class="log-label">模型清单</div>
+          <div class="metric-note">每行一个模型 ID；重复项会自动去重。</div>
+        </div>
+      </div>
+      <textarea id="api-key-models" class="form-input" rows="9" placeholder="每行一个模型 ID，例如:&#10;gpt-4.1-mini&#10;deepseek-v3"></textarea>
+      <div class="api-key-action-bar">
+        <div class="auth-chip" id="api-key-model-count">0 个模型</div>
+        <button class="secondary" type="button" onclick="fillApiKeyPresetModels()">填入该 Provider 已有模型</button>
+        <button class="primary api-key-submit-btn" id="api-key-submit-btn" type="button" onclick="submitApiKeyIntake()">保存并检测</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="list-wrap account-list-panel api-key-result-panel">
+    <div class="account-list-head">
+      <div class="log-label">最近接入结果</div>
+      <div class="account-list-count"><strong id="api-key-intake-status">待填写</strong></div>
+    </div>
+    <div id="api-key-intake-result" class="list compact-list">
+      <div class="api-key-empty-state">保存后这里会显示新认证、runtime 重建、代理重启 and 检测队列状态。</div>
+    </div>
+  </div>
+</section>

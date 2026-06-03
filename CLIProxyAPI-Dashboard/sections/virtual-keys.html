@@ -1,0 +1,39 @@
+<section id="section-virtual-keys" class="panel panel-scroll section-view" hidden>
+  <div class="panel-head">
+    <div>
+      <div class="section-kicker">密钥分发</div>
+      <h2 class="section-title">虚拟 API Key 管理</h2>
+    </div>
+    <div class="action-row">
+      <span id="virtual-keys-meta" class="metric-note"></span>
+      <button class="primary" type="button" onclick="showCreateVirtualKeyModal()">🔑 创建新密钥</button>
+      <button class="secondary" type="button" onclick="loadVirtualKeysPanel(true)">刷新</button>
+    </div>
+  </div>
+  <div class="tool-desc-zh">创建虚拟 API Key 分发给其他用户。每个 Key 可独立设定额度上限、速率限制和模型访问权限。</div>
+
+  <div id="virtual-keys-list" class="vk-list"></div>
+
+  <!-- 创建密钥 模态弹窗 -->
+  <div id="vk-create-modal" class="modal-overlay" hidden>
+    <div class="modal" style="max-width: 600px;">
+      <div class="modal-head">
+        <h3>创建新虚拟密钥</h3>
+        <button class="nav-btn secondary" type="button" onclick="hideCreateVirtualKeyModal()" style="min-height: 24px; padding: 0 8px;">×</button>
+      </div>
+      <div class="modal-body manual-add-grid" style="gap: 12px; padding: 16px;">
+        <label>名称 *<input id="vk-create-name" type="text" placeholder="例如：张三的测试Key" class="form-input" /></label>
+        <label>备注<input id="vk-create-note" type="text" placeholder="用途说明" class="form-input" /></label>
+        <label class="full-row">允许模型（逗号分隔，留空=全部）<input id="vk-create-models" type="text" placeholder="gpt-5.4, chat, coder" class="form-input" /></label>
+        <label>速率限制 (RPM)<input id="vk-create-rpm" type="number" min="0" placeholder="0 = 无限制" class="form-input" /></label>
+        <label>Token 额度上限<input id="vk-create-max-tokens" type="number" min="0" placeholder="0 = 无限制" class="form-input" /></label>
+        <label>请求次数上限<input id="vk-create-max-requests" type="number" min="0" placeholder="0 = 无限制" class="form-input" /></label>
+        <label>过期时间<input id="vk-create-expires" type="datetime-local" class="form-input" /></label>
+      </div>
+      <div class="modal-foot">
+        <button class="secondary" type="button" onclick="hideCreateVirtualKeyModal()">取消</button>
+        <button class="primary" type="button" onclick="createVirtualKey()">🔑 创建密钥</button>
+      </div>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,33 @@
+<section id="section-model-proxy" class="panel panel-scroll section-view" hidden>
+  <div class="panel-head">
+    <div>
+      <div class="section-kicker" data-i18n="section.modelProxyKicker">Model Proxy</div>
+      <h2 class="section-title" data-i18n="section.modelProxyTitle">模型默认代理</h2>
+    </div>
+    <div class="action-row">
+      <button class="secondary" type="button" onclick="loadModelProxyPanel(true)" data-i18n="btn.refresh">刷新</button>
+      <button type="button" onclick="saveModelProxyPanel()" data-i18n="btn.saveModelProxy">保存代理设置</button>
+    </div>
+  </div>
+  <div class="tool-desc-zh" data-i18n="section.modelProxyDesc">这里按 provider 分组绑定默认代理预设。当前实际写入的是 Clash 的 mixed-port；像美国4、香港4这些节点名主要作为预设标签，真正出口节点仍以 Clash 当前选中的节点为准。</div>
+  <div class="model-proxy-layout">
+    <div class="model-proxy-card">
+      <div class="aggregate-panel-head">
+        <h3 data-i18n="section.modelProxyPresetTitle">代理预设</h3>
+      </div>
+      <div id="model-proxy-presets" class="model-proxy-preset-list"></div>
+    </div>
+    <div class="model-proxy-card">
+      <div class="aggregate-panel-head">
+        <h3 data-i18n="section.modelProxyModelsTitle">Provider 列表</h3>
+      </div>
+      <div class="tool-desc-zh" data-i18n="section.modelProxyModelsDesc">按 provider 整组绑定默认代理。未设置时走当前原始配置，不强制使用 Clash。</div>
+      <div class="model-proxy-toolbar">
+        <input id="model-proxy-search" class="model-proxy-search-input" type="search" placeholder="搜索 Provider / 模型 ID / 上游模型" oninput="setModelProxySearch(this.value)" />
+        <div id="model-proxy-state-filters" class="provider-model-categories"></div>
+      </div>
+      <div id="model-proxy-summary" class="auth-chip">-</div>
+      <div id="model-proxy-list" class="model-proxy-list"></div>
+    </div>
+  </div>
+</section>

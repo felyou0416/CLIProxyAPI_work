@@ -1,0 +1,2 @@
+[console_scripts]
+relayx = relayx_cli:main

@@ -1,0 +1,67 @@
+<section id="section-firewall-access" class="panel panel-scroll section-view firewall-access-panel" hidden>
+  <div class="panel-head">
+    <div>
+      <div class="section-kicker">Access</div>
+      <h2 class="section-title">端口暴露与防火墙</h2>
+    </div>
+    <div class="action-row">
+      <span id="ip-helper-status" class="na-mini-pill warn">IP Helper 未读取</span>
+      <button class="secondary" type="button" onclick="setIpHelperService('start')">启动 IP Helper</button>
+      <button class="secondary" type="button" onclick="setIpHelperService('stop')">关闭 IP Helper</button>
+      <button class="secondary" type="button" onclick="loadFirewallAccessPanel(true)">刷新</button>
+    </div>
+  </div>
+
+  <div class="tool-desc-zh">上面只把监听 <code>127.0.0.1</code> 的 TCP 程序绑定到 <code>0.0.0.0</code>；下面单独管理本面板创建的防火墙端口规则。</div>
+
+  <div class="firewall-access-card">
+    <div class="firewall-card-head">
+      <div>
+        <strong>绑定到 0.0.0.0</strong>
+        <p>只适用于本机已有 <code>127.0.0.1</code> TCP 监听的服务；UDP/发现类端口请在下面单独放行防火墙。</p>
+      </div>
+    </div>
+    <label class="firewall-port-field">
+      <span>TCP 端口</span>
+      <input id="port-binding-input" type="text" inputmode="numeric" placeholder="例如：8317，或 8317,1900" />
+    </label>
+    <div class="action-row">
+      <button type="button" onclick="enablePortBindings()">添加绑定</button>
+      <button type="button" class="secondary" onclick="removePortBindings()">关闭绑定</button>
+    </div>
+  </div>
+
+  <div id="port-binding-status" class="firewall-access-status"></div>
+
+  <div class="firewall-access-card">
+    <div class="firewall-card-head">
+      <div>
+        <strong>单独防火墙放行</strong>
+        <p>只创建或删除本面板命名的防火墙规则，不修改程序监听地址。</p>
+      </div>
+    </div>
+    <label class="firewall-port-field">
+      <span>端口</span>
+      <input id="firewall-port-input" type="text" inputmode="numeric" placeholder="例如：1900，或 1900,8765" />
+    </label>
+    <label class="firewall-port-field">
+      <span>协议</span>
+      <select id="firewall-protocol-input">
+        <option value="BOTH" selected>TCP + UDP</option>
+        <option value="TCP">仅 TCP</option>
+        <option value="UDP">仅 UDP</option>
+      </select>
+    </label>
+    <label class="firewall-port-field">
+      <span>允许来源 IP / CIDR</span>
+      <input id="firewall-remote-input" type="text" placeholder="fd7a:115c:a1e0::9e39:c580, 100.89.197.128" />
+    </label>
+    <div class="action-row">
+      <button type="button" onclick="checkCustomFirewallPorts()">检查端口</button>
+      <button type="button" class="secondary" onclick="allowCustomFirewallPorts()">一键放行</button>
+      <button type="button" class="secondary" onclick="removeCustomFirewallPorts()">关闭放行</button>
+    </div>
+  </div>
+
+  <div id="firewall-access-status" class="firewall-access-status"></div>
+</section>

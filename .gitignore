@@ -1,0 +1,57 @@
+# --- 核心敏感项（不提交） ---
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+storage/
+storage.bak/
+*.log
+*.jsonl
+
+# --- Auth / 凭据文件 ---
+**/auths/*
+!**/auths/.gitkeep
+**/auths/**/
+!**/auths/**/.gitkeep
+
+# --- 构建产物 / 依赖（不提交） ---
+bin/
+obj/
+dist/
+build/
+out/
+target/
+vendor/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+node_modules/
+.venv/
+venv/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# --- Go 产物 ---
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# --- IDE / 编辑器 ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- 临时文件 ---
+*.tmp
+*.bak
+*.orig
+*.rej

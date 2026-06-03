@@ -1,0 +1,157 @@
+:root {
+  color-scheme: light;
+  --bg: #f4f6f8;
+  --panel: #ffffff;
+  --panel-2: #f0f3f6;
+  --border: #d8dee6;
+  --text: #161616;
+  --text-soft: #414141;
+  --text-muted: #858585;
+  --accent: #111827;
+  --accent-soft: #e8eef7;
+  --danger: #dc2626;
+  --ok: #2563eb;
+  --radius: 8px;
+  --radius-sm: 6px;
+  --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #11161d;
+  --panel: #18212c;
+  --panel-2: #202b38;
+  --border: #2b3949;
+  --text: #e6edf5;
+  --text-soft: #b9c7d8;
+  --text-muted: #91a3b8;
+  --accent: #4f8cff;
+  --accent-soft: #243349;
+  --danger: #ff6b6b;
+  --ok: #7aa7ff;
+}
+[data-theme="bright"] {
+  color-scheme: light;
+  --bg: #f7f9fc;
+  --panel: #ffffff;
+  --panel-2: #f3f6fa;
+  --border: #d9e1ec;
+  --text: #172033;
+  --text-soft: #3d4b63;
+  --text-muted: #66758c;
+  --accent: #315f9f;
+  --accent-soft: #e7eef8;
+  --danger: #d14343;
+  --ok: #2563eb;
+}
+[data-theme="dark"] .group-pill-bar .group-pill.active {
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+[data-theme="dark"] .panel {
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+}
+[data-theme="dark"] .auth-btn.secondary { background: #25364f; border-color: #39557a; color: #c8dcff; }
+[data-theme="dark"] .auth-group-head {
+  background: color-mix(in srgb, var(--panel-2) 85%, #2b3f5f);
+}
+[data-theme="dark"] .auth-chip {
+  border-color: #486699;
+  background: #23334b;
+  color: #cae0ff;
+}
+[data-theme="dark"] .auth-chip.active-chip {
+  border-color: #49658d;
+  background: #243349;
+  color: #cfe0ff;
+}
+[data-theme="dark"] .auth-provider-filter-btn.is-active {
+  background: #25364f;
+  border-color: #39557a;
+  color: #c8dcff;
+}
+[data-theme="dark"] .auth-provider-filter-btn.is-active.active-chip {
+  background: #243349;
+  border-color: #49658d;
+  color: #cfe0ff;
+}
+[data-theme="dark"] .auth-inline-chip.active-chip {
+  background: #243349;
+  border-color: #49658d;
+  color: #cfe0ff;
+}
+[data-theme="dark"] .provider-model-call-id.status-testing {
+  background: #4a3a12;
+  border-color: #b68a1f;
+  color: #f6df9a;
+}
+[data-theme="dark"] .provider-model-status-dot.status-testing {
+  background: #f0b429;
+  border-color: #6b5310;
+  border-top-color: #f0b429;
+}
+[data-theme="dark"] .provider-test-btn.is-testing,
+[data-theme="dark"] .provider-test-btn:disabled {
+  background: #5a4510;
+  border-color: #b68a1f;
+  color: #f6df9a;
+}
+[data-theme="dark"] .item.active {
+  background: color-mix(in srgb, var(--panel) 82%, var(--accent));
+  border-color: color-mix(in srgb, var(--accent) 85%, #ffffff);
+}
+[data-theme="dark"] .request-bubbles-panel {
+  background:
+    radial-gradient(circle at 8% 10%, rgba(14, 165, 233, .13) 0 170px, transparent 171px),
+    radial-gradient(circle at 92% 2%, rgba(217, 70, 239, .11) 0 190px, transparent 191px),
+    var(--panel);
+}
+[data-theme="dark"] .request-table tbody tr {
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
+}
+[data-theme="dark"] .chat-message.assistant .chat-message-content {
+  background: color-mix(in srgb, var(--panel-2) 80%, white 5%);
+}
+[data-theme="dark"] .chat-panel {
+  background: var(--bg);
+}
+[data-theme="dark"] .auth-strip {
+  background: var(--bg-card, #1e1e1e);
+  border-color: var(--border, #333);
+}
+[data-theme="dark"] .auth-strip.is-picked {
+  background: rgba(59, 130, 246, 0.08);
+}
+[data-theme="dark"] .auth-strip-details {
+  border-top-color: var(--border);
+  background: color-mix(in srgb, var(--panel-2) 40%, var(--panel));
+}
+[data-theme="dark"] .auth-details-grid {
+  color: var(--text-soft);
+}
+[data-theme="dark"] .na-banner-active {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.12) 0%, rgba(59, 130, 246, 0.12) 100%);
+  border-color: rgba(34, 197, 94, 0.25);
+}
+[data-theme="dark"] .na-banner-inactive {
+  background: linear-gradient(135deg, rgba(75, 85, 99, 0.15) 0%, rgba(55, 65, 81, 0.15) 100%);
+}
+[data-theme="dark"] .na-banner-desc code {
+  background: rgba(255, 255, 255, 0.08);
+}
+[data-theme="dark"] .na-info-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+[data-theme="bright"] .na-snippet-code {
+  background: #f8f8f8;
+  color: #333;
+  border-color: var(--border);
+}
+[data-theme="dark"] .na-guide-card:hover {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+[data-theme="dark"] .na-firewall-note {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.2);
+}
+[data-theme="dark"] .na-note-content code {
+  background: rgba(255, 255, 255, 0.08);
+}

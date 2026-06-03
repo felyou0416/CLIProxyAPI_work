@@ -1,0 +1,31 @@
+<section id="section-clients" class="panel panel-scroll section-view" hidden>
+  <div class="panel-head">
+    <div>
+      <div class="section-kicker" data-i18n="section.clientsKicker">Observability</div>
+      <h2 class="section-title" data-i18n="section.clientsTitle">Clients / IPs</h2>
+    </div>
+    <div class="action-row">
+      <button class="secondary" type="button" onclick="loadClientsPanel(true)" data-i18n="btn.refresh">刷新</button>
+      <span class="auth-chip" id="request-clients-meta">-</span>
+    </div>
+  </div>
+  <div class="metric-table-wrap">
+    <table class="metric-table">
+      <thead>
+        <tr>
+          <th>IP</th>
+          <th>请求数</th>
+          <th>成功率</th>
+          <th>4xx</th>
+          <th>5xx</th>
+          <th>常用模型</th>
+          <th>常用路径</th>
+          <th>总 Token</th>
+          <th>平均延迟</th>
+          <th>最近访问</th>
+        </tr>
+      </thead>
+      <tbody id="request-clients-body"></tbody>
+    </table>
+  </div>
+</section>

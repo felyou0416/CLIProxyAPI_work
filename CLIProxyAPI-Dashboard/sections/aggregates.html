@@ -1,0 +1,100 @@
+<section id="section-aggregates" class="panel panel-scroll section-view aggregate-workbench" hidden>
+  <div class="panel-head aggregate-page-head">
+    <div>
+      <h2 class="section-title">聚合模型工作台</h2>
+      <div class="tool-desc-zh">把多个上游模型组织成一个可调用的 model ID，并按可用性、分数和 runtime 状态维护顺序。</div>
+    </div>
+    <div class="action-row">
+      <button type="button" class="secondary" onclick="loadAggregateModels(true)">刷新</button>
+      <button type="button" class="secondary" onclick="loadAggregateSourceModels()">加载可选模型</button>
+    </div>
+  </div>
+
+  <div class="aggregate-layout">
+    <div class="aggregate-panel-card aggregate-sidebar-card">
+      <div class="aggregate-panel-head">
+        <div>
+          <div class="aggregate-step-label">Workspace</div>
+          <h3 data-i18n="section.aggregatesListTitle">聚合 ID 列表</h3>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="auth-chip" id="aggregate-total-count">0</span>
+          <button type="button" class="secondary" style="min-width: 28px; width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; border-radius: 50%; cursor: pointer;" onclick="showCreateAggregateModal()" title="新建聚合 ID">+</button>
+        </div>
+      </div>
+      <div id="aggregate-alias-list" class="aggregate-alias-list"></div>
+    </div>
+
+    <div class="aggregate-panel-card aggregate-detail-card">
+      <div class="aggregate-panel-head">
+        <div>
+          <div class="aggregate-step-label">Step 3</div>
+          <h3 data-i18n="section.aggregatesDetailTitle">当前聚合详情</h3>
+        </div>
+        <div class="aggregate-detail-actions">
+          <span class="auth-chip active-chip" id="aggregate-active-name">未选择</span>
+          <button type="button" class="secondary" id="aggregate-member-toggle-btn" style="min-width: 32px; width: 32px; height: 28px; padding: 0; display: none; align-items: center; justify-content: center; font-size: 10px; border-radius: 6px;"></button>
+          <button type="button" class="secondary" id="aggregate-test-btn" onclick="testCurrentAggregateMembers()" data-i18n="btn.testAvailability">检测可用</button>
+          <button type="button" class="secondary" onclick="sortCurrentAggregateByScore()" data-i18n="btn.sortByScore">按分数排序</button>
+          <button type="button" class="secondary" onclick="sortCurrentAggregateUnavailableLast()" data-i18n="btn.moveUnavailableLast">不可用后置</button>
+          <button type="button" class="secondary" onclick="startAggregateMemberEdit()">编辑成员</button>
+          <button type="button" class="secondary" onclick="saveAggregateMemberEdit()">保存修改</button>
+          <button type="button" class="secondary" onclick="cancelAggregateMemberEdit()">取消编辑</button>
+        </div>
+      </div>
+      <div id="aggregate-active-summary" class="tool-desc-zh" data-i18n="section.aggregatesDetailEmpty">请选择左侧一个聚合 ID。</div>
+      <div id="aggregate-member-list" class="aggregate-member-list"></div>
+    </div>
+  </div>
+
+  <!-- Step 4: Add members section, restructured to two-column left-right layout -->
+  <div class="aggregate-source-layout">
+    <!-- Left Column: Provider Sidebar -->
+    <div class="aggregate-panel-card aggregate-source-sidebar-card">
+      <div class="aggregate-panel-head" style="margin-bottom: 12px;">
+        <div>
+          <h3 data-i18n="section.aggregatesAddTitle">可选渠道来源</h3>
+        </div>
+      </div>
+      <div id="aggregate-provider-filters" class="provider-model-map-tabs-vertical"></div>
+    </div>
+
+    <!-- Right Column: Filters + Action Dock + Model List -->
+    <div class="aggregate-source-right-pane">
+      <div class="aggregate-panel-card" style="padding: 16px; margin: 0; display: grid; gap: 12px;">
+        <div class="aggregate-panel-head" style="padding: 0; border: none; background: transparent; margin-bottom: 0; justify-content: flex-end;">
+          <div class="aggregate-source-actions">
+            <button type="button" id="aggregate-load-source-btn" onclick="loadAggregateSourceModels()">加载可选模型</button>
+          </div>
+        </div>
+
+
+        <div id="aggregate-source-model-list" class="provider-model-list compact-provider-list" style="margin-top: 4px;"></div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- 新建聚合 ID 模态弹窗 -->
+  <div id="create-aggregate-modal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 2000; align-items: center; justify-content: center;">
+    <div class="modal" style="background: var(--panel); border: 1px solid var(--border); border-radius: 12px; width: 340px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); display: flex; flex-direction: column; overflow: hidden; transform: scale(0.96); opacity: 0; transition: all 0.15s ease;">
+      <div class="modal-head" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border);">
+        <h3 style="margin: 0; font-size: 15px; font-weight: 800;" data-i18n="section.aggregatesCreateTitle">创建聚合 ID</h3>
+        <button type="button" class="secondary" style="min-width: 24px; width: 24px; height: 24px; padding: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; cursor: pointer;" onclick="hideCreateAggregateModal()">×</button>
+      </div>
+      <div class="modal-body" style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+        <div class="manual-add-grid" style="margin: 0;">
+          <label style="display: flex; flex-direction: column; gap: 6px;">
+            <span style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase;">聚合 ID</span>
+            <input id="aggregate-create-id" type="text" placeholder="例如：voice 或 office" style="height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 13px;" />
+          </label>
+        </div>
+      </div>
+      <div class="modal-foot" style="display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--panel-2);">
+        <button type="button" class="secondary" style="min-height: 30px; padding: 0 12px; font-size: 12px; cursor: pointer;" onclick="hideCreateAggregateModal()">取消</button>
+        <button type="button" style="min-height: 30px; padding: 0 12px; font-size: 12px; cursor: pointer;" onclick="handleCreateAggregateSubmit()">创建</button>
+      </div>
+    </div>
+  </div>
+</section>
+

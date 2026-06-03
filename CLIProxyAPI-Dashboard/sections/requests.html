@@ -1,0 +1,104 @@
+<section id="section-requests" class="panel panel-scroll section-view request-bubbles-panel" hidden>
+  <div class="panel-head request-head">
+    <div>
+      <div class="section-kicker" data-i18n="section.requestsKicker">可观测性</div>
+      <h2 class="section-title" data-i18n="section.requestsTitle">请求记录</h2>
+    </div>
+    <div class="action-row">
+      <button class="secondary" type="button" onclick="loadRequestEventsPanel(true)" data-i18n="btn.refresh">刷新</button>
+      <button class="secondary" type="button" onclick="loadMoreRequestEvents()" data-i18n="btn.loadMore">加载更多</button>
+      <button class="secondary icon-btn" type="button" onclick="showRequestSettingsModal()" title="筛选与设置">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+      <span class="auth-chip" id="request-events-meta">-</span>
+    </div>
+  </div>
+  <div class="request-quick-note" data-i18n="section.requestsDesc">最近请求按时间倒序显示，默认隐藏 /v1/models。点击齿轮按钮进行高级筛选与配置。</div>
+  <div class="metric-table-wrap request-table-wrap">
+    <table class="metric-table request-table">
+      <thead>
+        <tr>
+          <th>时间</th>
+          <th>状态</th>
+          <th>请求</th>
+          <th>模型路由</th>
+          <th>用量</th>
+          <th>错误</th>
+        </tr>
+      </thead>
+      <tbody id="request-events-body"></tbody>
+    </table>
+  </div>
+
+  <!-- Unified Settings and Filter Modal -->
+  <!-- Unified Settings and Filter Modal -->
+  <div id="request-settings-modal" class="modal-overlay" style="overflow-y: auto; padding: 20px 0; box-sizing: border-box;" hidden>
+    <div class="modal" style="max-width: 640px; width: 95%; max-height: calc(100vh - 40px); display: flex; flex-direction: column; border-radius: 12px; box-shadow: 0 15px 30px rgba(0,0,0,0.12); border: 1px solid var(--border); overflow: hidden; margin: auto;">
+      <div class="modal-head" style="padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; background: var(--panel);">
+        <h3 style="font-size: 13px; font-weight: 800; color: var(--text); margin: 0;">请求日志设置与筛选</h3>
+        <button class="nav-btn secondary" type="button" onclick="hideRequestSettingsModal()" style="font-size: 15px; padding: 0; min-height: 20px; min-width: 20px; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--text-soft); cursor: pointer;">×</button>
+      </div>
+      <div class="modal-body" style="padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex: 1; min-height: 0;">
+        
+        <!-- Row 1: Display Configs & Primary Filters -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; align-items: end;">
+          <div class="form-group" style="display: flex; flex-direction: column; gap: 3px;">
+            <label style="font-size: 10px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.02em;">每次加载</label>
+            <select id="request-page-size" class="form-input" style="height: 28px; padding: 0 6px; border-radius: 6px; font-size: 11px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); width: 100%;">
+              <option value="50" selected>50 条</option>
+              <option value="100">100 条</option>
+              <option value="200">200 条</option>
+              <option value="300">300 条</option>
+            </select>
+          </div>
+          <div class="form-group" style="display: flex; flex-direction: column; gap: 3px;">
+            <label style="font-size: 10px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.02em;">选项</label>
+            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; color: var(--text); font-weight: 600; height: 28px; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); margin: 0; box-sizing: border-box; width: 100%;">
+              <input id="request-include-models" type="checkbox" style="width: 12px; height: 12px; accent-color: var(--accent);" />
+              <span style="white-space: nowrap;">包含 models</span>
+            </label>
+          </div>
+          <div class="form-group" style="display: flex; flex-direction: column; gap: 3px;">
+            <label style="font-size: 10px; font-weight: 700; color: var(--text-soft);">IP 过滤</label>
+            <input id="request-filter-ip" type="text" class="form-input" style="height: 28px; padding: 0 8px; border-radius: 6px; font-size: 11px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text);" placeholder="例如: 127.0.0.1" onkeydown="handleRequestFilterKeydown(event)">
+          </div>
+          <div class="form-group" style="display: flex; flex-direction: column; gap: 3px;">
+            <label style="font-size: 10px; font-weight: 700; color: var(--text-soft);">请求模型</label>
+            <input id="request-filter-model" type="text" class="form-input" style="height: 28px; padding: 0 8px; border-radius: 6px; font-size: 11px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text);" placeholder="例如: gpt-4" onkeydown="handleRequestFilterKeydown(event)">
+          </div>
+        </div>
+
+        <div style="border-top: 1px dashed var(--border); margin: 2px 0;"></div>
+
+        <!-- Row 2: Secondary Filters -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; align-items: end;">
+          <div class="form-group" style="display: flex; flex-direction: column; gap: 3px;">
+            <label style="font-size: 10px; font-weight: 700; color: var(--text-soft);">服务商 (Provider)</label>
+            <input id="request-filter-provider" type="text" class="form-input" style="height: 28px; padding: 0 8px; border-radius: 6px; font-size: 11px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text);" placeholder="例如: openrouter" onkeydown="handleRequestFilterKeydown(event)">
+          </div>
+          <div class="form-group" style="display: flex; flex-direction: column; gap: 3px;">
+            <label style="font-size: 10px; font-weight: 700; color: var(--text-soft);">状态码</label>
+            <input id="request-filter-status" type="text" class="form-input" style="height: 28px; padding: 0 8px; border-radius: 6px; font-size: 11px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text);" placeholder="例如: 200 / 404" onkeydown="handleRequestFilterKeydown(event)">
+          </div>
+          <div class="form-group" style="display: flex; flex-direction: column; gap: 3px; grid-column: span 2;">
+            <label style="font-size: 10px; font-weight: 700; color: var(--text-soft);">响应结果</label>
+            <select id="request-filter-success" class="form-input" style="height: 28px; padding: 0 6px; border-radius: 6px; font-size: 11px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); width: 100%;">
+              <option value="">全部</option>
+              <option value="true">成功</option>
+              <option value="false">失败</option>
+            </select>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-foot" style="padding: 10px 16px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--panel) 96%, black);">
+        <button class="secondary" type="button" onclick="resetAndClearRequestSettings()" style="height: 28px; padding: 0 10px; font-size: 11px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text-soft); font-weight: 600; cursor: pointer; margin-right: auto; transition: all 0.2s;">重置并清空</button>
+        <button class="secondary" type="button" onclick="hideRequestSettingsModal()" style="height: 28px; padding: 0 10px; font-size: 11px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-weight: 600; cursor: pointer; transition: all 0.2s;">取消</button>
+        <button class="primary" type="button" onclick="submitRequestSettings()" style="height: 28px; padding: 0 12px; font-size: 11px; border-radius: 6px; border: 0; background: var(--accent); color: white; font-weight: 700; cursor: pointer; transition: all 0.2s; box-shadow: 0 3px 8px color-mix(in srgb, var(--accent) 18%, transparent);">应用筛选</button>
+      </div>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,76 @@
+<section id="section-account" class="panel panel-scroll panel-account section-view">
+  <div class="panel-sub">
+    <!-- Header -->
+    <div class="panel-head" style="margin-bottom: 24px;">
+      <div>
+        <div class="section-kicker" data-i18n="section.proxy">Proxy Service</div>
+        <h2 class="section-title" data-i18n="section.proxyTitle">CLIProxyAPI Runtime Control</h2>
+      </div>
+    </div>
+
+    <!-- Runtime Control Station Card (Unified Premium Control Station) -->
+    <div class="control-station-card" style="margin-bottom: 28px; padding: 24px; background: var(--card-bg, var(--panel)); border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02); display: flex; gap: 32px; justify-content: space-between; flex-wrap: wrap; align-items: center;">
+      <!-- Group 1: Proxy Control -->
+      <div class="control-group" style="display: flex; flex-direction: column; gap: 12px; min-width: 280px; flex: 1;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 16px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.05));">⚡</span>
+          <span style="font-size: 14px; font-weight: 700; color: var(--text); letter-spacing: 0.5px;" data-i18n="label.proxyGroup">代理服务控制</span>
+        </div>
+        <div class="control-pair" style="display: flex; width: 100%; justify-content: space-between; padding: 4px; background: color-mix(in srgb, var(--panel) 94%, var(--text-muted)); border-radius: 99px; border: 1px solid var(--border); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);">
+          <button class="runtime-action-btn" onclick="startProxy(this)" data-i18n="btn.startProxy" style="flex: 1; border: none; background: transparent; padding: 10px 16px; font-weight: 700; border-radius: 99px; font-size: 13px; transition: all 0.2s; cursor: pointer; color: var(--text);">启动代理</button>
+          <button class="secondary runtime-action-btn" onclick="restartProxy(this)" data-i18n="btn.restartProxy" style="flex: 1; border: none; background: transparent; padding: 10px 16px; font-weight: 700; border-radius: 99px; font-size: 13px; transition: all 0.2s; cursor: pointer;">重启</button>
+          <button class="danger runtime-action-btn" onclick="stopProxy(this)" data-i18n="btn.stopProxy" style="flex: 1; border: none; background: transparent; padding: 10px 16px; font-weight: 700; border-radius: 99px; font-size: 13px; transition: all 0.2s; cursor: pointer;">停止</button>
+        </div>
+      </div>
+
+      <!-- Group 2: Dashboard Control -->
+      <div class="control-group" style="display: flex; flex-direction: column; gap: 12px; min-width: 280px; flex: 1;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 16px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.05));">📊</span>
+          <span style="font-size: 14px; font-weight: 700; color: var(--text); letter-spacing: 0.5px;" data-i18n="label.dashboardGroup">面板服务控制</span>
+        </div>
+        <div class="control-pair" style="display: flex; width: 100%; justify-content: space-between; padding: 4px; background: color-mix(in srgb, var(--panel) 94%, var(--text-muted)); border-radius: 99px; border: 1px solid var(--border); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);">
+          <button class="secondary" onclick="runDashboardScript('ps')" style="flex: 1; border: none; background: transparent; padding: 10px 16px; font-weight: 700; border-radius: 99px; font-size: 13px; transition: all 0.2s; cursor: pointer;">启动面板</button>
+          <button class="secondary" onclick="restartDashboardPanel()" style="flex: 1; border: none; background: transparent; padding: 10px 16px; font-weight: 700; border-radius: 99px; font-size: 13px; transition: all 0.2s; cursor: pointer;">重启</button>
+          <button class="danger" onclick="stopDashboardPanel()" style="flex: 1; border: none; background: transparent; padding: 10px 16px; font-weight: 700; border-radius: 99px; font-size: 13px; transition: all 0.2s; cursor: pointer;">停止</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Grid -->
+    <div class="status-grid compact-grid">
+      <div class="status-item">
+        <div class="label" data-i18n="label.proxyProcess">Proxy Process</div>
+        <div class="status-value" id="proxy-running"><span class="pill off" data-i18n="stopped">Not running</span></div>
+      </div>
+      <div class="status-item">
+        <div class="label" data-i18n="hero.localUrl">Local URL</div>
+        <div class="status-value"><code id="proxy-local-url">http://127.0.0.1:8317</code></div>
+      </div>
+      <div class="status-item">
+        <div class="label" data-i18n="label.exposureMode">Exposure Mode</div>
+        <div class="status-value" id="exposure-mode-status">Disabled</div>
+      </div>
+      <div class="status-item">
+        <div class="label" data-i18n="label.exposureUrl">Exposure URL</div>
+        <div class="status-value"><code id="proxy-exposure-url">-</code></div>
+      </div>
+      <div class="status-item">
+        <div class="label" data-i18n="hero.apiKey">API Key</div>
+        <div class="status-value"><code id="proxy-api-key">cliproxyapi</code></div>
+      </div>
+      <div class="status-item status-item-accent">
+        <div class="label">Imported Pool</div>
+        <div class="status-value"><code>poixe · 38 free models</code></div>
+      </div>
+      <div class="status-item">
+        <div class="label" data-i18n="label.runtimeAuthDir">Runtime auth-dir</div>
+        <div class="status-value"><code id="active-auth-dir"></code></div>
+      </div>
+      <div class="status-item">
+        <div class="label" data-i18n="label.runtimeConfig">Runtime Config</div>
+        <div class="status-value"><code id="runtime-config"></code></div>
+      </div>
+    </div>
+  </div>
+</section>

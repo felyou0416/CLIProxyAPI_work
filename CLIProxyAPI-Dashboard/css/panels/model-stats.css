@@ -1,0 +1,93 @@
+.model-stats-groups {
+  display: grid;
+  gap: 10px;
+}
+.model-stats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 2px 0;
+}
+.model-stats-actions-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.model-stats-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 0;
+}
+.model-stats-filters .provider-category-btn {
+  min-height: 28px;
+  padding: 0 10px;
+}
+.model-stats-provider-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+.model-stats-provider-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel-2) 82%, var(--panel));
+}
+.model-stats-provider-head strong {
+  font-size: 13px;
+  font-weight: 900;
+}
+.model-stats-table {
+  min-width: 760px;
+  table-layout: fixed;
+}
+.model-stats-table th,
+.model-stats-table td {
+  padding: 7px 9px;
+  vertical-align: middle;
+  font-size: 12px;
+  line-height: 1.3;
+}
+.model-stats-table th:nth-child(1) { width: 34%; }
+.model-stats-table th:nth-child(2) { width: 13%; }
+.model-stats-table th:nth-child(3) { width: 10%; }
+.model-stats-table th:nth-child(4),
+.model-stats-table th:nth-child(5),
+.model-stats-table th:nth-child(6) { width: 7%; }
+.model-stats-table th:nth-child(7) { width: 12%; }
+.model-stats-table th:nth-child(8) { width: 10%; }
+.model-stats-model code {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+.model-stats-table .pill {
+  min-height: 20px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+.model-stats-actions {
+  text-align: right;
+}
+.model-stats-delete {
+  min-height: 24px;
+  min-width: 44px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 12px;
+}

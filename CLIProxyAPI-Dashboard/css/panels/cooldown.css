@@ -1,0 +1,29 @@
+.cooldown-reason-chip {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.cooldown-expired {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.cooldown-row.cooldown-long {
+  border-left: 3px solid var(--danger);
+}
+.cooldown-row.cooldown-short {
+  border-left: 3px solid var(--ok);
+}
+.cooldown-model-cell {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.cooldown-clear-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.cooldown-remaining-cell {
+  font-weight: bold;
+  color: var(--danger);
+}

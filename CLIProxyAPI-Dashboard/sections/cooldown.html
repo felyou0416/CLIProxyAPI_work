@@ -1,0 +1,36 @@
+<section id="section-cooldown" class="panel panel-scroll section-view" hidden>
+  <div class="panel-head">
+    <div>
+      <div class="section-kicker" data-i18n="section.cooldownKicker">System</div>
+      <h2 class="section-title" data-i18n="section.cooldownTitle">冷却状态监控</h2>
+    </div>
+    <div class="action-row">
+      <label class="config-label" style="display:inline-flex;align-items:center;gap:4px;margin-right:12px">
+        <input type="checkbox" id="global-disable-cooling" onchange="toggleGlobalCooling(this.checked)" />
+        全局禁用冷却
+      </label>
+      <button class="secondary" type="button" onclick="loadCooldownPanel(true)" data-i18n="btn.refresh">刷新</button>
+      <button class="danger" type="button" onclick="clearAllCooldowns()" data-i18n="btn.clearAllCooldowns">清除全部冷却</button>
+      <span class="auth-chip" id="cooldown-meta">-</span>
+    </div>
+  </div>
+  <div class="tool-desc-zh" data-i18n="section.cooldownDesc">显示当前所有处于冷却中的 Provider / 模型 / 认证条目，包括聚合模型的冷却。可选择性地清除某个条目的冷却状态。</div>
+  <div id="cooldown-provider-filters" class="provider-model-categories"></div>
+  <div class="metric-table-wrap">
+    <table class="metric-table">
+      <thead>
+        <tr>
+          <th data-i18n="cooldown.provider">Provider</th>
+          <th data-i18n="cooldown.model">模型</th>
+          <th data-i18n="cooldown.authFile">认证文件</th>
+          <th data-i18n="cooldown.email">邮箱</th>
+          <th data-i18n="cooldown.reason">冷却原因</th>
+          <th data-i18n="cooldown.remaining">剩余时间</th>
+          <th data-i18n="cooldown.retryAfter">恢复时间</th>
+          <th data-i18n="cooldown.action">操作</th>
+        </tr>
+      </thead>
+      <tbody id="cooldown-body"></tbody>
+    </table>
+  </div>
+</section>

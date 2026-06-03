@@ -1,0 +1,117 @@
+#section-auth-health {
+  --table-max-height: 520px;
+}
+
+/* Custom table styling for Auth Health to make it incredibly compact and premium */
+#section-auth-health .metric-table-wrap {
+  overflow: auto; /* Enabled both X and Y scrolling */
+  width: 100%;
+  max-height: var(--table-max-height);
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  scrollbar-width: thin;
+}
+
+#section-auth-health .metric-table {
+  border-collapse: separate;
+  border-spacing: 0 4px;
+  table-layout: fixed;   /* Enforces column widths strictly */
+  width: 100%;           /* Lock table width exactly to 100% of container */
+}
+
+#section-auth-health .metric-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel); /* Solid theme background to prevent scroll overlapping */
+  z-index: 10;
+  border-bottom: 1px solid var(--border);
+  position: relative; /* Needed for absolutely positioned resize handles */
+}
+
+#section-auth-health .metric-table th,
+#section-auth-health .metric-table td {
+  white-space: nowrap;
+  vertical-align: middle;
+  padding: 6px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis; /* Truncate text nicely in fixed table columns */
+}
+
+/* Premium row hover background highlight */
+#section-auth-health .metric-table tbody tr {
+  transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#section-auth-health .metric-table tbody tr:hover {
+  background-color: color-mix(in srgb, var(--panel-2) 60%, transparent);
+}
+
+/* Ellipsis truncation classes with smooth modern micro-shift on hover */
+.ellipsis-cell {
+  cursor: pointer;
+  display: inline-block;
+  max-width: 100%;
+  transition: color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ellipsis-cell:hover {
+  color: var(--accent);
+  transform: translateX(4px); /* Sleek shift to the right instead of old underline */
+}
+
+/* Draggable column resize handle styles with high-end inner scaling line */
+#section-auth-health .metric-table th .resize-handle {
+  position: absolute;
+  top: 0;
+  right: -4px; /* Centered on the boundary line */
+  bottom: 0;
+  width: 8px; /* Large mouse target area for ease of use */
+  cursor: col-resize;
+  z-index: 100;
+  background-color: transparent;
+  user-select: none;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+}
+
+/* Elegant micro-animated inner vertical indicator line */
+#section-auth-health .metric-table th .resize-handle::after {
+  content: '';
+  width: 2px;
+  background-color: var(--accent);
+  opacity: 0;
+  transform: scaleY(0.85); /* Scales vertically slightly for a modern popup animation */
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent); /* Subtle glow */
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
+              transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 0.2s ease;
+}
+
+#section-auth-health .metric-table th .resize-handle:hover::after,
+#section-auth-health .metric-table th .resize-handle.is-dragging::after {
+  opacity: 1;
+  transform: scaleY(1); /* Smoothly stretches to full height on hover */
+}
+
+#section-auth-health .metric-table th.is-resizing {
+  user-select: none;
+}
+
+/* Modern floating popover box styling */
+.text-popover {
+  font-family: Inter, system-ui, sans-serif;
+  animation: popoverFadeIn 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes popoverFadeIn {
+  from {
+    transform: translateY(-4px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}

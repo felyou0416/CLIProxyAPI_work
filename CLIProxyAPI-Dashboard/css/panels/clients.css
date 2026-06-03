@@ -1,0 +1,41 @@
+/* Custom table styling for Clients to make it incredibly compact and premium */
+#section-clients .metric-table-wrap {
+  overflow-x: auto;
+  width: 100%;
+  border-radius: 14px;
+}
+
+#section-clients .metric-table {
+  border-collapse: separate;
+  border-spacing: 0 4px;
+}
+
+#section-clients .metric-table th,
+#section-clients .metric-table td {
+  white-space: nowrap;
+  vertical-align: middle;
+  padding: 6px 10px;
+}
+
+/* Ellipsis truncation classes with underlines on hover */
+.ellipsis-cell {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s ease;
+  position: relative;
+}
+
+.ellipsis-cell:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.ellipsis-cell.model-col {
+  max-width: 120px;
+}
+
+.ellipsis-cell.path-col {
+  max-width: 180px;
+}

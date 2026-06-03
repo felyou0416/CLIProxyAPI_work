@@ -1,0 +1,73 @@
+<section id="section-auths" class="panel panel-scroll panel-auths section-view">
+  <div class="panel-head">
+    <div>
+      <div class="section-kicker" data-i18n="section.authFilesKicker">账号文件管理</div>
+      <h2 class="section-title" data-i18n="section.authFilesTitle">OAuth 账号面板</h2>
+    </div>
+    <div class="action-row">
+      <button class="primary" onclick="showManualAuthModal()" data-i18n="btn.addManualAuth">添加 API Key</button>
+      <button onclick="loadAuthFiles()" data-i18n="btn.refreshAccounts">Refresh account list</button>
+    </div>
+  </div>
+
+  <div class="auth-hero">
+    <div class="auth-bulk-toolbar">
+      <div class="auth-bulk-meta">
+        <span class="auth-chip" id="auth-bulk-selection-count">未选择</span>
+      </div>
+      <div class="action-row">
+        <button class="secondary" type="button" id="auth-bulk-clear-btn" onclick="clearAuthCardSelection()">清空选择</button>
+        <button class="secondary" type="button" id="auth-bulk-delete-btn" onclick="deleteSelectedAuthCards()" data-i18n="btn.deleteSelected">删除选中</button>
+        <button class="secondary" type="button" id="auth-bulk-pool-btn" onclick="applySelectedAuthPoolAction()" hidden>目录直管</button>
+        <button class="secondary" type="button" id="auth-bulk-test-btn" onclick="testSelectedAuthCards()">检测选中</button>
+        <button class="secondary" type="button" id="auth-bulk-copy-btn" onclick="copySelectedAuthPaths()">复制路径</button>
+      </div>
+    </div>
+    <div class="auth-search-row">
+      <input
+        id="auth-search-input"
+        class="auth-search-input"
+        type="search"
+        placeholder="搜索文件名 / 邮箱 / Provider / 路径"
+        data-i18n-placeholder="manual.placeholder.searchAuth"
+        oninput="setAuthSearch(this.value)"
+      />
+    </div>
+
+    <div class="auth-groups">
+      <div class="auth-group-wrap">
+        <div class="auth-group-head">
+          <h3 data-i18n="summary.activeAccount">Enabled Auth Files</h3>
+          <div class="auth-group-meta">
+            <span class="auth-chip active-chip" data-i18n="common.enabled">Enabled</span>
+            <span class="auth-group-count" id="auth-selected-count">0</span>
+          </div>
+        </div>
+        <div id="auth-selected-filters" class="auth-provider-filters"></div>
+        <div id="auth-selected-list" class="auth-list-container"></div>
+      </div>
+      <div class="auth-group-wrap">
+        <div class="auth-group-head">
+          <h3 data-i18n="common.available">Available Accounts</h3>
+          <div class="auth-group-meta">
+            <span class="auth-chip" data-i18n="common.available">Available</span>
+            <span class="auth-group-count" id="auth-available-count">0</span>
+          </div>
+        </div>
+        <div id="auth-available-filters" class="auth-provider-filters"></div>
+        <div id="auth-available-list" class="auth-list-container"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="list-wrap account-list-panel" hidden>
+    <div class="account-list-head">
+      <div class="log-label" data-i18n="label.authEntries">账号条目</div>
+      <div class="account-list-count">
+        <span data-i18n="label.accountCount">Account Count</span>
+        <strong id="auth-count-badge">0</strong>
+      </div>
+    </div>
+    <div id="auth-list" class="list compact-list"></div>
+  </div>
+</section>

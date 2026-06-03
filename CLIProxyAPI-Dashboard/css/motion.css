@@ -1,0 +1,113 @@
+:root {
+  --motion-fast: 90ms;
+  --motion-base: 140ms;
+  --motion-slow: 180ms;
+  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes soft-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.section-view.active-view {
+  animation: panel-enter var(--motion-slow) var(--motion-ease);
+}
+
+.panel,
+.aggregate-panel-card,
+.na-firewall-panel,
+.firewall-access-card,
+.provider-group-card,
+.auth-strip,
+.vk-card,
+.na-info-card,
+.na-guide-card,
+.firewall-rule-card,
+.na-firewall-rule {
+  transition:
+    transform var(--motion-base) var(--motion-ease),
+    border-color var(--motion-base) var(--motion-ease),
+    background-color var(--motion-base) var(--motion-ease);
+}
+
+.aggregate-panel-card:hover,
+.na-firewall-panel:hover,
+.firewall-access-card:hover,
+.provider-group-card:hover,
+.auth-strip:hover,
+.vk-card:hover,
+.firewall-rule-card:hover,
+.na-firewall-rule:hover {
+  transform: translateY(-1px);
+}
+
+button,
+.nav-pill,
+.group-pill,
+.provider-category-btn,
+.aggregate-alias-chip,
+.aggregate-source-chip,
+.chat-session-item,
+input,
+select,
+textarea {
+  transition:
+    transform var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-base) var(--motion-ease),
+    background-color var(--motion-base) var(--motion-ease),
+    color var(--motion-base) var(--motion-ease),
+    opacity var(--motion-base) var(--motion-ease);
+}
+
+button:active:not(:disabled),
+.nav-pill:active,
+.group-pill:active,
+.aggregate-source-chip:active,
+.aggregate-alias-chip:active {
+  transform: scale(0.98);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.message.show {
+  animation: panel-enter var(--motion-base) var(--motion-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+
+  .sidebar-bubble-nav .nav-pill {
+    animation: none !important;
+  }
+}

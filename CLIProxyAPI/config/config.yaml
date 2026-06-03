@@ -1,0 +1,191 @@
+# CLIProxyAPI 配置文件 - 包含智谱 AI & 火山引擎
+# 服务器配置
+host: "127.0.0.1"
+port: 8317
+
+# 认证目录
+auth-dir: "E:/U_App/CLIProxyAPI_work/CLIProxyAPI/storage/auth"
+
+# API 密钥（用于管理接口认证）
+api-keys:
+  - "your-api-key-here"
+
+# 调试模式
+debug: true
+
+# 日志设置
+logging-to-file: false
+
+# 代理设置（如果需要）
+# proxy-url: "socks5://127.0.0.1:1080/"
+
+# 请求重试设置
+request-retry: 3
+max-retry-credentials: 5
+max-retry-interval: 30
+
+# 禁用冷却
+disable-cooling: false
+
+# 路由策略
+routing:
+  strategy: "round-robin"  # round-robin 或 fill-first
+
+# ========== 智谱 AI (Zhipu AI) ==========
+# GLM 模型 - OpenAI 兼容接口
+openai-compatibility:
+  - name: "zhipu"
+    base-url: "https://open.bigmodel.cn/v1"
+    api-key: "2d314679-cc61-4342-9701-bb8968913406"
+    prefix: "zhipu/"
+    headers:
+      Content-Type: "application/json"
+    models:
+      - name: "glm-4.6-flash"
+        alias: "glm-4.6-flash"
+      - name: "glm-4.7-flash"
+        alias: "glm-4.7-flash"
+      - name: "glm-4.5-flash"
+        alias: "glm-4.5-flash"
+
+# ========== 火山引擎（豆包） ==========
+# 豆包大模型 - OpenAI 兼容接口
+  - name: "volcengine"
+    base-url: "https://ark.cn-beijing.volces.com/api/paas/v4"
+    api-key: "2d314679-cc61-4342-9701-bb8968913406"
+    prefix: "volc/"
+    headers:
+      Content-Type: "application/json"
+      Accept-Language: "en-US,en"
+    models:
+      # 豆包 Seed 系列
+      - name: "Doubao-seed-2.0-lite"
+        alias: "doubao-seed-2.0-lite"
+      - name: "Doubao-seed-2.0-pro"
+        alias: "doubao-seed-2.0-pro"
+      - name: "Doubao-seed-2.0-code"
+        alias: "doubao-seed-2.0-code"
+      - name: "Doubao-seed-1.6-lite"
+        alias: "doubao-seed-1.6-lite"
+      - name: "Doubao-seed-1.6-pro"
+        alias: "doubao-seed-1.6-pro"
+      - name: "Doubao-seed-1.6-thinking"
+        alias: "doubao-seed-1.6-thinking"
+      - name: "Doubao-seed-1.8"
+        alias: "doubao-seed-1.8"
+      - name: "Doubao-seed-translation"
+        alias: "doubao-translation"
+      - name: "Doubao-seed-3d-1.0"
+        alias: "doubao-3d-1.0"
+
+      # Doubao 1.5 系列
+      - name: "Doubao-1.5-lite"
+        alias: "doubao-1.5-lite"
+      - name: "Doubao-1.5-pro"
+        alias: "doubao-1.5-pro"
+      - name: "Doubao-1.5-thinking"
+        alias: "doubao-1.5-thinking"
+      - name: "Doubao-1.5-vision-lite"
+        alias: "doubao-1.5-vision-lite"
+      - name: "Doubao-1.5-vision-pro"
+        alias: "doubao-1.5-vision-pro"
+      - name: "Doubao-1.5-ui-tars"
+        alias: "doubao-1.5-ui-tars"
+
+      # DeepSeek 系列
+      - name: "DeepSeek-V3"
+        alias: "deepseek-v3"
+      - name: "DeepSeek-R1"
+        alias: "deepseek-r1"
+      - name: "DeepSeek-V3.2"
+        alias: "deepseek-v3.2"
+      - name: "DeepSeek-V3.1"
+        alias: "deepseek-v3.1"
+      - name: "DeepSeek-R1-Distill-Qwen-32B"
+        alias: "deepseek-r1-qwen-32b"
+
+      # GLM 系列（火山引擎上）
+      - name: "GLM-4.7"
+        alias: "glm-4.7"
+      - name: "GLM-4.6"
+        alias: "glm-4.6"
+
+      # Kimi 系列
+      - name: "Kimi-K2"
+        alias: "kimi-k2"
+
+      # 图像生成
+      - name: "Doubao-seedream-5.0-lite"
+        alias: "doubao-sd-5.0-lite"
+      - name: "Doubao-seedream-4.0"
+        alias: "doubao-sd-4.0"
+      - name: "Doubao-seedream-4.5"
+        alias: "doubao-sd-4.5"
+
+# OAuth 模型别名
+oauth-model-alias:
+  zhipu:
+    - name: "glm-4.6-flash"
+      alias: "glm-4.6-flash"
+      fork: true
+    - name: "glm-4.7-flash"
+      alias: "glm-4.7-flash"
+      fork: true
+    - name: "glm-4.5-flash"
+      alias: "glm-4.5-flash"
+      fork: true
+
+  volcengine:
+    - name: "Doubao-seed-2.0-lite"
+      alias: "doubao-seed-2.0-lite"
+      fork: true
+    - name: "DeepSeek-V3"
+      alias: "deepseek-v3"
+      fork: true
+    - name: "GLM-4.7"
+      alias: "glm-4.7"
+      fork: true
+
+# 模型排除列表（可选）
+oauth-model-exclude: []
+
+# ========== 其他已有提供商（示例）==========
+# Claude OAuth（如果需要）
+# claude-api-key:
+#   - api-key: "sk-ant-..."
+#     prefix: "claude/"
+
+# Gemini OAuth（如果需要）
+# gemini-api-key:
+#   - api-key: "AIza..."
+#     prefix: "gemini/"
+
+# Codex (OpenAI) OAuth（如果需要）
+# codex-api-key:
+#   - api-key: "sk-..."
+#     prefix: "codex/"
+
+# 远程管理设置
+remote-management:
+  allow-remote: false
+  secret-key: ""
+  disable-control-panel: false
+  disable-auto-update-panel: false
+  panel-github-repository: "https://github.com/router-for-me/CLIProxyAPI-Management-Center"
+
+# 性能设置
+commercial-mode: false
+pass-through-headers: false
+ws-auth: false
+
+# 使用统计
+usage-statistics-enabled: false
+redis-usage-queue-retention-seconds: 60
+
+# 图像生成设置
+disable-image-generation: false
+
+# 其他设置
+force-model-prefix: false
+enable-gemini-cli-endpoint: false
+nonstream-keepalive-interval: 0

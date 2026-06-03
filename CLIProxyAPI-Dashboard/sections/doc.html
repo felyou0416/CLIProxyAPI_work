@@ -1,0 +1,116 @@
+<section id="section-doc" class="panel panel-scroll section-view doc-home">
+  <div class="panel-head">
+    <div>
+      <div class="section-kicker" data-i18n="section.docKicker">System Home</div>
+      <h2 class="section-title" data-i18n="section.docTitle">CLIProxyAPI 使用首页</h2>
+    </div>
+  </div>
+  <div class="doc-hero">
+    <div>
+      <div class="doc-hero-kicker">本地统一入口</div>
+      <h3>先确认模型，再把外部程序接到同一个 Base URL。</h3>
+      <p>默认基础地址是 <code>http://127.0.0.1:8317</code>。如果开启暴露模式，就把主机名替换成面板里显示的暴露地址。</p>
+    </div>
+    <div class="doc-hero-url">
+      <span>Base URL</span>
+      <div class="doc-url-wrap">
+        <code>http://127.0.0.1:8317</code>
+        <button class="doc-copy-btn" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317')" title="复制链接">复制</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="doc-grid">
+    <article class="doc-card doc-card-feature">
+      <div class="doc-top">
+        <div class="doc-method">DOC</div>
+        <h3>路由预览</h3>
+      </div>
+      <p class="doc-text">输入本机调用时填写的 model ID，例如 <code>openrouter-free</code>，查看 storage/auth 当前会命中哪些认证，以及是否按 round-robin 轮询。</p>
+      <div class="manual-add-grid" style="margin: 0;">
+        <label class="full-row" style="margin: 0;">
+          <span style="font-size: 11px;">Model ID</span>
+          <input id="route-preview-model" type="text" placeholder="openrouter-free" style="min-height: 28px; padding: 4px 8px; font-size: 12px;" />
+        </label>
+      </div>
+      <div class="action-row" style="margin: 0;">
+        <button type="button" onclick="loadRoutePreview()" style="min-height: 28px; font-size: 12px; padding: 0 12px;">查看路由</button>
+      </div>
+      <pre id="log-route-preview" class="log-output compact is-hidden" style="margin-top: 4px; padding: 6px 10px; font-size: 11px;"></pre>
+    </article>
+
+    <article class="doc-card doc-card-feature">
+      <div class="doc-top">
+        <div class="doc-method">GET</div>
+        <h3>/v1/models</h3>
+      </div>
+      <div class="doc-url-wrap">
+        <code>http://127.0.0.1:8317/v1/models</code>
+        <button class="doc-copy-btn" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/models')" title="复制链接">复制</button>
+      </div>
+      <p class="doc-text">查看当前代理实际可调用的模型 ID。先查这个，再决定外部程序里 `model` 填什么。</p>
+      <div class="doc-sub">适用</div>
+      <p class="doc-text">所有 provider 通用。最适合排查“面板显示”和“真实可调用”是否一致。</p>
+    </article>
+
+    <article class="doc-card">
+      <div class="doc-top">
+        <div class="doc-method">POST</div>
+        <h3>/v1/messages?beta=true</h3>
+      </div>
+      <div class="doc-url-wrap">
+        <code>http://127.0.0.1:8317/v1/messages?beta=true</code>
+        <button class="doc-copy-btn" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/messages?beta=true')" title="复制链接">复制</button>
+      </div>
+      <p class="doc-text">Claude / Anthropic 风格接口。适合 Claude 类客户端，`minimax-portal` 也建议优先走这条。</p>
+      <div class="doc-sub">最小请求体</div>
+      <pre class="doc-code">{
+  "model": "openrouter-free",
+  "max_tokens": 256,
+  "messages": [
+    { "role": "user", "content": "Say OK only." }
+  ]
+}</pre>
+    </article>
+
+    <article class="doc-card">
+      <div class="doc-top">
+        <div class="doc-method">POST</div>
+        <h3>/v1/responses</h3>
+      </div>
+      <div class="doc-url-wrap">
+        <code>http://127.0.0.1:8317/v1/responses</code>
+        <button class="doc-copy-btn" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/responses')" title="复制链接">复制</button>
+      </div>
+      <p class="doc-text">OpenAI Responses 风格接口。适合新式 OpenAI SDK 或支持 `responses` 的外部程序。</p>
+      <div class="doc-sub">最小请求体</div>
+      <pre class="doc-code">{
+  "model": "codex-gpt-5.4",
+  "input": "Say OK only."
+}</pre>
+      <div class="doc-sub">注意</div>
+      <p class="doc-text">`minimax-portal` 走这条时，`input` 最稳的是数组结构，不建议只传纯字符串。</p>
+    </article>
+
+    <article class="doc-card">
+      <div class="doc-top">
+        <div class="doc-method">POST</div>
+        <h3>/v1/chat/completions</h3>
+      </div>
+      <div class="doc-url-wrap">
+        <code>http://127.0.0.1:8317/v1/chat/completions</code>
+        <button class="doc-copy-btn" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/chat/completions')" title="复制链接">复制</button>
+      </div>
+      <p class="doc-text">OpenAI Chat Completions 风格接口。兼容面最广，很多现成工具默认都走这条。</p>
+      <div class="doc-sub">最小请求体</div>
+      <pre class="doc-code">{
+  "model": "aihubmix-gpt-4.1-free",
+  "messages": [
+    { "role": "user", "content": "Say OK only." }
+  ],
+  "max_tokens": 256
+}</pre>
+    </article>
+
+  </div>
+</section>

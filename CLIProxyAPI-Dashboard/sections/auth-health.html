@@ -1,0 +1,31 @@
+<section id="section-auth-health" class="panel panel-scroll section-view" hidden>
+  <div class="panel-head">
+    <div>
+      <div class="section-kicker" data-i18n="section.authHealthKicker">Observability</div>
+      <h2 class="section-title" data-i18n="section.authHealthTitle">Auth Health</h2>
+    </div>
+    <div class="action-row">
+      <button class="secondary" type="button" onclick="loadAuthHealthPanel(true)" data-i18n="btn.refresh">刷新</button>
+      <span class="auth-chip" id="auth-health-meta">-</span>
+    </div>
+  </div>
+  <div class="metric-table-wrap">
+    <table class="metric-table">
+      <thead>
+        <tr>
+          <th>认证文件</th>
+          <th>Provider</th>
+          <th>邮箱</th>
+          <th>状态</th>
+          <th>可用模型</th>
+          <th>失败模型</th>
+          <th>请求数</th>
+          <th>总 Token</th>
+          <th>最近失败</th>
+          <th>失败时间</th>
+        </tr>
+      </thead>
+      <tbody id="auth-health-body"></tbody>
+    </table>
+  </div>
+</section>

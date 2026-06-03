@@ -1,0 +1,319 @@
+.workspace-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  background: color-mix(in srgb, var(--bg) 88%, var(--panel));
+}
+.control-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.control-strip-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+.app-shell {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  height: 100vh;
+  min-height: 0;
+}
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 88%, var(--bg));
+  padding: 24px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.sidebar-block {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+.brand-title {
+  font-size: 23px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+.brand-sub {
+  margin-top: 4px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+.nav-block {
+  display: grid;
+  gap: 12px;
+}
+/* Group pill bar — horizontal bubble tabs */
+.group-pill-bar {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel-2) 60%, var(--panel));
+  border: 1px solid var(--border);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.04);
+}
+.group-pill-bar .group-pill {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.group-pill-bar .group-pill span {
+  text-align: center;
+  width: auto;
+}
+.group-pill-bar .group-pill:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text);
+}
+.group-pill-bar .group-pill:active {
+  transform: scale(0.92);
+}
+.group-pill-bar .group-pill.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+/* Ripple effect on click */
+.group-pill-bar .group-pill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.25) 0%, transparent 60%);
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+.group-pill-bar .group-pill:active::after {
+  opacity: 1;
+  transition: opacity 0s;
+}
+.sidebar-label {
+  margin: 6px 0 8px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.sidebar-pages {
+  min-height: 0;
+}
+.sidebar .nav-btn,
+.lang-btn,
+.theme-btn {
+  width: 100%;
+  justify-content: flex-start;
+}
+.sidebar-controls {
+  margin-top: auto;
+  display: grid;
+  gap: 8px;
+}
+.sidebar-meta {
+  display: grid;
+  gap: 8px;
+}
+.workspace {
+  height: 100vh;
+  min-height: 0;
+  padding: 0; /* Remove padding here, add to header and sections */
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.workspace-header {
+  display: none;
+}
+.workspace:has(.active-view:not(#section-account)) .workspace-header {
+  border-color: var(--border);
+}
+.workspace-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 1320px;
+  margin: 0 auto;
+  width: 100%;
+}
+.nav-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+.nav-pill:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--text);
+  transform: translateY(-1px);
+}
+.nav-pill.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.nav-pill.nav-hidden {
+  display: none !important;
+}
+.nav-pill:active {
+  transform: translateY(0) scale(0.96);
+}
+.workspace #message {
+  max-width: 1320px;
+  margin: 12px auto;
+  width: calc(100% - 76px);
+}
+.content-grid {
+  min-height: 0;
+  display: block;
+  width: 100%;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 12px 38px 38px;
+}
+.summary-detail,
+.status-value,
+.meta-value,
+.brand-sub {
+  color: var(--text-soft);
+}
+.sidebar-bubble-nav {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: flex-start;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  min-height: 138px;
+  height: 184px;
+  padding: 8px 2px 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+}
+.sidebar-bubble-nav .nav-pill {
+  position: relative;
+  left: auto !important;
+  top: auto !important;
+  width: 100%;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border-color: color-mix(in srgb, var(--border) 78%, var(--accent));
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255,255,255,.76), transparent 42%),
+    color-mix(in srgb, var(--panel) 90%, var(--accent));
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, .07);
+  user-select: none;
+  animation: bubble-morph 7.2s ease-in-out var(--bubble-delay, 0s) infinite;
+}
+.sidebar-bubble-nav .nav-pill:nth-child(3n + 1) {
+  padding-inline: 10px;
+}
+.sidebar-bubble-nav .nav-pill:nth-child(3n + 2) {
+  padding-inline: 10px;
+}
+.sidebar-bubble-nav .nav-pill:nth-child(5n) {
+  padding-inline: 10px;
+}
+.sidebar-bubble-nav .nav-pill:hover {
+  filter: saturate(1.08);
+}
+.sidebar-bubble-nav .nav-pill.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.sidebar-bubble-nav .nav-pill.is-dragging {
+  z-index: 10;
+  cursor: grabbing;
+  animation-play-state: paused;
+  transform: scale(1.06);
+}
+.bubble-resize-rail {
+  position: relative;
+  height: 18px;
+  margin: 0 36px 2px;
+  cursor: ns-resize;
+  border-radius: 999px;
+}
+.bubble-resize-rail::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 8px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 34%, var(--border));
+  box-shadow: 0 1px 5px rgba(15, 23, 42, .12);
+}
+.bubble-resize-rail::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  width: 34px;
+  height: 12px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 74%, var(--accent));
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+}
+.bubble-resize-rail:hover::after,
+.bubble-resize-rail.is-dragging::after {
+  background: var(--accent);
+  border-color: var(--accent);
+}

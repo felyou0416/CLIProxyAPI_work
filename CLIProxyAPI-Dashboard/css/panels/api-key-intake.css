@@ -1,0 +1,194 @@
+/* Custom CSS for a highly compact and premium API Key Intake page layout */
+
+.api-key-intake-panel {
+  --table-max-height: 240px; /* Compact max height for results */
+}
+
+/* Widescreen-friendly 3-column layout for Steps 1, 2, and 3 */
+.api-key-intake-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  margin-bottom: 12px !important;
+}
+
+@media (max-width: 1100px) {
+  .api-key-intake-grid {
+    grid-template-columns: 1fr !important; /* Stack vertically on small screens */
+    gap: 14px !important;
+  }
+}
+
+/* Tighten the step flow banner at the top */
+.api-key-flow-note {
+  margin: 0 0 12px !important;
+  padding: 8px 12px !important;
+  border-radius: 10px !important;
+  gap: 6px !important;
+}
+
+.api-key-flow-note span,
+.api-key-flow-note strong {
+  min-height: 24px !important;
+  padding: 0 10px !important;
+  font-size: 11px !important;
+  border-radius: 6px !important;
+}
+
+/* Tighten cards spacing, paddings, and margins */
+.api-key-card {
+  padding: 12px 14px !important;
+  gap: 8px !important;
+  border-radius: 12px !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.02) !important;
+}
+
+.api-key-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px !important;
+  margin-bottom: 2px !important;
+}
+
+.api-key-step {
+  min-width: 28px !important;
+  height: 28px !important;
+  border-radius: 8px !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+}
+
+.api-key-card .log-label {
+  font-size: 12px !important;
+  font-weight: 800 !important;
+}
+
+.api-key-card .metric-note {
+  font-size: 11px !important;
+  line-height: 1.3 !important;
+}
+
+/* Tighten form labels and inputs inside the cards */
+.api-key-card .form-label {
+  margin-top: 2px !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.api-key-card .form-input {
+  padding: 6px 10px !important;
+  font-size: 13px !important;
+  border-radius: 8px !important;
+  border: 1px solid var(--border) !important;
+  background: var(--panel-2) !important;
+  min-height: 32px !important;
+}
+
+.api-key-mode-switch {
+  padding: 2px !important;
+  display: flex !important;
+  width: 100% !important;
+}
+
+.api-key-mode-switch button {
+  flex: 1 !important;
+  min-height: 26px !important;
+  font-size: 11px !important;
+  padding: 0 8px !important;
+  border-radius: 999px !important;
+}
+
+.api-key-ghost-btn {
+  min-height: 32px !important;
+  font-size: 11px !important;
+  border-radius: 8px !important;
+}
+
+/* Specific styling for Step 3 Model List Card */
+.api-key-model-card {
+  display: flex;
+  flex-direction: column;
+}
+
+#api-key-models {
+  flex: 1 !important; /* Stretch textarea to fill remaining height */
+  height: 100% !important;
+  min-height: 105px !important;
+  resize: none !important; /* Clean no-resize on widescreen */
+  line-height: 1.4 !important;
+  font-size: 12px !important;
+}
+
+.api-key-action-bar {
+  padding-top: 4px !important;
+  gap: 8px !important;
+}
+
+.api-key-action-bar button {
+  min-height: 32px !important;
+  border-radius: 8px !important;
+  font-size: 11px !important;
+  padding: 0 10px !important;
+}
+
+.api-key-submit-btn {
+  font-weight: 800 !important;
+}
+
+/* Tighten results panel at the bottom */
+.api-key-result-panel {
+  padding: 10px 14px !important;
+  border-radius: 12px !important;
+  border: 1px solid var(--border) !important;
+  background: var(--panel) !important;
+}
+
+.api-key-result-panel .account-list-head {
+  padding: 0 0 6px !important;
+}
+
+.api-key-empty-state {
+  padding: 10px 12px !important;
+  border-radius: 8px !important;
+  font-size: 12px !important;
+}
+
+.api-key-result-card {
+  padding: 8px 10px !important;
+  border-radius: 10px !important;
+}
+
+.api-key-result-title {
+  margin-bottom: 6px !important;
+}
+
+.api-key-result-title strong {
+  font-size: 13px !important;
+}
+
+.api-key-result-grid {
+  gap: 6px !important;
+}
+
+.api-key-result-metric {
+  padding: 5px 8px !important;
+  border-radius: 6px !important;
+}
+
+.api-key-result-metric span {
+  font-size: 10px !important;
+  margin-bottom: 2px !important;
+}
+
+.api-key-result-metric b {
+  font-size: 11px !important;
+}
+
+.api-key-result-queue {
+  margin-top: 6px !important;
+  font-size: 11px !important;
+}

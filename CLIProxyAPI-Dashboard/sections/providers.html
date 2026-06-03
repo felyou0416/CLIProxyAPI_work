@@ -1,0 +1,29 @@
+<section id="section-providers" class="panel panel-scroll section-view" hidden>
+  <div class="provider-layout">
+    <!-- Left Column: Provider Sidebar -->
+    <div class="aggregate-panel-card provider-sidebar-card">
+      <div class="aggregate-panel-head" style="margin-bottom: 12px;">
+        <div>
+          <div class="aggregate-step-label">Workspace</div>
+          <h3 style="margin: 0; font-size: 15px; font-weight: 800;" data-i18n="section.providersTitle">可调用模型 ID</h3>
+        </div>
+      </div>
+      <div id="provider-model-groups" class="provider-model-map-tabs-vertical"></div>
+    </div>
+
+    <!-- Right Column: Actions + Model List -->
+    <div class="provider-right-pane">
+      <div class="provider-page-head" style="margin-bottom: 12px;">
+        <div class="provider-action-dock">
+          <button class="secondary" type="button" onclick="clearProviderModelSelection()" data-i18n="btn.clearSelection">清空选择</button>
+          <button class="secondary" type="button" onclick="clearProviderModelTestResults()" data-i18n="btn.clearTestStatus">清除检测结果</button>
+          <button class="secondary" id="provider-delete-selected-btn" type="button" onclick="deleteSelectedProviderModels()" data-i18n="btn.deleteSelected">删除选中</button>
+          <button class="secondary" id="provider-test-selected-btn" type="button" onclick="testSelectedProviderModels()" data-i18n="btn.testSelected">检测选中</button>
+          <button class="secondary" id="provider-stop-test-btn" type="button" onclick="stopProviderModelTests()" data-i18n="btn.stopTest">停止检测</button>
+          <button id="provider-test-all-btn" type="button" onclick="testAllProviderModels()" data-i18n="btn.testAll">检测全部</button>
+        </div>
+      </div>
+      <div id="provider-model-list" class="provider-model-list"></div>
+    </div>
+  </div>
+</section>

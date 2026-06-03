@@ -1,0 +1,38 @@
+# Runtime & secrets
+storage/
+.claude/
+
+# Built proxy binary
+CLIProxyAPI/bin/
+app/cli-proxy-api.exe
+app/*.exe
+app/*.1bak
+
+# Removed legacy trees (do not re-add)
+app/backup/
+CLIProxyAPI-main/
+
+# Python
+__pycache__/
+*.py[cod]
+.playwright-mcp/
+
+# Logs
+*.log
+storage/logs/
+storage/backups/
+storage/auth/logs/
+storage/auth/archive/**/metadata/logs/
+
+# Dashboard-generated (regenerated locally)
+storage/runtime/cliproxyapi-active-config.yaml
+storage/models/provider_model_overrides.json
+storage/models/provider_model_test_state.json
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini

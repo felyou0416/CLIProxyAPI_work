@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: relayx-dashboard
+Version: 0.1.0
+Summary: RelayX dashboard CLI and local operations helpers.
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pywinpty>=2.0.14

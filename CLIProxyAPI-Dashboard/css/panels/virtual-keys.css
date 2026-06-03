@@ -1,0 +1,121 @@
+.api-key-card {
+  gap: 12px;
+  border-radius: 14px;
+  border-color: color-mix(in srgb, var(--border) 84%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 96%, white), var(--panel));
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+}
+.api-key-card-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+.api-key-card .form-input {
+  min-height: 38px;
+  border-radius: 10px;
+  border-color: color-mix(in srgb, var(--border) 86%, transparent);
+  background: color-mix(in srgb, var(--panel) 92%, var(--panel-2));
+}
+.api-key-card textarea.form-input {
+  min-height: 210px;
+  resize: vertical;
+  line-height: 1.55;
+  font-family: var(--mono);
+}
+
+/* ─── Compact Row Styles for Virtual Key ─── */
+.vk-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.vk-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+}
+
+.vk-col-info {
+  flex: 1 1 22%;
+  min-width: 160px;
+  display: grid;
+  gap: 2px;
+}
+.vk-col-info strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.vk-col-info code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.vk-col-stats {
+  flex: 2 1 30%;
+  min-width: 220px;
+  display: flex;
+  gap: 16px;
+}
+.vk-col-stat {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+}
+.vk-col-stat-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.vk-col-stat .vk-usage-bar {
+  width: 100%;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.vk-col-limits {
+  flex: 1 1 18%;
+  min-width: 140px;
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-soft);
+}
+.vk-col-limits .vk-models-text-span {
+  font-size: 11px;
+  color: var(--text-soft);
+}
+
+.vk-col-meta {
+  flex: 1 1 15%;
+  min-width: 120px;
+  display: grid;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.vk-col-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+}
+.vk-col-actions button {
+  padding: 4px 10px !important;
+  font-size: 11px !important;
+  min-height: 28px !important;
+  border-radius: 8px !important;
+}

@@ -1,0 +1,63 @@
+<section id="section-terminals" class="panel panel-scroll section-view terminals-page" hidden>
+  <div class="terminal-workspace">
+    <div class="terminal-titlebar">
+      <div class="terminal-window-controls" aria-hidden="true">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+      <div class="terminal-title-main">
+        <span class="terminal-panel-title">TERMINAL</span>
+        <span id="terminal-active-status" class="terminal-status-chip">未连接</span>
+      </div>
+      <div class="terminal-meta">
+        <span id="terminal-shell-label">Shell: -</span>
+        <span id="terminal-pid-label">PID: -</span>
+      </div>
+    </div>
+
+    <div class="terminal-tabbar">
+      <div class="terminal-tabs" id="terminal-tabs"></div>
+      <div class="terminal-actions">
+        <input id="terminal-cwd-input" list="terminal-cwd-history" type="text" value="E:\U_App\CLIProxyAPI_work\CLIProxyAPI" title="启动目录" aria-label="启动目录" />
+        <datalist id="terminal-cwd-history"></datalist>
+        <button type="button" onclick="openTerminalPanel('powershell')">+ PowerShell</button>
+        <button type="button" class="secondary" onclick="openTerminalPanel('cmd')">+ CMD</button>
+        <button type="button" class="secondary danger" onclick="closeActiveTerminalPanel()">关闭</button>
+      </div>
+    </div>
+
+    <div class="terminal-pathbar">
+      <span>工作目录</span>
+      <code id="terminal-cwd-label">E:\U_App\CLIProxyAPI_work\CLIProxyAPI</code>
+    </div>
+
+    <div class="terminal-body">
+      <div class="terminal-control-panel">
+        <div class="control-panel-section">
+          <div class="control-section-title">方向键 / Navigation</div>
+          <div class="arrow-key-pad">
+            <div class="arrow-key-row">
+              <button type="button" class="arrow-key-btn up" onclick="writeTerminalRaw('\u001b[A')" title="Up (向上)">▲</button>
+            </div>
+            <div class="arrow-key-row">
+              <button type="button" class="arrow-key-btn left" onclick="writeTerminalRaw('\u001b[D')" title="Left (向左)">◀</button>
+              <button type="button" class="arrow-key-btn down" onclick="writeTerminalRaw('\u001b[B')" title="Down (向下)">▼</button>
+              <button type="button" class="arrow-key-btn right" onclick="writeTerminalRaw('\u001b[C')" title="Right (向右)">▶</button>
+            </div>
+          </div>
+        </div>
+        <div class="control-panel-section">
+          <div class="control-section-title">预设命令 / Presets</div>
+          <div id="preset-commands-list" class="preset-commands-list">
+            <!-- Dynamically populated from js/terminals.js -->
+          </div>
+        </div>
+      </div>
+      <div class="terminal-output-container">
+        <div class="terminal-output" id="terminal-output" tabindex="0">选择或新建一个终端。</div>
+      </div>
+      <textarea id="terminal-key-capture" class="terminal-key-capture" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="终端输入捕获"></textarea>
+    </div>
+  </div>
+</section>

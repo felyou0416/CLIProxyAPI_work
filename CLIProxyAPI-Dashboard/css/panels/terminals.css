@@ -1,0 +1,365 @@
+.terminals-page {
+  min-height: calc(100vh - 44px);
+  padding: 0;
+  background: #1e1e1e;
+}
+
+.terminal-workspace {
+  width: 100%;
+  max-width: 1120px;
+  height: 620px;
+  margin: 0 auto;
+  border: 1px solid #2d2d2d;
+  border-radius: 8px;
+  background: #1e1e1e;
+  color: #cccccc;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+}
+
+.terminal-titlebar {
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #2d2d2d;
+  background: #181818;
+}
+
+.terminal-window-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.terminal-window-controls span {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #858585;
+}
+
+.terminal-window-controls span:nth-child(1) {
+  background: #ff5f57;
+}
+
+.terminal-window-controls span:nth-child(2) {
+  background: #ffbd2e;
+}
+
+.terminal-window-controls span:nth-child(3) {
+  background: #28c840;
+}
+
+.terminal-title-main,
+.terminal-meta,
+.terminal-tabs,
+.terminal-actions,
+.terminal-pathbar {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.terminal-title-main {
+  gap: 10px;
+}
+
+.terminal-panel-title {
+  color: #f3f3f3;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.terminal-status-chip {
+  border: 1px solid #315f3f;
+  border-radius: 999px;
+  background: #12331d;
+  color: #89d185;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.terminal-meta {
+  justify-content: flex-end;
+  gap: 12px;
+  color: #9d9d9d;
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+
+.terminal-tabbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+  min-height: 42px;
+  border-bottom: 1px solid #2d2d2d;
+  background: #181818;
+}
+
+.terminal-tabs {
+  gap: 0;
+  overflow-x: auto;
+}
+
+.terminal-actions {
+  gap: 8px;
+  padding: 6px 10px 6px 0;
+}
+
+.terminal-tab,
+.terminal-empty-tab {
+  min-height: 42px;
+  border: 0;
+  border-right: 1px solid #2d2d2d;
+  border-radius: 0;
+  background: #2d2d2d;
+  color: #bfbfbf;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+.terminal-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+.terminal-tab:hover {
+  background: #333333;
+  color: #ffffff;
+}
+
+.terminal-tab.is-active {
+  background: #1e1e1e;
+  color: #ffffff;
+}
+
+.terminal-tab.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: #007acc;
+}
+
+.terminal-tab-icon {
+  color: #4fc1ff;
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+
+.terminal-tab small {
+  color: #8f8f8f;
+}
+
+.terminal-actions input {
+  width: min(360px, 28vw);
+  height: 30px;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  background: #111111;
+  color: #cccccc;
+  padding: 0 9px;
+}
+
+.terminal-actions button {
+  min-height: 30px;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  background: #2d2d2d;
+  color: #dddddd;
+  padding: 5px 10px;
+}
+
+.terminal-actions button:hover {
+  border-color: #007acc;
+  background: #333333;
+  color: #ffffff;
+}
+
+.terminal-actions button.danger:hover {
+  border-color: #f14c4c;
+  color: #ffffff;
+}
+
+.terminal-pathbar {
+  min-height: 28px;
+  gap: 8px;
+  padding: 5px 12px;
+  border-bottom: 1px solid #2d2d2d;
+  background: #222222;
+  color: #858585;
+  font-size: 12px;
+}
+
+.terminal-pathbar code {
+  overflow: hidden;
+  color: #c586c0;
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-body {
+  position: relative;
+  min-height: 0;
+  background: #1e1e1e;
+  display: flex;
+}
+
+.terminal-control-panel {
+  width: 156px;
+  background: #151515;
+  border-right: 1px solid #2d2d2d;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 14px 10px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.control-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.control-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #858585;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #2d2d2d;
+  padding-bottom: 5px;
+}
+
+.arrow-key-pad {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.arrow-key-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.arrow-key-btn {
+  width: 36px;
+  height: 36px;
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+  background: #252526;
+  color: #cccccc;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  outline: none;
+}
+
+.arrow-key-btn:hover {
+  border-color: #007acc;
+  background: #2d2d2d;
+  color: #ffffff;
+}
+
+.arrow-key-btn:active {
+  background: #007acc;
+  color: #ffffff;
+  transform: scale(0.92);
+}
+
+
+
+.terminal-output-container {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  background: #1e1e1e;
+}
+
+.terminal-output {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 12px;
+  overflow: hidden;
+  outline: 0;
+  background: #1e1e1e;
+}
+
+.terminal-output .xterm {
+  width: 100%;
+  height: 100%;
+}
+
+.terminal-key-capture {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  resize: none;
+}
+
+.preset-commands-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.preset-cmd-btn {
+  width: 100%;
+  height: 28px;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  background: #252526;
+  color: #aaaaaa;
+  font-size: 11px;
+  text-align: left;
+  padding: 0 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  outline: none;
+}
+
+.preset-cmd-btn:hover {
+  border-color: #007acc;
+  background: #2d2d2d;
+  color: #ffffff;
+}
+
+.preset-cmd-btn:active {
+  background: #007acc;
+  color: #ffffff;
+}
+
+@media (max-width: 980px) {
+  .terminals-page {
+    overflow-x: auto;
+  }
+}

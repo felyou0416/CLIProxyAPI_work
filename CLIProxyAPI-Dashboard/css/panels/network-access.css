@@ -1,0 +1,90 @@
+.na-firewall-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.na-firewall-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.na-firewall-head p,
+.na-firewall-help {
+  margin: 6px 0 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.na-firewall-head code {
+  font-family: var(--mono);
+}
+
+.na-firewall-rules {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.na-firewall-rule {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+
+.na-firewall-rule.is-ok {
+  border-color: color-mix(in srgb, var(--ok) 32%, var(--border));
+}
+
+.na-firewall-rule.is-warn {
+  border-color: color-mix(in srgb, #f59e0b 38%, var(--border));
+}
+
+.na-firewall-rule strong,
+.na-firewall-rule p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.na-firewall-rule strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.na-firewall-rule p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.na-firewall-allow-btn {
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .na-firewall-head,
+  .na-firewall-rule {
+    display: grid;
+  }
+
+  .na-firewall-rules {
+    grid-template-columns: 1fr;
+  }
+
+  .na-firewall-allow-btn {
+    width: 100%;
+  }
+}
