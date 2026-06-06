@@ -1,4 +1,15 @@
 let refreshStatusPending = false;
+window.tunnelActionBusy = false;
+window.proxyActionBusy = false;
+window.oauthActionBusy = false;
+window.dashboardActionBusy = false;
+
+window.updateIndicator = function(type, state) {
+  const el = document.getElementById(`${type}-status-indicator`);
+  if (el) {
+    el.className = `status-indicator-dot ${state}`;
+  }
+};
 
 function setHtml(id, html) {
   const el = document.getElementById(id);
@@ -92,6 +103,40 @@ async function refreshStatus() {
     setText('proxy-api-key', s.api_key || 'cliproxyapi', 'cliproxyapi');
     setText('exposure-mode-status', s.exposure_enabled ? 'Enabled (LAN)' : 'Disabled', 'Disabled');
 
+    if (!window.proxyActionBusy) {
+      window.updateIndicator('proxy', s.proxy_running ? 'green' : 'red');
+    }
+    if (!window.tunnelActionBusy) {
+      window.updateIndicator('tunnel', s.tunnel_running ? 'green' : 'red');
+    }
+    if (!window.oauthActionBusy) {
+      window.updateIndicator('oauth', s.oauth_manager_running ? 'green' : 'red');
+    }
+    if (!window.dashboardActionBusy) {
+      window.updateIndicator('dashboard', 'green');
+    }
+
+    const startBtn = document.getElementById('tunnel-start-btn');
+    const stopBtn = document.getElementById('tunnel-stop-btn');
+    if (startBtn && stopBtn) {
+      const isRunning = !!s.tunnel_running;
+      if (isRunning) {
+        startBtn.disabled = true;
+        startBtn.style.opacity = '0.5';
+        stopBtn.disabled = false;
+        stopBtn.style.opacity = '1';
+      } else {
+        startBtn.disabled = false;
+        startBtn.style.opacity = '1';
+        stopBtn.disabled = true;
+        stopBtn.style.opacity = '0.5';
+      }
+      if (window.tunnelActionBusy) {
+        startBtn.disabled = true;
+        stopBtn.disabled = true;
+      }
+    }
+
     setText('summary-selected-auth-count', selectedAuthCount, '0');
     setText('summary-auth-count', authCount, '0');
     setText('auth-count-badge', authCount, '0');
@@ -176,64 +221,48 @@ async function withRuntimeAction(button, label, task) {
   }
 }
 
+async function handleActionWithIndicator(type, button, label, actionApiUrl, errorIndicatorState) {
+  const busyKey = `${type}ActionBusy`;
+  window[busyKey] = true;
+  if (typeof window.updateIndicator === 'function') {
+    window.updateIndicator(type, 'yellow');
+  }
+  try {
+    return await withRuntimeAction(button, label, async () => {
+      try {
+        const r = await api(actionApiUrl, 'POST');
+        showMessage(r.message);
+        await refreshStatus();
+      } catch (e) {
+        showMessage(e.message, true);
+        if (errorIndicatorState && typeof window.updateIndicator === 'function') {
+          window.updateIndicator(type, errorIndicatorState);
+        }
+      }
+    });
+  } finally {
+    window[busyKey] = false;
+  }
+}
+
 async function startProxy(button) {
-  return withRuntimeAction(button, t('runtime.startingProxy', '启动中...'), async () => {
-    try {
-      const r = await api('/api/start-project', 'POST');
-      showMessage(r.message);
-      await refreshStatus();
-    } catch (e) {
-      showMessage(e.message, true);
-    }
-  });
+  return handleActionWithIndicator('proxy', button, t('runtime.startingProxy', '启动中...'), '/api/start-project', 'red');
 }
 
 async function restartProxy(button) {
-  return withRuntimeAction(button, t('runtime.restartingProxy', '重启中...'), async () => {
-    try {
-      const r = await api('/api/restart-proxy', 'POST');
-      showMessage(r.message);
-      await refreshStatus();
-    } catch (e) {
-      showMessage(e.message, true);
-    }
-  });
+  return handleActionWithIndicator('proxy', button, t('runtime.restartingProxy', '重启中...'), '/api/restart-proxy');
 }
 
 async function stopProxy(button) {
-  return withRuntimeAction(button, t('runtime.stoppingProxy', '停止中...'), async () => {
-    try {
-      const r = await api('/api/stop-proxy', 'POST');
-      showMessage(r.message);
-      await refreshStatus();
-    } catch (e) {
-      showMessage(e.message, true);
-    }
-  });
+  return handleActionWithIndicator('proxy', button, t('runtime.stoppingProxy', '停止中...'), '/api/stop-proxy', 'green');
 }
 
 async function startOAuthManager(button) {
-  return withRuntimeAction(button, t('runtime.startingOAuthManager', '启动中...'), async () => {
-    try {
-      const r = await api('/api/start-oauth-manager', 'POST');
-      showMessage(r.message);
-      await refreshStatus();
-    } catch (e) {
-      showMessage(e.message, true);
-    }
-  });
+  return handleActionWithIndicator('oauth', button, t('runtime.startingOAuthManager', '启动中...'), '/api/start-oauth-manager', 'red');
 }
 
 async function stopOAuthManager(button) {
-  return withRuntimeAction(button, t('runtime.stoppingOAuthManager', '停止中...'), async () => {
-    try {
-      const r = await api('/api/stop-oauth-manager', 'POST');
-      showMessage(r.message);
-      await refreshStatus();
-    } catch (e) {
-      showMessage(e.message, true);
-    }
-  });
+  return handleActionWithIndicator('oauth', button, t('runtime.stoppingOAuthManager', '停止中...'), '/api/stop-oauth-manager', 'green');
 }
 
 async function enableExposureMode(button) {
@@ -265,3 +294,12 @@ async function disableExposureMode(button) {
     }
   });
 }
+
+async function startTunnel(button) {
+  return handleActionWithIndicator('tunnel', button, t('runtime.startingTunnel', '启动中...'), '/api/tunnel/start', 'red');
+}
+
+async function stopTunnel(button) {
+  return handleActionWithIndicator('tunnel', button, t('runtime.stoppingTunnel', '关闭中...'), '/api/tunnel/stop', 'green');
+}
+

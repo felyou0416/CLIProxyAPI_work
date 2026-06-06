@@ -1,0 +1,14 @@
+{
+  "sessions": {
+    "019e8b12-1132-77d2-a344-c563af77a7db": {
+      "ordinary_no_progress_guard": {
+        "fingerprint": "ordinary|能用，而且现在就是靠它控制的。 规则是： - `cliproxyapi_auto_start=1 / true / yes / on`：启动面板时自动启动 `8317` api 服务 - `cliproxyapi_auto_start=0 / false / no / off`：不自动启动 - 如果不设置：现在 `start_dashboard.ps1` 会默认设成 `1` 也就是说你现在直接运行： ```powershell e:\\u_app\\cliproxyapi_work\\cliproxyapi-dashboard\\start_dashboard.ps1 ``` 会自动启动面板 `8765`，同时自动启动 `8317` 的 cliproxyapi 服务。 如果你哪天想临时关闭自动启动，可以这样： ```powershell $env:cliproxyapi_auto_start='0' e:\\u_app\\cliproxyapi_work\\cliproxyapi-dashboard\\start_dashboard.ps1 ``` 我刚才已经验证过日志里有： ```text auto start relayx: started relayx with storage/auth account files: 21 active. ``` 所以这个变量现在是生效的。",
+        "first_seen_at": "2026-06-03T01:35:04.190Z",
+        "last_seen_at": "2026-06-03T01:35:04.190Z",
+        "repeat_count": 1,
+        "last_turn_id": "019e8b1e-65e0-7533-9706-bad698d4256a",
+        "last_thread_id": null
+      }
+    }
+  }
+}

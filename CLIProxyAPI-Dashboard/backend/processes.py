@@ -1266,7 +1266,7 @@ def _find_oauth_manager_pid_uncached():
             command = (
                 "$needle = 'E:\\U_App\\oauth-manager'; "
                 "$p = Get-CimInstance Win32_Process | "
-                "Where-Object { $_.CommandLine -and $_.CommandLine -like '*switcher.py*--dashboard*' -and $_.CommandLine -like \"*$needle*\" } | "
+                "Where-Object { $_.Name -notlike '*powershell*' -and $_.CommandLine -and $_.CommandLine -like '*switcher.py*--dashboard*' -and $_.CommandLine -like \"*$needle*\" } | "
                 "Select-Object -First 1 -ExpandProperty ProcessId; "
                 "if($null -ne $p){ Write-Output $p }"
             )
@@ -1290,31 +1290,48 @@ def start_oauth_manager():
     _oauth_manager_pid_cache['time'] = 0
     if not OAUTH_MANAGER_DIR.exists():
         return {'ok': False, 'message': f'OAuth Manager directory was not found: {OAUTH_MANAGER_DIR}'}
-    if not (OAUTH_MANAGER_DIR / 'switcher.py').exists():
-        return {'ok': False, 'message': f'OAuth Manager entry was not found: {OAUTH_MANAGER_DIR / "switcher.py"}'}
-    launcher = 'py' if command_exists('py') else 'python'
-    args = [launcher, '-3.12', 'switcher.py', '--dashboard'] if launcher == 'py' else [launcher, 'switcher.py', '--dashboard']
+    start_bat = OAUTH_MANAGER_DIR / 'start.bat'
+    if not start_bat.exists():
+        return {'ok': False, 'message': f'start.bat was not found: {start_bat}'}
+    
     with process_lock:
         if process_alive(processes.get('oauth_manager')) or find_oauth_manager_pid():
             return {'ok': True, 'message': f'OAuth Manager is already running at {_oauth_manager_url()}.'}
-        stdout = open(OAUTH_MANAGER_STDOUT, 'w', encoding='utf-8', errors='ignore')
-        stderr = open(OAUTH_MANAGER_STDERR, 'w', encoding='utf-8', errors='ignore')
-        proc = subprocess.Popen(args, cwd=str(OAUTH_MANAGER_DIR), stdout=stdout, stderr=stderr, stdin=subprocess.DEVNULL, creationflags=_creationflags())
-        processes['oauth_manager'] = proc
-    return {'ok': True, 'message': f'Started OAuth Manager at {_oauth_manager_url()}.'}
+        
+        try:
+            subprocess.Popen(
+                ['cmd', '/c', 'start.bat'],
+                cwd=str(OAUTH_MANAGER_DIR),
+                creationflags=subprocess.CREATE_NEW_CONSOLE if is_windows() else 0
+            )
+            return {'ok': True, 'message': f'Started OAuth Manager via start.bat at {_oauth_manager_url()}.'}
+        except Exception as exc:
+            return {'ok': False, 'message': f'Failed to launch start.bat: {exc}'}
 
 
 def stop_oauth_manager():
     _oauth_manager_pid_cache['time'] = 0
+    stop_bat = OAUTH_MANAGER_DIR / 'stop.bat'
+    if not stop_bat.exists():
+        return {'ok': False, 'message': f'stop.bat was not found: {stop_bat}'}
+    
     with process_lock:
         proc = processes.get('oauth_manager')
-        stopped = kill_process(proc)
-        processes['oauth_manager'] = None
-    if not stopped:
-        pid = find_oauth_manager_pid()
-        if pid:
-            stopped = stop_pid(pid)
-    return {'ok': True, 'message': 'Stopped OAuth Manager.' if stopped else 'OAuth Manager was not running.'}
+        if proc:
+            kill_process(proc)
+            processes['oauth_manager'] = None
+            
+    try:
+        subprocess.run(
+            ['cmd', '/c', 'stop.bat'],
+            cwd=str(OAUTH_MANAGER_DIR),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=_creationflags()
+        )
+        return {'ok': True, 'message': 'Stopped OAuth Manager via stop.bat.'}
+    except Exception as exc:
+        return {'ok': False, 'message': f'Failed to launch stop.bat: {exc}'}
 
 
 def read_tail(path, max_chars: int = 6000):
@@ -1713,6 +1730,7 @@ def current_status(include_logs: bool = True):
         'oauth_manager_pid': oauth_manager_pid,
         'oauth_manager_url': _oauth_manager_url(),
         'auth_files_count': len(auth_files),
+        'tunnel_running': is_cloudflared_running(),
         'dashboard_root': str(DASHBOARD_ROOT),
         'proxy_root': str(PROXY_ROOT),
         'app_dir': str(PROXY_ROOT),
@@ -1774,3 +1792,78 @@ def stop_project():
         'proxy': proxy_result,
         'device_login': device_result,
     }
+
+
+_cloudflared_running_cache = {'value': False, 'time': 0}
+
+def is_cloudflared_running():
+    now = time.time()
+    if now - _cloudflared_running_cache['time'] < 2.0:
+        return _cloudflared_running_cache['value']
+    
+    val = _is_cloudflared_running_uncached()
+    _cloudflared_running_cache['value'] = val
+    _cloudflared_running_cache['time'] = now
+    return val
+
+def _is_cloudflared_running_uncached():
+    if is_windows():
+        try:
+            output = subprocess.check_output(['tasklist', '/FI', 'IMAGENAME eq cloudflared.exe', '/FO', 'CSV', '/NH'], text=True, stderr=subprocess.DEVNULL)
+            return 'cloudflared.exe' in output.lower()
+        except Exception:
+            return False
+    else:
+        try:
+            output = subprocess.check_output(['pgrep', 'cloudflared'], text=True, stderr=subprocess.DEVNULL)
+            return bool(output.strip())
+        except Exception:
+            return False
+
+def start_cloudflared_tunnel():
+    token = os.environ.get('CLOUDFLARED_TUNNEL_TOKEN', '').strip()
+    if not token:
+        return {'ok': False, 'message': 'Cloudflared tunnel token is not configured in .env file (CLOUDFLARED_TUNNEL_TOKEN).'}
+    if is_cloudflared_running():
+        return {'ok': True, 'message': 'Cloudflared tunnel is already running.'}
+    if not is_windows():
+        return {'ok': False, 'message': 'Starting cloudflared tunnel is only supported on Windows.'}
+    
+    cmd_str = f"cloudflared tunnel run --token {token}"
+    script = f"""
+$ErrorActionPreference = 'Stop'
+Start-Process -Verb RunAs -FilePath powershell -ArgumentList '-NoProfile', '-WindowStyle', 'Hidden', '-Command', '{cmd_str}'
+"""
+    encoded = base64.b64encode(script.encode('utf-16le')).decode('ascii')
+    try:
+        subprocess.Popen(
+            ['powershell', '-NoProfile', '-Command', f"Start-Process -Verb RunAs -FilePath powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','{encoded}')"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=_creationflags(),
+        )
+        return {'ok': True, 'message': 'Cloudflared tunnel start command sent with Admin rights.'}
+    except Exception as exc:
+        return {'ok': False, 'message': f'Failed to launch tunnel command: {exc}'}
+
+def stop_cloudflared_tunnel():
+    if not is_cloudflared_running():
+        return {'ok': True, 'message': 'Cloudflared tunnel is not running.'}
+    if not is_windows():
+        return {'ok': False, 'message': 'Stopping cloudflared tunnel is only supported on Windows.'}
+    
+    script = """
+$ErrorActionPreference = 'Stop'
+Stop-Process -Name cloudflared -Force
+"""
+    encoded = base64.b64encode(script.encode('utf-16le')).decode('ascii')
+    try:
+        subprocess.Popen(
+            ['powershell', '-NoProfile', '-Command', f"Start-Process -Verb RunAs -FilePath powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','{encoded}')"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=_creationflags(),
+        )
+        return {'ok': True, 'message': 'Cloudflared tunnel stop command sent with Admin rights.'}
+    except Exception as exc:
+        return {'ok': False, 'message': f'Failed to launch stop command: {exc}'}

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import base64,json,sys; payload=sys.argv[1]; payload+='='*\\(4-len\\(payload\\)%4\\); print\\(json.dumps\\(json.loads\\(base64.urlsafe_b64decode\\(payload\\)\\),indent=2\\)\\)\" \"eyJhdWQiOlsiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS92MSJdLCJjbGllbnRfaWQiOiJhcHBfWDh6WTZ2VzJwUTl0UjNkRTduSzFqTDVnSCIsImV4cCI6MTc4MDMwMzI1NCwiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS9hdXRoIjp7ImNoYXRncHRfYWNjb3VudF9pZCI6IjUyZGFiNTQ3LTNlNzEtNDI0Ny04OGNjLTliMTI4NDIyYjQ2ZSIsImNoYXRncHRfYWNjb3VudF91c2VyX2lkIjoidXNlci1IMWRMOUZnaG1xN0tnWnUzbWdId3U3cWVfXzUyZGFiNTQ3LTNlNzEtNDI0Ny04OGNjLTliMTI4NDIyYjQ2ZSIsImNoYXRncHRfY29tcHV0ZV9yZXNpZGVuY3kiOiJub19jb25zdHJhaW50IiwiY2hhdGdwdF9wbGFuX3R5cGUiOiJmcmVlIiwiY2hhdGdwdF91c2VyX2lkIjoidXNlci1IMWRMOUZnaG1xN0tnWnUzbWdId3U3cWUifSwiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS9wcm9maWxlIjp7ImVtYWlsIjoieW91cXUwNDE2QHFxLmNvbSIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlfSwiaWF0IjoxNzc5NDM5MjU0LCJpc3MiOiJodHRwczovL2F1dGgub3BlbmFpLmNvbSIsImp0aSI6ImMxZjk5YjYzLWRhZTEtNGMwMy1iYjJlLTJkZWJkODAzMGQyMCIsIm5iZiI6MTc3OTQzOTI1NCwicHdkX2F1dGhfdGltZSI6MTc3Nzc0MzMwMTAwMiwic2NwIjpbIm9wZW5pZCIsImVtYWlsIiwicHJvZmlsZSIsIm9mZmxpbmVfYWNjZXNzIiwibW9kZWwucmVxdWVzdCIsIm1vZGVsLnJlYWQiLCJvcmdhbml6YXRpb24ucmVhZCIsIm9yZ2FuaXphdGlvbi53cml0ZSJdLCJzZXNzaW9uX2lkIjoiYXV0aHNlc3NfV2tyNU9HWXJCMUpCckNuWWJSb1NsTlhEIiwic2wiOnRydWUsInN1YiI6ImF1dGgwfG9PZWNIVVcyR3NxcjhmZWJqQ2FaU0xkdCJ9\")",
+      "Bash(python -m pytest)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(go -C \"E:/U_App/CLIProxyAPI_work/CLIProxyAPI/CLIProxyAPI\" build -o \"E:/U_App/CLIProxyAPI_work/CLIProxyAPI/CLIProxyAPI/test-output.exe\" ./cmd/server)",
+      "Bash(go -C \"E:/U_App/CLIProxyAPI_work/CLIProxyAPI/CLIProxyAPI\" build -o test-output.exe ./cmd/server)",
+      "Bash(powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '$since=\\(Get-Date\\).AddHours\\(-6\\); Get-WinEvent -FilterHashtable @{LogName=\"System\"; StartTime=$since; Level=1,2,3} -ErrorAction SilentlyContinue | Select-Object -First 120 TimeCreated,Id,LevelDisplayName,ProviderName,Message | Format-List')"
+    ]
+  }
+}

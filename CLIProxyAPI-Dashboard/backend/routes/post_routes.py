@@ -554,6 +554,16 @@ def handle_post(handler, parsed, data):
         result = restart_proxy()
         send_json(handler, result, status=200 if result.get('ok') else 400)
         return True
+    if parsed.path == '/api/tunnel/start':
+        from backend.processes import start_cloudflared_tunnel
+        result = start_cloudflared_tunnel()
+        send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/tunnel/stop':
+        from backend.processes import stop_cloudflared_tunnel
+        result = stop_cloudflared_tunnel()
+        send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
     if parsed.path == '/api/start-oauth-manager':
         result = start_oauth_manager()
         send_json(handler, result, status=200 if result.get('ok') else 400)

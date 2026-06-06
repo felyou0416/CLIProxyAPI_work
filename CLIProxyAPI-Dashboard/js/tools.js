@@ -205,6 +205,10 @@ async function loadRoutePreview() {
 }
 
 async function runDashboardScript(mode = 'ps') {
+  if (typeof window.updateIndicator === 'function') {
+    window.updateIndicator('dashboard', 'yellow');
+  }
+  window.dashboardActionBusy = true;
   const logEl = document.getElementById('dashboard-script-log');
   if (logEl) {
     setLogVisible(logEl, true);
@@ -220,10 +224,15 @@ async function runDashboardScript(mode = 'ps') {
   try {
     const result = await api('/api/run-tool', 'POST', { tool });
     showMessage(result.message || 'Launch script triggered');
-    if (logEl) tailToolLogSimple(tool, logEl);
+    if (logEl) await tailToolLogSimple(tool, logEl);
   } catch (err) {
     if (logEl) logEl.textContent = 'Launch failed: ' + err.message;
     showMessage(err.message, true);
+  } finally {
+    window.dashboardActionBusy = false;
+    if (typeof window.updateIndicator === 'function') {
+      window.updateIndicator('dashboard', 'green');
+    }
   }
 }
 
@@ -231,6 +240,10 @@ async function stopDashboardPanel() {
   const logEl = document.getElementById('dashboard-script-log');
   const statusEl = document.getElementById('status-dashboard-panel');
   if (!confirm('确定停止 Dashboard 面板？停止后当前页面会断开。')) return;
+  if (typeof window.updateIndicator === 'function') {
+    window.updateIndicator('dashboard', 'yellow');
+  }
+  window.dashboardActionBusy = true;
   if (logEl) {
     setLogVisible(logEl, true);
     logEl.textContent = 'Stopping dashboard panel...';
@@ -243,15 +256,26 @@ async function stopDashboardPanel() {
       statusEl.className = 'tool-status tool-stopped';
     }
     if (logEl) logEl.textContent = 'Dashboard panel is stopping. Restart it with start_dashboard.ps1.';
+    if (typeof window.updateIndicator === 'function') {
+      window.updateIndicator('dashboard', 'red');
+    }
   } catch (err) {
     if (logEl) logEl.textContent = 'Stop failed: ' + err.message;
     showMessage(err.message || '停止面板失败。', true);
+    window.dashboardActionBusy = false;
+    if (typeof window.updateIndicator === 'function') {
+      window.updateIndicator('dashboard', 'green');
+    }
   }
 }
 
 async function restartDashboardPanel() {
   const logEl = document.getElementById('dashboard-script-log');
   if (!confirm('确定重启 Dashboard 面板？重启期间页面将断开，随后会自动尝试重新连接。')) return;
+  if (typeof window.updateIndicator === 'function') {
+    window.updateIndicator('dashboard', 'yellow');
+  }
+  window.dashboardActionBusy = true;
   if (logEl) {
     setLogVisible(logEl, true);
     logEl.textContent = 'Restarting dashboard panel...';
@@ -266,6 +290,10 @@ async function restartDashboardPanel() {
   } catch (err) {
     if (logEl) logEl.textContent = 'Restart failed: ' + err.message;
     showMessage(err.message || '重启面板失败。', true);
+    window.dashboardActionBusy = false;
+    if (typeof window.updateIndicator === 'function') {
+      window.updateIndicator('dashboard', 'green');
+    }
   }
 }
 
