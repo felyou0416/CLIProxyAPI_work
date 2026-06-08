@@ -314,6 +314,14 @@
   min-height: 28px;
   padding: 0 10px;
 }
+.provider-aggregate-btn {
+  min-height: 28px;
+  padding: 0 10px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  color: var(--accent);
+  font-weight: 800;
+}
 .provider-test-btn.is-testing,
 .provider-test-btn:disabled {
   background: #fff3bf;

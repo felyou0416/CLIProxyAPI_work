@@ -21,6 +21,7 @@ from backend.paths import (
     PROXY_ROOT,
     DASHBOARD_ROOT,
     STORAGE_DIR,
+    LOGS_DIR,
     RUNTIME_VARIANT,
     POOL_AUTH_DIR,
 )
@@ -29,13 +30,18 @@ from backend.state import load_state, save_state, get_proxy_bind_host, get_proxy
 from backend.runtime_env import command_exists, is_windows, cli_binary_hint
 
 process_lock = threading.Lock()
-processes = {'device_login': None, 'proxy': None, 'oauth_manager': None}
+processes = {'device_login': None, 'proxy': None, 'oauth_manager': None, 'openclaw': None}
 tool_processes: dict = {}
 tool_states: dict = {}
 DEFAULT_TRUSTED_REMOTE_ADDRESSES = ['fd7a:115c:a1e0::9e39:c580', '100.89.197.128']
 OAUTH_MANAGER_DIR = Path(r'E:\U_App\oauth-manager')
 OAUTH_MANAGER_STDOUT = OAUTH_MANAGER_DIR / 'dashboard.stdout.log'
 OAUTH_MANAGER_STDERR = OAUTH_MANAGER_DIR / 'dashboard.stderr.log'
+OPENCLAW_HOME = Path.home() / '.openclaw'
+OPENCLAW_GATEWAY_CMD = OPENCLAW_HOME / 'gateway.cmd'
+OPENCLAW_CMD = Path.home() / 'AppData' / 'Roaming' / 'npm' / 'openclaw.cmd'
+OPENCLAW_STDOUT = LOGS_DIR / 'openclaw.stdout.log'
+OPENCLAW_STDERR = LOGS_DIR / 'openclaw.stderr.log'
 FIREWALL_RULES = [
     {
         'id': 'dashboard',
@@ -981,13 +987,14 @@ def _ip_helper_script(action):
     if action == 'start':
         return """
 $ErrorActionPreference = 'Stop'
-Set-Service iphlpsvc -StartupType Automatic
+Set-Service iphlpsvc -StartupType Manual
 Start-Service iphlpsvc
 """
     if action == 'stop':
         return """
 $ErrorActionPreference = 'Stop'
 Stop-Service iphlpsvc -Force
+Set-Service iphlpsvc -StartupType Manual
 """
     raise ValueError('Invalid IP Helper action.')
 
@@ -1270,11 +1277,109 @@ def _find_oauth_manager_pid_uncached():
                 "Select-Object -First 1 -ExpandProperty ProcessId; "
                 "if($null -ne $p){ Write-Output $p }"
             )
-            output = subprocess.check_output(['powershell', '-NoProfile', '-Command', command], text=True, stderr=subprocess.DEVNULL).strip()
+            output = subprocess.check_output(['powershell', '-NoProfile', '-Command', command], text=True, stderr=subprocess.DEVNULL, timeout=3).strip()
             return int(output) if output else None
         except Exception:
             return None
     return None
+
+
+_openclaw_pid_cache = {'value': None, 'time': 0}
+
+def find_openclaw_gateway_pid():
+    now = time.time()
+    if now - _openclaw_pid_cache['time'] < 3.0:
+        return _openclaw_pid_cache['value']
+
+    val = _find_openclaw_gateway_pid_uncached()
+    _openclaw_pid_cache['value'] = val
+    _openclaw_pid_cache['time'] = now
+    return val
+
+def _find_openclaw_gateway_pid_uncached():
+    pid = find_proxy_listener_pid(18789)
+    if not pid:
+        return None
+    name = (get_process_name(pid) or '').lower()
+    return pid if name in ('node.exe', 'node') else None
+
+
+def _kill_pid_tree(pid: int):
+    if not pid:
+        return False
+    if is_windows():
+        try:
+            subprocess.run(['taskkill', '/PID', str(pid), '/T', '/F'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except Exception:
+            try:
+                subprocess.run(['powershell', '-NoProfile', '-Command', f'Stop-Process -Id {int(pid)} -Force'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True
+            except Exception:
+                return False
+    return kill_pid(pid)
+
+
+def _openclaw_command():
+    if OPENCLAW_GATEWAY_CMD.exists():
+        if is_windows():
+            return ['cmd', '/c', str(OPENCLAW_GATEWAY_CMD)]
+        return [str(OPENCLAW_GATEWAY_CMD)]
+    if OPENCLAW_CMD.exists():
+        if is_windows():
+            return ['cmd', '/c', str(OPENCLAW_CMD), 'gateway']
+        return [str(OPENCLAW_CMD), 'gateway']
+    return ['openclaw', 'gateway']
+
+
+def start_openclaw_gateway():
+    _openclaw_pid_cache['time'] = 0
+    with process_lock:
+        proc = processes.get('openclaw')
+        if process_alive(proc) or find_openclaw_gateway_pid():
+            return {'ok': True, 'message': 'OpenClaw gateway is already running.'}
+
+        try:
+            LOGS_DIR.mkdir(parents=True, exist_ok=True)
+            fout = open(OPENCLAW_STDOUT, 'w', encoding='utf-8', errors='ignore')
+            ferr = open(OPENCLAW_STDERR, 'w', encoding='utf-8', errors='ignore')
+            proc = subprocess.Popen(
+                _openclaw_command(),
+                cwd=str(OPENCLAW_HOME if OPENCLAW_HOME.exists() else PROXY_ROOT),
+                stdout=fout,
+                stderr=ferr,
+                stdin=subprocess.DEVNULL,
+                creationflags=_creationflags(),
+            )
+            processes['openclaw'] = proc
+            _openclaw_pid_cache['value'] = proc.pid
+            _openclaw_pid_cache['time'] = time.time()
+            return {'ok': True, 'message': 'Started OpenClaw gateway.', 'pid': proc.pid}
+        except Exception as exc:
+            return {'ok': False, 'message': f'Failed to start OpenClaw gateway: {exc}'}
+
+
+def stop_openclaw_gateway():
+    _openclaw_pid_cache['time'] = 0
+    stopped = False
+    with process_lock:
+        proc = processes.get('openclaw')
+        if process_alive(proc):
+            stopped = _kill_pid_tree(proc.pid)
+            processes['openclaw'] = None
+
+    pid = find_openclaw_gateway_pid()
+    if pid:
+        stopped = _kill_pid_tree(pid) or stopped
+    _openclaw_pid_cache['value'] = None
+    _openclaw_pid_cache['time'] = time.time()
+    return {'ok': True, 'message': 'Stopped OpenClaw gateway.' if stopped else 'OpenClaw gateway was not running.'}
+
+
+def restart_openclaw_gateway():
+    stop_openclaw_gateway()
+    time.sleep(0.4)
+    return start_openclaw_gateway()
 
 
 def _oauth_manager_url():
@@ -1662,8 +1767,12 @@ def current_status(include_logs: bool = True):
 
     tracked_proxy_running = process_alive(processes.get('proxy'))
     tracked_oauth_manager_running = process_alive(processes.get('oauth_manager'))
+    tracked_openclaw_proc = processes.get('openclaw')
+    tracked_openclaw_running = process_alive(tracked_openclaw_proc)
     oauth_manager_pid = find_oauth_manager_pid()
     oauth_manager_running = bool(tracked_oauth_manager_running or oauth_manager_pid)
+    openclaw_pid = tracked_openclaw_proc.pid if tracked_openclaw_running else find_openclaw_gateway_pid()
+    openclaw_running = bool(tracked_openclaw_running or openclaw_pid)
     listener_pid = find_proxy_listener_pid()
     listener_process_name = get_process_name(listener_pid) if listener_pid else None
     listener_is_proxy = bool(listener_pid and listener_process_name and listener_process_name.lower() == 'cli-proxy-api.exe')
@@ -1729,6 +1838,8 @@ def current_status(include_logs: bool = True):
         'oauth_manager_running': oauth_manager_running,
         'oauth_manager_pid': oauth_manager_pid,
         'oauth_manager_url': _oauth_manager_url(),
+        'openclaw_running': openclaw_running,
+        'openclaw_pid': openclaw_pid,
         'auth_files_count': len(auth_files),
         'tunnel_running': is_cloudflared_running(),
         'dashboard_root': str(DASHBOARD_ROOT),
@@ -1746,6 +1857,8 @@ def current_status(include_logs: bool = True):
         status.update({
             'oauth_manager_stdout': read_tail(OAUTH_MANAGER_STDOUT),
             'oauth_manager_stderr': read_tail(OAUTH_MANAGER_STDERR),
+            'openclaw_stdout': read_tail(OPENCLAW_STDOUT),
+            'openclaw_stderr': read_tail(OPENCLAW_STDERR),
             'device_login_stdout': read_tail(DEVICE_LOGIN_STDOUT),
             'device_login_stderr': read_tail(DEVICE_LOGIN_STDERR),
             'proxy_stdout': read_tail(PROXY_STDOUT),

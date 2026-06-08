@@ -104,6 +104,16 @@
     radial-gradient(circle at 92% 2%, rgba(217, 70, 239, .11) 0 190px, transparent 191px),
     var(--panel);
 }
+[data-theme="dark"] .sidebar-bubble-nav .nav-pill {
+  background:
+    radial-gradient(circle at 30% 20%, rgba(79, 140, 255, .16), transparent 42%),
+    color-mix(in srgb, var(--panel) 88%, var(--accent));
+  box-shadow: 0 8px 18px rgba(0, 0, 0, .18);
+}
+[data-theme="dark"] .sidebar-bubble-nav .nav-pill.active {
+  background: var(--accent);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 24%, transparent);
+}
 [data-theme="dark"] .request-table tbody tr {
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
 }

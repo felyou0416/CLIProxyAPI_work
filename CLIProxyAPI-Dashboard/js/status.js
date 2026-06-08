@@ -3,6 +3,7 @@ window.tunnelActionBusy = false;
 window.proxyActionBusy = false;
 window.oauthActionBusy = false;
 window.dashboardActionBusy = false;
+window.openclawActionBusy = false;
 
 window.updateIndicator = function(type, state) {
   const el = document.getElementById(`${type}-status-indicator`);
@@ -112,8 +113,29 @@ async function refreshStatus() {
     if (!window.oauthActionBusy) {
       window.updateIndicator('oauth', s.oauth_manager_running ? 'green' : 'red');
     }
+    if (!window.openclawActionBusy) {
+      window.updateIndicator('openclaw', s.openclaw_running ? 'green' : 'red');
+    }
     if (!window.dashboardActionBusy) {
       window.updateIndicator('dashboard', 'green');
+    }
+
+    const openClawStartBtn = document.getElementById('openclaw-start-btn');
+    const openClawRestartBtn = document.getElementById('openclaw-restart-btn');
+    const openClawStopBtn = document.getElementById('openclaw-stop-btn');
+    if (openClawStartBtn && openClawRestartBtn && openClawStopBtn) {
+      const isRunning = !!s.openclaw_running;
+      openClawStartBtn.disabled = isRunning;
+      openClawStartBtn.style.opacity = isRunning ? '0.5' : '1';
+      openClawRestartBtn.disabled = !isRunning;
+      openClawRestartBtn.style.opacity = isRunning ? '1' : '0.5';
+      openClawStopBtn.disabled = !isRunning;
+      openClawStopBtn.style.opacity = isRunning ? '1' : '0.5';
+      if (window.openclawActionBusy) {
+        openClawStartBtn.disabled = true;
+        openClawRestartBtn.disabled = true;
+        openClawStopBtn.disabled = true;
+      }
     }
 
     const startBtn = document.getElementById('tunnel-start-btn');
@@ -265,6 +287,18 @@ async function stopOAuthManager(button) {
   return handleActionWithIndicator('oauth', button, t('runtime.stoppingOAuthManager', '停止中...'), '/api/stop-oauth-manager', 'green');
 }
 
+async function startOpenClaw(button) {
+  return handleActionWithIndicator('openclaw', button, '启动中...', '/api/openclaw/start', 'red');
+}
+
+async function restartOpenClaw(button) {
+  return handleActionWithIndicator('openclaw', button, '重启中...', '/api/openclaw/restart', 'red');
+}
+
+async function stopOpenClaw(button) {
+  return handleActionWithIndicator('openclaw', button, '停止中...', '/api/openclaw/stop', 'green');
+}
+
 async function enableExposureMode(button) {
   return withRuntimeAction(button, t('runtime.enablingExposure', '开启中...'), async () => {
     try {
@@ -302,4 +336,3 @@ async function startTunnel(button) {
 async function stopTunnel(button) {
   return handleActionWithIndicator('tunnel', button, t('runtime.stoppingTunnel', '关闭中...'), '/api/tunnel/stop', 'green');
 }
-

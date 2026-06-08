@@ -103,8 +103,6 @@ while ((Get-Date) -lt `$deadline) {
     Start-Sleep -Seconds 1
 }
 if (`$listener) {
-    Set-Service iphlpsvc -StartupType Automatic
-    Start-Service iphlpsvc
     netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=$dashboardPort | Out-Null
     netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=$dashboardPort connectaddress=127.0.0.1 connectport=$dashboardPort | Out-Null
 }

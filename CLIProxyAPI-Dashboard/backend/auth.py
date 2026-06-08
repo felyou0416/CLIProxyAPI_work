@@ -578,10 +578,14 @@ def _prioritize_model_rows_by_alias(rows: list[dict]):
 def _aggregate_alias_id_set():
     alias_ids = {'auto', 'image', 'agent', 'coder', 'reasoning', 'chat'}
     saved = _load_aggregate_model_aliases()
+    disabled_aliases = _load_disabled_aggregate_aliases()
+    hidden_aliases = _load_hidden_aggregate_aliases()
     for alias_id in saved.keys():
         token = str(alias_id or '').strip().lower()
         if token:
             alias_ids.add(token)
+    alias_ids.difference_update(disabled_aliases)
+    alias_ids.difference_update(hidden_aliases)
     return alias_ids
 
 
@@ -1704,6 +1708,53 @@ def _provider_model_override_deleted(overrides: dict, provider: str, upstream_id
     return False
 
 
+def _remove_provider_mapping_call_conflicts(
+    overrides: dict,
+    provider_value: str,
+    call_value: str,
+    keep_upstream_value: str,
+    keep_target_provider_value: str,
+    keep_target_upstream_value: str,
+):
+    provider_map = overrides.setdefault(provider_value, {})
+    removed = []
+    for upstream_key in list(provider_map.keys()):
+        upstream_value = str(upstream_key or '').strip()
+        if not upstream_value:
+            continue
+        current_entries = iter_model_mapping_entries(overrides, provider_value, upstream_value)
+        next_entries = []
+        changed = False
+        for item in current_entries:
+            item_call = str(item.get('call_id') or '').strip()
+            item_provider = str(item.get('provider') or '').strip().lower()
+            item_upstream = str(item.get('upstream_id') or '').strip()
+            item_deleted = bool(item.get('deleted'))
+            is_kept_entry = (
+                upstream_value == keep_upstream_value
+                and item_provider == keep_target_provider_value
+                and item_upstream == keep_target_upstream_value
+            )
+            if not item_deleted and item_call == call_value and not is_kept_entry:
+                removed.append({
+                    'provider': provider_value,
+                    'upstream_id': upstream_value,
+                    'target_provider': item_provider,
+                    'target_upstream_id': item_upstream,
+                    'call_id': item_call,
+                })
+                changed = True
+                continue
+            next_entries.append(item)
+        if not changed:
+            continue
+        if next_entries:
+            provider_map[upstream_value] = {'mappings': next_entries}
+        else:
+            provider_map.pop(upstream_value, None)
+    return removed
+
+
 def set_provider_model_override(
     provider: str,
     upstream_id: str,
@@ -1724,6 +1775,14 @@ def set_provider_model_override(
 
     overrides = _load_model_mapping_overrides()
     provider_map = overrides.setdefault(provider_value, {})
+    removed_conflicts = _remove_provider_mapping_call_conflicts(
+        overrides,
+        provider_value,
+        call_value,
+        upstream_value,
+        target_provider_value,
+        target_upstream_value,
+    )
     current_entries = iter_model_mapping_entries(overrides, provider_value, upstream_value)
     next_entry = _model_mapping_entry(call_value, target_provider_value, target_upstream_value, False)
     next_entries = [
@@ -1743,6 +1802,8 @@ def set_provider_model_override(
         'upstream_id': upstream_value,
         'target_upstream_id': target_upstream_value,
         'call_id': call_value,
+        'removed_conflicts': removed_conflicts,
+        'removed_conflicts_count': len(removed_conflicts),
     }
 
 
@@ -1798,7 +1859,7 @@ def _load_aggregate_model_aliases():
         return {}
     normalized = {}
     for alias_id, raw_members in payload.items():
-        if str(alias_id or '').strip() == '__hidden_builtin__':
+        if str(alias_id or '').strip() in ('__hidden_builtin__', '__disabled__', '__copy_groups__'):
             continue
         alias_value = _safe_name(alias_id, '')
         if not alias_value:
@@ -1832,34 +1893,117 @@ def _builtin_aggregate_alias_ids():
     return {'auto', 'image', 'agent', 'coder', 'reasoning', 'chat'}
 
 
-def _load_hidden_aggregate_aliases():
+def _load_aggregate_alias_marker(marker_key: str, allowed_aliases: set | None = None):
     if not AGGREGATE_MODEL_ALIASES_FILE.exists():
         return set()
     try:
         payload = json.loads(AGGREGATE_MODEL_ALIASES_FILE.read_text(encoding='utf-8'))
     except Exception:
         return set()
-    hidden = payload.get('__hidden_builtin__') if isinstance(payload, dict) else []
-    if not isinstance(hidden, list):
+    values = payload.get(marker_key) if isinstance(payload, dict) else []
+    if not isinstance(values, list):
         return set()
-    return {
-        _safe_name(item, '')
-        for item in hidden
-        if _safe_name(item, '') in _builtin_aggregate_alias_ids()
-    }
+    normalized = {_safe_name(item, '') for item in values if _safe_name(item, '')}
+    return normalized & allowed_aliases if allowed_aliases is not None else normalized
 
 
-def _save_aggregate_model_aliases(aliases: dict, hidden_aliases: set | None = None):
+def _load_hidden_aggregate_aliases():
+    return _load_aggregate_alias_marker('__hidden_builtin__', _builtin_aggregate_alias_ids())
+
+
+def _load_disabled_aggregate_aliases():
+    return _load_aggregate_alias_marker('__disabled__')
+
+
+def _load_aggregate_copy_groups():
+    if not AGGREGATE_MODEL_ALIASES_FILE.exists():
+        return {}
+    try:
+        payload = json.loads(AGGREGATE_MODEL_ALIASES_FILE.read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+    raw_groups = payload.get('__copy_groups__') if isinstance(payload, dict) else {}
+    if not isinstance(raw_groups, dict):
+        return {}
+    groups = {}
+    for raw_group_id, raw_aliases in raw_groups.items():
+        group_id = _safe_name(raw_group_id, '')
+        if not group_id or not isinstance(raw_aliases, list):
+            continue
+        aliases = []
+        seen = set()
+        for raw_alias in raw_aliases:
+            alias_id = _safe_name(raw_alias, '')
+            if not alias_id or alias_id in seen:
+                continue
+            seen.add(alias_id)
+            aliases.append(alias_id)
+        if len(aliases) > 1:
+            groups[group_id] = aliases
+    return groups
+
+
+def _copy_group_id_for_alias(copy_groups: dict, alias_id: str):
+    alias_value = _safe_name(alias_id, '')
+    for group_id, aliases in (copy_groups or {}).items():
+        if alias_value in (aliases or []):
+            return group_id
+    return ''
+
+
+def _remove_alias_from_copy_groups(copy_groups: dict, alias_id: str):
+    alias_value = _safe_name(alias_id, '')
+    next_groups = {}
+    for group_id, aliases in (copy_groups or {}).items():
+        next_aliases = [item for item in (aliases or []) if item != alias_value]
+        if len(next_aliases) > 1:
+            next_groups[group_id] = next_aliases
+    return next_groups
+
+
+def _save_aggregate_model_aliases(
+    aliases: dict,
+    hidden_aliases: set | None = None,
+    disabled_aliases: set | None = None,
+    copy_groups: dict | None = None,
+):
     AGGREGATE_MODEL_ALIASES_FILE.parent.mkdir(parents=True, exist_ok=True)
     payload = dict(aliases or {})
     if hidden_aliases is None:
         hidden_aliases = _load_hidden_aggregate_aliases()
+    if disabled_aliases is None:
+        disabled_aliases = _load_disabled_aggregate_aliases()
+    if copy_groups is None:
+        copy_groups = _load_aggregate_copy_groups()
     hidden_list = [
         alias_id for alias_id in ['auto', 'image', 'agent', 'coder', 'reasoning', 'chat']
         if alias_id in set(hidden_aliases or set())
     ]
     if hidden_list:
         payload['__hidden_builtin__'] = hidden_list
+    disabled_list = [
+        alias_id for alias_id in sorted(set(disabled_aliases or set()))
+        if _safe_name(alias_id, '')
+    ]
+    if disabled_list:
+        payload['__disabled__'] = disabled_list
+    normalized_copy_groups = {}
+    for group_id, group_aliases in (copy_groups or {}).items():
+        safe_group_id = _safe_name(group_id, '')
+        if not safe_group_id:
+            continue
+        aliases_in_group = []
+        seen_aliases = set()
+        for alias_id in group_aliases or []:
+            safe_alias_id = _safe_name(alias_id, '')
+            if not safe_alias_id or safe_alias_id in seen_aliases:
+                continue
+            seen_aliases.add(safe_alias_id)
+            aliases_in_group.append(safe_alias_id)
+        if len(aliases_in_group) > 1:
+            normalized_copy_groups[safe_group_id] = aliases_in_group
+    if normalized_copy_groups:
+        payload['__copy_groups__'] = normalized_copy_groups
     AGGREGATE_MODEL_ALIASES_FILE.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding='utf-8',
@@ -1900,10 +2044,12 @@ def create_custom_aggregate_alias(alias_id: str):
         raise ValueError('aggregate alias id is required.')
     aliases = _load_aggregate_model_aliases()
     hidden_aliases = _load_hidden_aggregate_aliases()
+    disabled_aliases = _load_disabled_aggregate_aliases()
     hidden_aliases.discard(alias_value)
+    disabled_aliases.discard(alias_value)
     aliases.setdefault(alias_value, [])
-    _save_aggregate_model_aliases(aliases, hidden_aliases)
-    return {'alias_id': alias_value, 'members': aliases.get(alias_value, [])}
+    _save_aggregate_model_aliases(aliases, hidden_aliases, disabled_aliases)
+    return {'alias_id': alias_value, 'members': aliases.get(alias_value, []), 'enabled': True}
 
 
 def delete_custom_aggregate_alias(alias_id: str):
@@ -1912,9 +2058,13 @@ def delete_custom_aggregate_alias(alias_id: str):
         raise ValueError('aggregate alias id is required.')
     aliases = _load_aggregate_model_aliases()
     hidden_aliases = _load_hidden_aggregate_aliases()
+    disabled_aliases = _load_disabled_aggregate_aliases()
+    copy_groups = _load_aggregate_copy_groups()
+    disabled_aliases.discard(alias_value)
+    copy_groups = _remove_alias_from_copy_groups(copy_groups, alias_value)
     if alias_value in aliases:
         removed_members = aliases.pop(alias_value, [])
-        _save_aggregate_model_aliases(aliases, hidden_aliases)
+        _save_aggregate_model_aliases(aliases, hidden_aliases, disabled_aliases, copy_groups)
         return {
             'alias_id': alias_value,
             'removed_count': len(removed_members),
@@ -1922,7 +2072,7 @@ def delete_custom_aggregate_alias(alias_id: str):
         }
     if alias_value in _builtin_aggregate_alias_ids():
         hidden_aliases.add(alias_value)
-        _save_aggregate_model_aliases(aliases, hidden_aliases)
+        _save_aggregate_model_aliases(aliases, hidden_aliases, disabled_aliases, copy_groups)
         return {
             'alias_id': alias_value,
             'removed_count': 0,
@@ -1987,6 +2137,103 @@ def reorder_custom_aggregate_aliases(ordered_ids: list):
     }
 
 
+def set_custom_aggregate_alias_enabled(alias_id: str, enabled: bool):
+    alias_value = _safe_name(alias_id, '')
+    if not alias_value:
+        raise ValueError('aggregate alias id is required.')
+    aliases = _load_aggregate_model_aliases()
+    hidden_aliases = _load_hidden_aggregate_aliases()
+    disabled_aliases = _load_disabled_aggregate_aliases()
+    copy_groups = _load_aggregate_copy_groups()
+    if bool(enabled):
+        disabled_aliases.discard(alias_value)
+        group_id = _copy_group_id_for_alias(copy_groups, alias_value)
+        if group_id:
+            for sibling_alias in copy_groups.get(group_id, []):
+                if sibling_alias != alias_value:
+                    disabled_aliases.add(sibling_alias)
+    else:
+        disabled_aliases.add(alias_value)
+        hidden_aliases.discard(alias_value)
+    _save_aggregate_model_aliases(aliases, hidden_aliases, disabled_aliases, copy_groups)
+    return {
+        'alias_id': alias_value,
+        'members': aliases.get(alias_value, []),
+        'enabled': bool(enabled),
+    }
+
+
+def copy_custom_aggregate_alias(alias_id: str, new_alias_id: str):
+    source_value = _safe_name(alias_id, '')
+    new_alias_value = _safe_name(new_alias_id, '')
+    if not source_value or not new_alias_value:
+        raise ValueError('aggregate alias id is required.')
+    if source_value == new_alias_value:
+        raise ValueError('new aggregate alias id must be different.')
+    if new_alias_value in _builtin_aggregate_alias_ids():
+        raise ValueError('new aggregate alias id conflicts with a built-in alias.')
+
+    aliases = _load_aggregate_model_aliases()
+    if new_alias_value in aliases:
+        raise ValueError(f'aggregate alias already exists: {new_alias_value}')
+
+    if source_value in aliases:
+        source_members = aliases.get(source_value, [])
+    else:
+        source_item = next(
+            (
+                item for item in get_configured_aggregate_models()
+                if str(item.get('alias_id') or '').strip() == source_value
+            ),
+            None,
+        )
+        if not source_item:
+            raise ValueError(f'aggregate alias not found: {source_value}')
+        source_members = source_item.get('members') or []
+
+    copied_members = []
+    seen = set()
+    for raw_member in source_members or []:
+        if not isinstance(raw_member, dict):
+            continue
+        provider = str(raw_member.get('provider') or '').strip().lower()
+        upstream_id = str(raw_member.get('upstream_id') or '').strip()
+        if not provider or not upstream_id:
+            continue
+        key = (provider, upstream_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        copied_members.append({
+            'provider': provider,
+            'upstream_id': upstream_id,
+        })
+
+    hidden_aliases = _load_hidden_aggregate_aliases()
+    disabled_aliases = _load_disabled_aggregate_aliases()
+    copy_groups = _load_aggregate_copy_groups()
+    group_id = _copy_group_id_for_alias(copy_groups, source_value) or source_value
+    copy_groups = _remove_alias_from_copy_groups(copy_groups, new_alias_value)
+    group_aliases = copy_groups.get(group_id, [])
+    for item in (source_value, new_alias_value):
+        if item not in group_aliases:
+            group_aliases.append(item)
+    copy_groups[group_id] = group_aliases
+
+    aliases[new_alias_value] = copied_members
+    hidden_aliases.discard(new_alias_value)
+    disabled_aliases.add(new_alias_value)
+    _save_aggregate_model_aliases(aliases, hidden_aliases, disabled_aliases, copy_groups)
+    return {
+        'alias_id': new_alias_value,
+        'source_alias_id': source_value,
+        'members': copied_members,
+        'member_count': len(copied_members),
+        'enabled': False,
+        'copy_group_id': group_id,
+    }
+
+
 def rename_custom_aggregate_alias(alias_id: str, new_alias_id: str):
     alias_value = _safe_name(alias_id, '')
     new_alias_value = _safe_name(new_alias_id, '')
@@ -2006,6 +2253,8 @@ def rename_custom_aggregate_alias(alias_id: str, new_alias_id: str):
         raise ValueError('new aggregate alias id conflicts with a built-in alias.')
 
     aliases = _load_aggregate_model_aliases()
+    disabled_aliases = _load_disabled_aggregate_aliases()
+    copy_groups = _load_aggregate_copy_groups()
     if alias_value not in aliases:
         raise ValueError(f'aggregate alias not found: {alias_value}')
     if new_alias_value in aliases:
@@ -2014,7 +2263,16 @@ def rename_custom_aggregate_alias(alias_id: str, new_alias_id: str):
     reordered = {}
     for key, members in aliases.items():
         reordered[new_alias_value if key == alias_value else key] = members
-    _save_aggregate_model_aliases(reordered)
+    if alias_value in disabled_aliases:
+        disabled_aliases.discard(alias_value)
+        disabled_aliases.add(new_alias_value)
+    group_id = _copy_group_id_for_alias(copy_groups, alias_value)
+    if group_id:
+        copy_groups[group_id] = [
+            new_alias_value if item == alias_value else item
+            for item in copy_groups.get(group_id, [])
+        ]
+    _save_aggregate_model_aliases(reordered, disabled_aliases=disabled_aliases, copy_groups=copy_groups)
     return {
         'alias_id': new_alias_value,
         'old_alias_id': alias_value,
@@ -2093,8 +2351,9 @@ def get_custom_aggregate_aliases_for_model(provider: str, upstream_id: str):
         return []
     aliases = []
     hidden_aliases = _load_hidden_aggregate_aliases()
+    disabled_aliases = _load_disabled_aggregate_aliases()
     for alias_id, members in _load_aggregate_model_aliases().items():
-        if alias_id in hidden_aliases:
+        if alias_id in hidden_aliases or alias_id in disabled_aliases:
             continue
         if any(
             str(item.get('provider') or '').strip().lower() == provider_value
@@ -2800,6 +3059,7 @@ def _group_manual_entry_models(entry: dict, overrides: dict | None = None):
             if upstream_value and call_value and upstream_value not in merged_models:
                 merged_models.append(upstream_value)
     aggregate_alias_ids = _aggregate_alias_id_set()
+    disabled_aliases = _load_disabled_aggregate_aliases()
     test_results = _load_provider_model_test_results()
     strategy = _current_route_strategy()
     now_ts = int(time.time())
@@ -2838,6 +3098,8 @@ def _group_manual_entry_models(entry: dict, overrides: dict | None = None):
                 if extra_alias and extra_alias not in aliases:
                     aliases.append(extra_alias)
             for global_alias in derive_global_aggregate_aliases(source_provider, source_model_id, runtime_upstream_id):
+                if global_alias in disabled_aliases:
+                    continue
                 if global_alias not in aliases:
                     aliases.append(global_alias)
             for custom_alias in get_custom_aggregate_aliases_for_model(source_provider, source_model_id):
@@ -3196,6 +3458,7 @@ def get_configured_aggregate_models():
     alias_map = {}
     saved_aliases = _load_aggregate_model_aliases()
     hidden_aliases = _load_hidden_aggregate_aliases()
+    disabled_aliases = _load_disabled_aggregate_aliases()
 
     def ensure_alias(alias_id: str):
         alias_value = _safe_name(alias_id, '')
@@ -3322,6 +3585,7 @@ def get_configured_aggregate_models():
         result.append({
             'alias_id': alias_id,
             'builtin': bool(entry.get('builtin')),
+            'enabled': alias_id not in disabled_aliases,
             'members': entry.get('members') or [],
             'member_count': len(entry.get('members') or []),
         })
@@ -3621,6 +3885,7 @@ def get_model_route_preview(model_id: str, auth_refs: list[str] | None = None):
                         })
         else:
             alias_map = collect_provider_model_aliases(auth_refs=[auth_ref])
+            disabled_aliases = _load_disabled_aggregate_aliases()
             for upstream_id, alias in alias_map.get(provider, []):
                 mapping = resolve_provider_mapping(provider, upstream_id, alias)
                 call_id = str(mapping.get('call_id') or '').strip()
@@ -3631,6 +3896,8 @@ def get_model_route_preview(model_id: str, auth_refs: list[str] | None = None):
                 )
                 candidate_aliases = [call_id]
                 for global_alias in derive_global_aggregate_aliases(provider, upstream_id, runtime_upstream_id):
+                    if global_alias in disabled_aliases:
+                        continue
                     if global_alias not in candidate_aliases:
                         candidate_aliases.append(global_alias)
                 for custom_alias in get_custom_aggregate_aliases_for_model(provider, upstream_id):
@@ -3722,6 +3989,7 @@ def build_oauth_model_alias_block(providers, auth_refs: list[str] | None = None)
     if not unique_providers:
         unique_providers = ['codex']
     aggregate_alias_ids = _aggregate_alias_id_set()
+    disabled_aliases = _load_disabled_aggregate_aliases()
     test_results = _load_provider_model_test_results()
     strategy = _current_route_strategy()
     now_ts = int(time.time())
@@ -3749,6 +4017,8 @@ def build_oauth_model_alias_block(providers, auth_refs: list[str] | None = None)
                 primary_call_id = str(mapping.get('call_id', '') or '').strip()
                 call_ids = [primary_call_id]
                 for global_alias in derive_global_aggregate_aliases(effective_provider, model_name, actual_model_name):
+                    if global_alias in disabled_aliases:
+                        continue
                     if global_alias not in call_ids:
                         call_ids.append(global_alias)
                 for custom_alias in get_custom_aggregate_aliases_for_model(effective_provider, model_name):

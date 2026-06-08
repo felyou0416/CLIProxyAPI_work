@@ -1,5 +1,6 @@
 let apiKeyIntakePresets = [];
 let apiKeyIntakeMode = 'existing';
+let apiKeyIntakeSelectedProvider = '';
 
 function apiKeyIntakeEscape(value) {
   return String(value ?? '')
@@ -58,11 +59,20 @@ function setApiKeyIntakeMode(mode) {
 }
 
 function selectApiKeyPreset(provider) {
-  const preset = apiKeyIntakePresets.find((item) => String(item.provider || '') === String(provider || ''));
+  const selectedProvider = String(provider || '');
+  const preset = apiKeyIntakePresets.find((item) => String(item.provider || '') === selectedProvider);
   const baseInput = document.getElementById('api-key-base-url');
+  const secretInput = document.getElementById('api-key-secret');
+  const remarkInput = document.getElementById('api-key-remark');
   const note = document.getElementById('api-key-provider-note');
-  if (preset && baseInput && !baseInput.value.trim()) {
+  const providerChanged = apiKeyIntakeSelectedProvider && apiKeyIntakeSelectedProvider !== selectedProvider;
+  apiKeyIntakeSelectedProvider = selectedProvider;
+  if (preset && baseInput) {
     baseInput.value = preset.base_url || '';
+  }
+  if (providerChanged) {
+    if (secretInput) secretInput.value = '';
+    if (remarkInput) remarkInput.value = '';
   }
   if (note) {
     const modelCount = Array.isArray(preset?.models) ? preset.models.length : 0;

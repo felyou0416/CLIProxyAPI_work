@@ -1,7 +1,7 @@
-from backend.auth import create_manual_auth_entry, create_manual_auth_bundle_entry, list_auth_files, build_auth_ref, set_provider_model_override, delete_provider_model_override, create_custom_aggregate_alias, add_custom_aggregate_alias_members, set_custom_aggregate_alias_members, delete_custom_aggregate_alias, move_custom_aggregate_alias, rename_custom_aggregate_alias, delete_auth_entries, save_model_proxy_rules, rebuild_runtime_config_from_state, get_configured_provider_models, reorder_custom_aggregate_aliases
+from backend.auth import create_manual_auth_entry, create_manual_auth_bundle_entry, list_auth_files, build_auth_ref, set_provider_model_override, delete_provider_model_override, create_custom_aggregate_alias, add_custom_aggregate_alias_members, set_custom_aggregate_alias_members, delete_custom_aggregate_alias, move_custom_aggregate_alias, rename_custom_aggregate_alias, copy_custom_aggregate_alias, set_custom_aggregate_alias_enabled, delete_auth_entries, save_model_proxy_rules, rebuild_runtime_config_from_state, get_configured_provider_models, reorder_custom_aggregate_aliases
 from backend.api_keys import create_api_key, update_api_key, delete_api_key, reset_api_key_usage, reveal_api_key
 from backend.state import load_state, save_state, normalize_route_strategy
-from backend.processes import start_device_login, stop_device_login, start_proxy, stop_proxy, restart_proxy, start_project, start_oauth_manager, stop_oauth_manager, current_status, ensure_firewall_access, ensure_custom_firewall_ports, remove_custom_firewall_ports, ensure_external_firewall_ports, remove_external_firewall_ports, ensure_port_bindings, remove_port_bindings, set_ip_helper_service, stop_dashboard_panel, restart_dashboard_panel
+from backend.processes import start_device_login, stop_device_login, start_proxy, stop_proxy, restart_proxy, start_project, start_oauth_manager, stop_oauth_manager, start_openclaw_gateway, stop_openclaw_gateway, restart_openclaw_gateway, current_status, ensure_firewall_access, ensure_custom_firewall_ports, remove_custom_firewall_ports, ensure_external_firewall_ports, remove_external_firewall_ports, ensure_port_bindings, remove_port_bindings, set_ip_helper_service, stop_dashboard_panel, restart_dashboard_panel
 from backend.tools import run_tool, stop_tool, test_provider_models, test_image_models, test_auth_entry, queue_provider_model_tests, clear_provider_model_test_state, stop_provider_model_tests, run_storage_cleanup, _proxy_request
 from backend.terminals import open_terminal, open_desktop_terminal, close_terminal, list_terminals, write_terminal, resize_terminal
 from backend.routes.helpers import send_json
@@ -318,6 +318,9 @@ def handle_post(handler, parsed, data):
             send_json(handler, {'ok': False, 'message': f'Failed to save model mapping: {e}'}, status=500)
             return True
         message = f'Saved model mapping: {item.get("provider")} / {item.get("upstream_id")}'
+        removed_conflicts_count = int(item.get('removed_conflicts_count') or 0)
+        if removed_conflicts_count:
+            message += f'. Replaced {removed_conflicts_count} mapping(s) with the same call ID.'
         if not rebuild.get('rebuilt'):
             message += '. No storage/auth account files to rebuild right now.'
         send_json(handler, {
@@ -412,6 +415,18 @@ def handle_post(handler, parsed, data):
                     data.get('new_alias_id', ''),
                 )
                 message = f'Renamed aggregate ID: {item.get("old_alias_id")} -> {item.get("alias_id")}'
+            elif action == 'copy':
+                item = copy_custom_aggregate_alias(
+                    data.get('alias_id', ''),
+                    data.get('new_alias_id', ''),
+                )
+                message = f'Copied aggregate ID: {item.get("source_alias_id")} -> {item.get("alias_id")}. The copy is disabled by default'
+            elif action == 'set_enabled':
+                item = set_custom_aggregate_alias_enabled(
+                    data.get('alias_id', ''),
+                    bool(data.get('enabled')),
+                )
+                message = f'{"Enabled" if item.get("enabled") else "Disabled"} aggregate ID: {item.get("alias_id")}'
             elif action == 'add_members':
                 item = add_custom_aggregate_alias_members(
                     data.get('alias_id', ''),
@@ -570,6 +585,17 @@ def handle_post(handler, parsed, data):
         return True
     if parsed.path == '/api/stop-oauth-manager':
         send_json(handler, stop_oauth_manager())
+        return True
+    if parsed.path == '/api/openclaw/start':
+        result = start_openclaw_gateway()
+        send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/openclaw/restart':
+        result = restart_openclaw_gateway()
+        send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/openclaw/stop':
+        send_json(handler, stop_openclaw_gateway())
         return True
     if parsed.path == '/api/clear-cooldown':
         if not isinstance(data, dict):

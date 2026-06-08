@@ -135,16 +135,31 @@ function renderPortBindingStatus(item) {
 }
 
 function renderIpHelperStatus(item) {
-  const root = document.getElementById('ip-helper-status');
-  if (!root) return;
   ipHelperStatusCache = item || {};
   const signature = JSON.stringify(item || {});
   if (signature === ipHelperStatusSignature) return;
   ipHelperStatusSignature = signature;
   const running = !!item?.running;
   const status = firewallEscape(item?.status || 'Unknown');
-  root.className = `na-mini-pill ${running ? 'ok' : 'warn'}`;
-  root.textContent = `IP Helper ${running ? '运行中' : status}`;
+  const statusText = `IP Helper ${running ? '运行中' : status}`;
+  const root = document.getElementById('ip-helper-status');
+  if (root) {
+    root.className = `na-mini-pill ${running ? 'ok' : 'warn'}`;
+    root.textContent = statusText;
+  }
+  const indicator = document.getElementById('ip-helper-status-indicator');
+  if (indicator) {
+    indicator.className = `status-indicator-dot ${running ? 'green' : 'red'}`;
+    indicator.title = statusText;
+  }
+  const startBtn = document.getElementById('ip-helper-start-btn');
+  const stopBtn = document.getElementById('ip-helper-stop-btn');
+  if (startBtn && stopBtn) {
+    startBtn.disabled = running;
+    startBtn.style.opacity = running ? '0.5' : '1';
+    stopBtn.disabled = !running;
+    stopBtn.style.opacity = running ? '1' : '0.5';
+  }
 }
 
 function renderFirewallAccessStatus(item) {
@@ -217,23 +232,35 @@ async function loadIpHelperStatus(force = false) {
   }
 }
 
-async function setIpHelperService(action) {
-  try {
-    const nextAction = String(action || '').toLowerCase();
-    if (nextAction !== 'start' && nextAction !== 'stop') {
-      showMessage('无效的 IP Helper 操作。', true);
-      return;
-    }
-    showMessage(nextAction === 'start' ? '正在启动 IP Helper...' : '正在关闭 IP Helper...');
-    const res = await api('/api/ip-helper', 'POST', { action: nextAction, elevated: true });
-    if (res?.message) showMessage(res.message);
-    renderIpHelperStatus(res.ip_helper || {});
-    renderPortBindingStatus(res.port_bindings || {});
-    setTimeout(() => loadFirewallAccessPanel(true), res?.pending_elevation ? 5000 : 1200);
-  } catch (err) {
-    showMessage(err.message || '更新 IP Helper 失败。', true);
-    setTimeout(() => loadFirewallAccessPanel(true), 1200);
+async function setIpHelperService(action, button) {
+  const nextAction = String(action || '').toLowerCase();
+  if (nextAction !== 'start' && nextAction !== 'stop') {
+    showMessage('无效的 IP Helper 操作。', true);
+    return null;
   }
+  const label = nextAction === 'start' ? '启动中...' : '关闭中...';
+  const run = async () => {
+    try {
+      const indicator = document.getElementById('ip-helper-status-indicator');
+      if (indicator) {
+        indicator.className = 'status-indicator-dot yellow';
+        indicator.title = nextAction === 'start' ? '正在启动 IP Helper...' : '正在关闭 IP Helper...';
+      }
+      showMessage(nextAction === 'start' ? '正在启动 IP Helper...' : '正在关闭 IP Helper...');
+      const res = await api('/api/ip-helper', 'POST', { action: nextAction, elevated: true });
+      if (res?.message) showMessage(res.message);
+      renderIpHelperStatus(res.ip_helper || {});
+      renderPortBindingStatus(res.port_bindings || {});
+      setTimeout(() => loadFirewallAccessPanel(true), res?.pending_elevation ? 5000 : 1200);
+    } catch (err) {
+      showMessage(err.message || '更新 IP Helper 失败。', true);
+      setTimeout(() => loadFirewallAccessPanel(true), 1200);
+    }
+  };
+  if (typeof withRuntimeAction === 'function') {
+    return withRuntimeAction(button, label, run);
+  }
+  return run();
 }
 
 async function prefillTrustedRemoteAddress() {

@@ -264,7 +264,9 @@ function providerModelChipHtml(row) {
 }
 
 function providerModelCardHtml(item) {
-  const provider = escapeProviderHtml(item.provider || '-');
+  const sourceProvider = String(item.lookup_provider || item.provider || '').trim();
+  const provider = escapeProviderHtml(item.provider || sourceProvider || '-');
+  const providerKey = escapeProviderHtml(sourceProvider || item.provider || '');
   const rows = normalizeProviderRows(item).map((row) => ({
     ...row,
     categories: deriveProviderModelCategories(row),
@@ -278,7 +280,8 @@ function providerModelCardHtml(item) {
         <div class="provider-model-name">${provider}</div>
         <div class="provider-model-actions">
           <span class="provider-model-summary">${escapeProviderHtml(getProviderStatusSummary(rows))}</span>
-          <button type="button" class="secondary provider-test-btn ${isTesting ? 'is-testing' : ''}" data-provider-test="${provider}" ${isTesting ? 'disabled' : ''}>${isTesting ? '检测中' : '检测本组'}</button>
+          <button type="button" class="secondary provider-aggregate-btn" data-provider-key="${providerKey}" data-provider-create-aggregate>创建聚合</button>
+          <button type="button" class="secondary provider-test-btn ${isTesting ? 'is-testing' : ''}" data-provider-key="${providerKey}" data-provider-test ${isTesting ? 'disabled' : ''}>${isTesting ? '检测中' : '检测本组'}</button>
         </div>
       </div>
       <div class="provider-model-call-list">
@@ -362,6 +365,79 @@ async function fetchRuntimeProviderModelItems() {
     .sort((a, b) => String(a.provider).localeCompare(String(b.provider)));
 }
 
+function providerAggregateAliasId(provider) {
+  return String(provider || '').trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^[-._]+|[-._]+$/g, '').slice(0, 64);
+}
+
+function providerAggregateMemberRows(item) {
+  const rows = normalizeProviderRows(item)
+    .map((row) => {
+      const provider = String(row.source_provider || item?.lookup_provider || item?.provider || '').trim().toLowerCase();
+      const upstreamId = String(row.lookup_upstream_id || row.upstream_id || '').trim();
+      const callId = String(row.call_id || '').trim();
+      return { provider, upstream_id: upstreamId, call_id: callId };
+    })
+    .filter((row) => row.provider && row.upstream_id);
+
+  const testedRows = rows.filter((row) => providerModelStatuses[row.call_id]);
+  const availableRows = rows.filter((row) => providerModelStatuses[row.call_id] === 'ok');
+  return availableRows.length ? availableRows : (testedRows.length ? [] : rows);
+}
+
+function findProviderModelItem(providerKey) {
+  const key = String(providerKey || '').trim();
+  return providerModelItemsCache.find((entry) =>
+    String(entry.lookup_provider || entry.provider || '').trim() === key
+  );
+}
+
+async function createAggregateForProvider(item, button) {
+  const provider = String(item?.lookup_provider || item?.provider || '').trim();
+  const aliasId = providerAggregateAliasId(provider);
+  if (!provider || !aliasId) {
+    showMessage(getLanguage() === 'zh' ? '缺少 provider，无法创建聚合 model。' : 'Provider is missing; cannot create an aggregate model.', true);
+    return;
+  }
+
+  const memberRows = providerAggregateMemberRows(item);
+  if (!memberRows.length) {
+    showMessage(getLanguage() === 'zh'
+      ? '本组没有检测可用的模型，先检测本组后再创建。'
+      : 'No available models in this provider. Test this provider first, then create the aggregate model.', true);
+    return;
+  }
+
+  try {
+    if (button) button.disabled = true;
+    const existing = await api('/api/aggregate-models');
+    const existingIds = new Set((Array.isArray(existing.items) ? existing.items : [])
+      .map((entry) => String(entry.alias_id || '').trim())
+      .filter(Boolean));
+    if (existingIds.has(aliasId)) {
+      showMessage(getLanguage() === 'zh' ? `聚合 model 已存在：${aliasId}` : `Aggregate model already exists: ${aliasId}`, true);
+      return;
+    }
+
+    const members = memberRows.map((row) => ({ provider: row.provider, upstream_id: row.upstream_id }));
+    const res = await api('/api/aggregate-models', 'POST', {
+      action: 'set_members',
+      alias_id: aliasId,
+      members,
+    });
+
+    if (typeof aggregateItemsCache !== 'undefined') aggregateItemsCache = [];
+    if (typeof aggregateModelsLoaded !== 'undefined') aggregateModelsLoaded = false;
+    if (typeof loadAggregateModels === 'function') void loadAggregateModels(true);
+    showMessage(res.message || (getLanguage() === 'zh'
+      ? `已创建聚合 model：${aliasId}（${members.length} 个模型）`
+      : `Created aggregate model: ${aliasId} (${members.length} models)`));
+  } catch (err) {
+    showMessage(err.message, true);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function bindProviderModelActions(root) {
   root?.querySelectorAll('[data-provider-model-id]').forEach((btn) => {
     btn.onclick = () => {
@@ -386,10 +462,16 @@ function bindProviderModelActions(root) {
 
   root?.querySelectorAll('[data-provider-test]').forEach((btn) => {
     btn.onclick = async () => {
-      const provider = btn.getAttribute('data-provider-test') || '';
-      const item = providerModelItemsCache.find((entry) => String(entry.provider || '') === provider);
+      const item = findProviderModelItem(btn.getAttribute('data-provider-key') || '');
       const modelIds = normalizeProviderRows(item).map((row) => row.call_id).filter(Boolean);
       await runProviderModelDetection(modelIds);
+    };
+  });
+
+  root?.querySelectorAll('[data-provider-create-aggregate]').forEach((btn) => {
+    btn.onclick = async () => {
+      const item = findProviderModelItem(btn.getAttribute('data-provider-key') || '');
+      await createAggregateForProvider(item, btn);
     };
   });
 }
@@ -823,14 +905,16 @@ function bindProviderModelMapActions(root) {
 
       try {
         btn.disabled = true;
-        await api('/api/provider-model-override', 'POST', {
+        const res = await api('/api/provider-model-override', 'POST', {
           provider,
           target_provider: targetProvider,
           upstream_id: targetUpstreamId,
           target_upstream_id: targetUpstreamId,
           call_id: callId,
         });
-        showMessage(`已新增映射：${provider} / ${targetUpstreamId}`);
+        const replacedCount = Number(res?.item?.removed_conflicts_count || 0);
+        const replaceText = replacedCount ? `（已替换 ${replacedCount} 个同名映射）` : '';
+        showMessage(`已新增映射：${provider} / ${targetUpstreamId}${replaceText}`);
         invalidateProviderModelCache();
         await Promise.all([loadProviderModelMappings(), loadProviderModels(false)]);
       } catch (err) {
@@ -861,6 +945,7 @@ function bindProviderModelMapActions(root) {
 
       try {
         btn.disabled = true;
+        let replacedCount = 0;
         if (targetProvider !== previousTargetProvider) {
           const rowButtons = Array.from(root.querySelectorAll(`[data-provider-map-save="${escapeSelectorValue(provider)}"]`));
           for (const rowButton of rowButtons) {
@@ -871,13 +956,14 @@ function bindProviderModelMapActions(root) {
             const nextUpstreamId = nextUpstreamInput?.value?.trim() || '';
             const nextCallId = nextCallInput?.value?.trim() || '';
             if (!nextUpstreamId || !nextCallId) continue;
-            await api('/api/provider-model-override', 'POST', {
+            const res = await api('/api/provider-model-override', 'POST', {
               provider,
               target_provider: targetProvider,
               upstream_id: nextUpstreamId,
               target_upstream_id: nextUpstreamId,
               call_id: nextCallId,
             });
+            replacedCount += Number(res?.item?.removed_conflicts_count || 0);
             if (nextUpstreamId !== oldUpstreamId) {
               await api('/api/provider-model-delete', 'POST', {
                 provider,
@@ -887,28 +973,31 @@ function bindProviderModelMapActions(root) {
           }
         } else {
           if (targetUpstreamId !== upstreamId) {
-            await api('/api/provider-model-override', 'POST', {
+            const res = await api('/api/provider-model-override', 'POST', {
               provider,
               target_provider: targetProvider,
               upstream_id: targetUpstreamId,
               target_upstream_id: targetUpstreamId,
               call_id: callId,
             });
+            replacedCount += Number(res?.item?.removed_conflicts_count || 0);
             await api('/api/provider-model-delete', 'POST', {
               provider,
               upstream_id: upstreamId,
             });
           } else {
-            await api('/api/provider-model-override', 'POST', {
+            const res = await api('/api/provider-model-override', 'POST', {
               provider,
               target_provider: targetProvider,
               upstream_id: upstreamId,
               target_upstream_id: targetUpstreamId,
               call_id: callId,
             });
+            replacedCount += Number(res?.item?.removed_conflicts_count || 0);
           }
         }
-        showMessage(`已保存映射：${provider} / ${targetUpstreamId}`);
+        const replaceText = replacedCount ? `（已替换 ${replacedCount} 个同名映射）` : '';
+        showMessage(`已保存映射：${provider} / ${targetUpstreamId}${replaceText}`);
         invalidateProviderModelCache();
         await Promise.all([loadProviderModelMappings(), loadProviderModels(false)]);
       } catch (err) {
@@ -1127,14 +1216,16 @@ async function handleAddMappingSubmit() {
   }
 
   try {
-    await api('/api/provider-model-override', 'POST', {
+    const res = await api('/api/provider-model-override', 'POST', {
       provider,
       target_provider: targetProvider,
       upstream_id: targetUpstreamId,
       target_upstream_id: targetUpstreamId,
       call_id: callId,
     });
-    showMessage(`已新增映射：${provider} / ${targetUpstreamId}`);
+    const replacedCount = Number(res?.item?.removed_conflicts_count || 0);
+    const replaceText = replacedCount ? `（已替换 ${replacedCount} 个同名映射）` : '';
+    showMessage(`已新增映射：${provider} / ${targetUpstreamId}${replaceText}`);
     
     providerModelMappingItemsCache = [];
     await loadProviderModelMappings();

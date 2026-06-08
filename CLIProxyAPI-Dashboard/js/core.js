@@ -531,6 +531,9 @@ async function showSection(name) {
   if (name === 'network-access' && typeof loadNetworkAccessPanel === 'function') {
     loadNetworkAccessPanel();
   }
+  if (name === 'account' && typeof loadIpHelperStatus === 'function') {
+    loadIpHelperStatus(true);
+  }
   if (name === 'firewall-access' && typeof loadFirewallAccessPanel === 'function') {
     loadFirewallAccessPanel();
   }

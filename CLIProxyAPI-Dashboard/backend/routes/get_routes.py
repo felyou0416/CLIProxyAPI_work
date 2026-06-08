@@ -200,9 +200,36 @@ def handle_get(handler, parsed):
         })
         return True
     if parsed.path == '/api/provider-models':
-        runtime_only = str(parse_qs(parsed.query).get('runtime', ['0'])[0]).strip().lower() in ('1', 'true', 'yes')
-        runtime_state = str(parse_qs(parsed.query).get('runtime_state', ['0'])[0]).strip().lower() in ('1', 'true', 'yes')
+        params = parse_qs(parsed.query)
+        runtime_only = str(params.get('runtime', ['0'])[0]).strip().lower() in ('1', 'true', 'yes')
+        runtime_state = str(params.get('runtime_state', ['0'])[0]).strip().lower() in ('1', 'true', 'yes')
+        provider_filter = str(params.get('provider', [''])[0] or '').strip().lower()
+        providers_only = str(params.get('providers_only', ['0'])[0]).strip().lower() in ('1', 'true', 'yes')
         items = get_configured_provider_models(include_override_only=False)
+        if provider_filter:
+            items = [
+                item for item in items
+                if str(item.get('lookup_provider') or item.get('provider') or '').strip().lower() == provider_filter
+            ]
+        if providers_only:
+            items = [
+                {
+                    'provider': item.get('provider'),
+                    'lookup_provider': item.get('lookup_provider') or item.get('provider'),
+                    'row_count': len(item.get('rows') or []),
+                }
+                for item in items
+            ]
+            send_json(handler, {
+                'ok': True,
+                'items': items,
+                'providers_only': True,
+                'runtime_only': False,
+                'runtime_state': False,
+                'runtime_loaded': False,
+                'runtime_model_ids': [],
+            })
+            return True
         runtime_loaded = False
         runtime_model_ids = []
         if runtime_only or runtime_state:

@@ -1,7 +1,10 @@
 let aggregateItemsCache = [];
 let aggregateProviderItemsCache = [];
+let aggregateProviderSummariesCache = [];
+const aggregateProviderItemCache = new Map();
+let aggregateProviderRowsLoading = false;
 let activeAggregateAliasId = '';
-let activeAggregateProviderFilter = 'all';
+let activeAggregateProviderFilter = '';
 let activeAggregateTypeFilter = 'all';
 let activeAggregateScoreFilter = 'all';
 // Reverted to click-to-add directly (removed aggregateSelectedMembers)
@@ -75,6 +78,31 @@ function aggregateLookupText(row) {
     String(row?.call_id || '').trim().toLowerCase(),
     String(row?.lookup_upstream_id || row?.upstream_id || '').trim().toLowerCase(),
   ].filter(Boolean).join(' ');
+}
+
+function aggregateProviderKey(item) {
+  return String(item?.lookup_provider || item?.provider || '').trim().toLowerCase();
+}
+
+function aggregateProviderNames() {
+  const sourceItems = aggregateProviderSummariesCache.length ? aggregateProviderSummariesCache : aggregateProviderItemsCache;
+  return sourceItems
+    .map(aggregateProviderKey)
+    .filter(Boolean)
+    .filter((value, index, arr) => arr.indexOf(value) === index);
+}
+
+function ensureAggregateProviderFilter() {
+  const names = aggregateProviderNames();
+  if (!names.length) {
+    activeAggregateProviderFilter = '';
+    return '';
+  }
+  if (activeAggregateProviderFilter === 'all') return activeAggregateProviderFilter;
+  if (!activeAggregateProviderFilter || !names.includes(activeAggregateProviderFilter)) {
+    activeAggregateProviderFilter = names[0];
+  }
+  return activeAggregateProviderFilter;
 }
 
 function deriveAggregateModelTypes(row) {
@@ -187,19 +215,6 @@ function aggregateModelRawScore(row) {
   return Math.max(0, Math.min(100, score));
 }
 
-function computeAggregateScoreMap(items) {
-  const map = new Map();
-  items.forEach((item) => {
-    const provider = String(item.lookup_provider || item.provider || '').trim().toLowerCase();
-    (Array.isArray(item.rows) ? item.rows : []).forEach((row) => {
-      const key = aggregateMemberKey(provider, row.lookup_upstream_id || row.upstream_id || '');
-      const score = Number(aggregateModelRawScore(row));
-      map.set(key, Math.max(0, Math.min(100, Math.round(score))));
-    });
-  });
-  return map;
-}
-
 function aggregateMemberScore(member) {
   return Number(aggregateModelRawScore({
     call_id: member?.call_id,
@@ -238,6 +253,17 @@ function cloneAggregateItems(items = aggregateItemsCache) {
     ...item,
     members: Array.isArray(item.members) ? item.members.map((member) => ({ ...member })) : [],
   }));
+}
+
+function nextAggregateCopyAliasId(aliasId) {
+  const baseId = `${String(aliasId || '').trim()}-copy`;
+  const existingIds = new Set(aggregateItemsCache.map((item) => String(item.alias_id || '').trim()).filter(Boolean));
+  if (!existingIds.has(baseId)) return baseId;
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${baseId}-${index}`;
+    if (!existingIds.has(candidate)) return candidate;
+  }
+  return `${baseId}-${Date.now()}`;
 }
 
 function aggregateMemberPayload(members) {
@@ -368,10 +394,62 @@ async function fetchAggregateItems() {
   return aggregateItemsCache;
 }
 
-async function fetchAggregateProviderItems() {
-  const res = await api('/api/provider-models?runtime_state=1');
-  aggregateProviderItemsCache = Array.isArray(res.items) ? res.items : [];
+async function fetchAggregateProviderSummaries() {
+  const res = await api('/api/provider-models?providers_only=1');
+  aggregateProviderSummariesCache = Array.isArray(res.items) ? res.items : [];
+  return aggregateProviderSummariesCache;
+}
+
+async function fetchAggregateProviderItems(provider) {
+  const providerKey = String(provider || '').trim().toLowerCase();
+  if (!providerKey) {
+    aggregateProviderItemsCache = [];
+    return aggregateProviderItemsCache;
+  }
+  if (providerKey === 'all') {
+    const providerNames = aggregateProviderNames();
+    const cachedItems = providerNames
+      .map((key) => aggregateProviderItemCache.get(key))
+      .filter(Boolean);
+    if (providerNames.length && cachedItems.length === providerNames.length) {
+      aggregateProviderItemsCache = cachedItems;
+      return aggregateProviderItemsCache;
+    }
+    const res = await api('/api/provider-models?runtime_state=1');
+    aggregateProviderItemsCache = Array.isArray(res.items) ? res.items : [];
+    aggregateProviderItemsCache.forEach((item) => {
+      const key = aggregateProviderKey(item);
+      if (key) aggregateProviderItemCache.set(key, item);
+    });
+    return aggregateProviderItemsCache;
+  }
+  if (aggregateProviderItemCache.has(providerKey)) {
+    aggregateProviderItemsCache = [aggregateProviderItemCache.get(providerKey)];
+    return aggregateProviderItemsCache;
+  }
+  const res = await api(`/api/provider-models?runtime_state=1&provider=${encodeURIComponent(providerKey)}`);
+  const items = Array.isArray(res.items) ? res.items : [];
+  items.forEach((item) => {
+    const key = aggregateProviderKey(item);
+    if (key) aggregateProviderItemCache.set(key, item);
+  });
+  aggregateProviderItemsCache = items;
   return aggregateProviderItemsCache;
+}
+
+async function loadAggregateActiveProviderRows() {
+  const provider = ensureAggregateProviderFilter();
+  if (!provider) {
+    aggregateProviderItemsCache = [];
+    return;
+  }
+  aggregateProviderRowsLoading = true;
+  renderAggregateProviderSourceList();
+  try {
+    await fetchAggregateProviderItems(provider);
+  } finally {
+    aggregateProviderRowsLoading = false;
+  }
 }
 
 async function refreshAggregateRoutePreview() {
@@ -406,7 +484,7 @@ function findAggregateMemberRuntimeRow(member) {
   const callId = String(member?.call_id || '').trim();
   if (!provider) return null;
   for (const item of aggregateProviderItemsCache) {
-    const itemProvider = String(item.lookup_provider || item.provider || '').trim().toLowerCase();
+    const itemProvider = aggregateProviderKey(item);
     if (itemProvider !== provider) continue;
     for (const row of Array.isArray(item.rows) ? item.rows : []) {
       const rowCallId = String(row.call_id || '').trim();
@@ -445,17 +523,23 @@ function renderAggregateAliasList() {
   root.innerHTML = aggregateItemsCache.map((item, index) => {
     const aliasId = String(item.alias_id || '').trim();
     const count = Number(item.member_count || 0);
+    const enabled = item.enabled !== false;
     const isActive = aliasId === activeAggregateAliasId;
     const aliasPending = aggregateAliasPendingIds.has(aliasId);
     const controlsDisabled = hasAggregatePendingWork() ? 'disabled' : '';
+    const toggleLabel = enabled
+      ? (getLanguage() === 'zh' ? '禁用' : 'Disable')
+      : (getLanguage() === 'zh' ? '启用' : 'Enable');
     return `
-      <div class="aggregate-alias-row ${isActive ? 'is-active' : ''} ${aliasPending ? 'is-pending' : ''}" draggable="true" data-alias-id="${escapeAggregateHtml(aliasId)}">
+      <div class="aggregate-alias-row ${isActive ? 'is-active' : ''} ${aliasPending ? 'is-pending' : ''} ${enabled ? '' : 'is-disabled'}" draggable="true" data-alias-id="${escapeAggregateHtml(aliasId)}">
         <div class="aggregate-alias-drag-handle" title="${getLanguage() === 'zh' ? '拖动排序' : 'Drag to reorder'}">☰</div>
         <button type="button" class="aggregate-alias-chip ${isActive ? 'is-active' : ''}" data-aggregate-alias="${escapeAggregateHtml(aliasId)}" ${aliasPending ? 'disabled' : ''}>
           <span>${escapeAggregateHtml(aliasId)}</span>
           <strong>${count} ${getLanguage() === 'zh' ? '个' : ''}</strong>
         </button>
         <div class="aggregate-alias-actions">
+          <button type="button" class="secondary aggregate-alias-action aggregate-alias-enable-action" data-aggregate-alias-enabled="${escapeAggregateHtml(aliasId)}" data-enabled="${enabled ? '1' : '0'}" ${controlsDisabled}>${toggleLabel}</button>
+          <button type="button" class="secondary aggregate-alias-action" data-aggregate-alias-copy="${escapeAggregateHtml(aliasId)}" ${controlsDisabled}>复制</button>
           <button type="button" class="secondary aggregate-alias-action" data-aggregate-alias-rename="${escapeAggregateHtml(aliasId)}" ${controlsDisabled}>改名</button>
           <button type="button" class="danger aggregate-alias-action" data-aggregate-alias-delete="${escapeAggregateHtml(aliasId)}" ${controlsDisabled}>删除</button>
         </div>
@@ -486,6 +570,20 @@ function renderAggregateAliasList() {
     btn.onclick = async (event) => {
       event.stopPropagation();
       await renameAggregateAlias(btn.getAttribute('data-aggregate-alias-rename') || '');
+    };
+  });
+  root.querySelectorAll('[data-aggregate-alias-copy]').forEach((btn) => {
+    btn.onclick = async (event) => {
+      event.stopPropagation();
+      await copyAggregateAlias(btn.getAttribute('data-aggregate-alias-copy') || '');
+    };
+  });
+  root.querySelectorAll('[data-aggregate-alias-enabled]').forEach((btn) => {
+    btn.onclick = async (event) => {
+      event.stopPropagation();
+      const aliasId = btn.getAttribute('data-aggregate-alias-enabled') || '';
+      const nextEnabled = btn.getAttribute('data-enabled') !== '1';
+      await toggleAggregateAliasEnabled(aliasId, nextEnabled);
     };
   });
 
@@ -615,6 +713,89 @@ async function deleteAggregateAlias(aliasId) {
   } finally {
     aggregateAliasPendingIds.delete(targetId);
     renderAggregateCurrentViews(true);
+  }
+}
+
+async function toggleAggregateAliasEnabled(aliasId, enabled) {
+  const targetId = String(aliasId || '').trim();
+  if (!targetId || aggregateAliasPendingIds.has(targetId) || hasAggregatePendingWork()) return;
+  const previousItems = cloneAggregateItems();
+  const index = aggregateItemsCache.findIndex((item) => String(item.alias_id || '').trim() === targetId);
+  if (index < 0) return;
+
+  aggregateAliasPendingIds.add(targetId);
+  aggregateItemsCache[index] = {
+    ...aggregateItemsCache[index],
+    enabled: Boolean(enabled),
+  };
+  renderAggregateCurrentViews(true);
+
+  try {
+    const res = await api('/api/aggregate-models', 'POST', {
+      action: 'set_enabled',
+      alias_id: targetId,
+      enabled: Boolean(enabled),
+    });
+    showMessage(res.message || (getLanguage() === 'zh'
+      ? `${enabled ? '已启用' : '已禁用'}聚合 ID：${targetId}。`
+      : `${enabled ? 'Enabled' : 'Disabled'} aggregate ID: ${targetId}.`));
+    await loadAggregateModels(true);
+    if (typeof loadProviderModels === 'function') void loadProviderModels();
+  } catch (error) {
+    aggregateItemsCache = previousItems;
+    renderAggregateCurrentViews(true);
+    showMessage(getLanguage() === 'zh'
+      ? `切换聚合 ID 状态失败：${error.message}`
+      : `Failed to toggle aggregate ID: ${error.message}`, true);
+  } finally {
+    aggregateAliasPendingIds.delete(targetId);
+    renderAggregateCurrentViews(true);
+  }
+}
+
+async function copyAggregateAlias(aliasId) {
+  const sourceId = String(aliasId || '').trim();
+  if (!sourceId || aggregateAliasPendingIds.has(sourceId) || hasAggregatePendingWork()) return;
+  const source = aggregateItemsCache.find((item) => String(item.alias_id || '').trim() === sourceId);
+  if (!source) {
+    showMessage(getLanguage() === 'zh' ? '未找到要复制的聚合 ID。' : 'Aggregate ID not found.', true);
+    return;
+  }
+
+  const nextId = window.prompt(
+    getLanguage() === 'zh' ? '复制为新的聚合 model ID' : 'Copy as new aggregate model ID',
+    nextAggregateCopyAliasId(sourceId)
+  );
+  if (nextId === null) return;
+  const normalized = String(nextId || '').trim();
+  if (!normalized) return;
+  if (aggregateItemsCache.some((item) => String(item.alias_id || '').trim() === normalized)) {
+    showMessage(getLanguage() === 'zh' ? `聚合 ID 已存在：${normalized}` : `Aggregate ID already exists: ${normalized}`, true);
+    return;
+  }
+
+  aggregateAliasPendingIds.add(sourceId);
+  aggregateAliasPendingIds.add(normalized);
+  renderAggregateAliasList();
+  try {
+    const res = await api('/api/aggregate-models', 'POST', {
+      action: 'copy',
+      alias_id: sourceId,
+      new_alias_id: normalized,
+    });
+    activeAggregateAliasId = normalized;
+    aggregateEditMode = false;
+    aggregateEditMembers.clear();
+    showMessage(res.message || (getLanguage() === 'zh'
+      ? `已复制 ${sourceId} 为 ${normalized}，新副本默认禁用。`
+      : `Copied ${sourceId} to ${normalized}. The copy is disabled by default.`));
+    await loadAggregateModels(true);
+  } catch (error) {
+    showMessage(getLanguage() === 'zh' ? `复制聚合 ID 失败：${error.message}` : `Failed to copy aggregate ID: ${error.message}`, true);
+  } finally {
+    aggregateAliasPendingIds.delete(sourceId);
+    aggregateAliasPendingIds.delete(normalized);
+    renderAggregateAliasList();
   }
 }
 
@@ -866,24 +1047,20 @@ function renderAggregateProviderFilters() {
     return;
   }
 
-  const providerNames = ['all', ...aggregateProviderItemsCache
-    .map((item) => String(item.lookup_provider || item.provider || '').trim().toLowerCase())
-    .filter(Boolean)
-    .filter((value, index, arr) => arr.indexOf(value) === index)];
-
-  if (!providerNames.includes(activeAggregateProviderFilter)) {
-    activeAggregateProviderFilter = 'all';
-  }
+  const realProviderNames = aggregateProviderNames();
+  const activeProvider = ensureAggregateProviderFilter();
+  const providerNames = [...realProviderNames, 'all'];
 
   root.innerHTML = providerNames.map((provider) => `
-    <button type="button" class="provider-map-tab ${provider === activeAggregateProviderFilter ? 'is-active' : ''}" data-aggregate-provider-filter="${escapeAggregateHtml(provider)}">
+    <button type="button" class="provider-map-tab ${provider === activeProvider ? 'is-active' : ''}" data-aggregate-provider-filter="${escapeAggregateHtml(provider)}">
       ${provider === 'all' ? '全部' : escapeAggregateHtml(provider)}
     </button>
   `).join('');
 
   root.querySelectorAll('[data-aggregate-provider-filter]').forEach((btn) => {
-    btn.onclick = () => {
-      activeAggregateProviderFilter = btn.getAttribute('data-aggregate-provider-filter') || 'all';
+    btn.onclick = async () => {
+      activeAggregateProviderFilter = btn.getAttribute('data-aggregate-provider-filter') || '';
+      await loadAggregateActiveProviderRows();
       renderAggregateProviderFilters();
       renderAggregateTypeFilters();
       renderAggregateScoreFilters();
@@ -902,8 +1079,9 @@ function renderAggregateTypeFilters() {
 
   const counts = new Map(AGGREGATE_TYPE_OPTIONS.map((item) => [item.id, 0]));
   let total = 0;
+  ensureAggregateProviderFilter();
   aggregateProviderItemsCache.forEach((item) => {
-    const provider = String(item.lookup_provider || item.provider || '').trim().toLowerCase();
+    const provider = aggregateProviderKey(item);
     if (activeAggregateProviderFilter !== 'all' && provider !== activeAggregateProviderFilter) return;
     (Array.isArray(item.rows) ? item.rows : []).forEach((row) => {
       total += 1;
@@ -940,10 +1118,9 @@ function renderAggregateScoreFilters() {
 
   const counts = new Map(AGGREGATE_SCORE_OPTIONS.map((item) => [item.id, 0]));
   let total = 0;
-  const scoreMap = computeAggregateScoreMap(aggregateProviderItemsCache);
-
+  ensureAggregateProviderFilter();
   aggregateProviderItemsCache.forEach((item) => {
-    const provider = String(item.lookup_provider || item.provider || '').trim().toLowerCase();
+    const provider = aggregateProviderKey(item);
     if (activeAggregateProviderFilter !== 'all' && provider !== activeAggregateProviderFilter) return;
     (Array.isArray(item.rows) ? item.rows : []).forEach((row) => {
       const types = deriveAggregateModelTypes(row);
@@ -1000,13 +1177,17 @@ function renderAggregateProviderSourceList() {
     return;
   }
 
+  if (aggregateProviderRowsLoading) {
+    root.innerHTML = `<div class="auth-empty">${getLanguage() === 'zh' ? '正在加载当前渠道模型...' : 'Loading models for this provider...'}</div>`;
+    return;
+  }
+
   const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
   const existingKeys = new Set((current?.members || []).map((member) => aggregateMemberKey(member.provider, member.upstream_id)));
-  const scoreMap = computeAggregateScoreMap(aggregateProviderItemsCache);
-
+  ensureAggregateProviderFilter();
   const visibleItems = aggregateProviderItemsCache
     .map((item) => {
-      const provider = String(item.lookup_provider || item.provider || '').trim().toLowerCase();
+      const provider = aggregateProviderKey(item);
       if (activeAggregateProviderFilter !== 'all' && provider !== activeAggregateProviderFilter) return null;
       const rows = (Array.isArray(item.rows) ? item.rows : []).filter((row) => {
         const types = deriveAggregateModelTypes(row);
@@ -1026,7 +1207,7 @@ function renderAggregateProviderSourceList() {
   }
 
   root.innerHTML = visibleItems.map((item) => {
-    const provider = String(item.lookup_provider || item.provider || '').trim().toLowerCase();
+    const provider = aggregateProviderKey(item);
     const rows = Array.isArray(item.rows) ? item.rows : [];
     const chips = rows.map((row) => {
       const upstreamId = String(row.lookup_upstream_id || row.upstream_id || '').trim();
@@ -1132,7 +1313,7 @@ async function loadAggregateModels(force = false) {
         if (aggregateSourceListLoaded) renderAggregateProviderSourceList();
       }
     });
-    if (!aggregateSourceListLoaded || force) {
+    if (!aggregateSourceListLoaded) {
       void loadAggregateSourceModels();
     }
     aggregateModelsLoaded = true;
@@ -1146,8 +1327,10 @@ async function loadAggregateSourceModels() {
   aggregateSourceListLoading = true;
   renderAggregateProviderSourceList();
   try {
-    await Promise.all([fetchAggregateProviderItems(), syncAggregateModelTestState()]);
+    await Promise.all([fetchAggregateProviderSummaries(), syncAggregateModelTestState()]);
     aggregateSourceListLoaded = true;
+    ensureAggregateProviderFilter();
+    await loadAggregateActiveProviderRows();
     renderAggregateActiveDetails();
     renderAggregateProviderFilters();
     renderAggregateTypeFilters();
