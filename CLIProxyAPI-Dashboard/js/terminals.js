@@ -5,7 +5,13 @@ let terminalOutputOffset = 0;
 let terminalOutputBuffers = {};
 let terminalOutputOffsets = {};
 let terminalPoller = null;
+let terminalPollInFlight = false;
+let terminalPollSeq = 0;
+let terminalWriteQueue = '';
+let terminalWriteScheduled = false;
+let terminalResizeTimer = null;
 let term = null;
+let fitAddon = null;
 const TERMINAL_BUFFER_LIMIT = 160000;
 
 function terminalEscape(value) {
@@ -37,6 +43,7 @@ function isTerminalVisible() {
 
 async function resizeActiveTerminal() {
   if (!activeTerminalId || !term || !isTerminalVisible()) return;
+  fitActiveTerminal();
   try {
     await api('/api/terminals/resize', 'POST', { id: activeTerminalId, rows: term.rows, cols: term.cols });
   } catch (error) {
@@ -63,11 +70,62 @@ function renderTerminalTabs() {
   }).join('');
 }
 
+function trimTerminalReplayBuffer(text) {
+  const value = String(text || '');
+  if (value.length <= TERMINAL_BUFFER_LIMIT) return value;
+  const cut = value.length - TERMINAL_BUFFER_LIMIT;
+  const newline = value.indexOf('\n', cut);
+  if (newline >= 0 && newline - cut < 4000) return value.slice(newline + 1);
+  return value.slice(cut);
+}
+
 function appendTerminalBuffer(id, text) {
   if (!id || !text) return terminalOutputBuffers[id] || '';
-  const next = `${terminalOutputBuffers[id] || ''}${text}`;
-  terminalOutputBuffers[id] = next.length > TERMINAL_BUFFER_LIMIT ? next.slice(-TERMINAL_BUFFER_LIMIT) : next;
+  terminalOutputBuffers[id] = trimTerminalReplayBuffer(`${terminalOutputBuffers[id] || ''}${text}`);
   return terminalOutputBuffers[id];
+}
+
+function queueTerminalWrite(text) {
+  if (!term || !text) return;
+  terminalWriteQueue += text;
+  if (terminalWriteScheduled) return;
+  terminalWriteScheduled = true;
+  requestAnimationFrame(() => {
+    const chunk = terminalWriteQueue;
+    terminalWriteQueue = '';
+    terminalWriteScheduled = false;
+    if (chunk && term) term.write(chunk);
+  });
+}
+
+function clearTerminalWriteQueue() {
+  terminalWriteQueue = '';
+  terminalWriteScheduled = false;
+}
+
+function resetTerminalWithReplay(text = '') {
+  if (!term) return;
+  clearTerminalWriteQueue();
+  term.reset();
+  if (text) queueTerminalWrite(text);
+}
+
+function fitActiveTerminal() {
+  if (!term || !fitAddon || !isTerminalVisible()) return false;
+  try {
+    fitAddon.fit();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function scheduleTerminalResize(delay = 0) {
+  if (terminalResizeTimer) clearTimeout(terminalResizeTimer);
+  terminalResizeTimer = setTimeout(() => {
+    terminalResizeTimer = null;
+    requestAnimationFrame(() => { void resizeActiveTerminal(); });
+  }, delay);
 }
 
 function focusTerminal() {
@@ -83,8 +141,7 @@ function renderTerminalState() {
   setTerminalText('terminal-pid-label', `PID: ${item?.pid || '-'}`);
   setTerminalText('terminal-cwd-label', item?.cwd || document.getElementById('terminal-cwd-input')?.value || '-');
   if (!item && term) {
-    term.reset();
-    term.write('正在准备交互终端...');
+    resetTerminalWithReplay('正在准备交互终端...');
   }
 }
 
@@ -93,27 +150,32 @@ function stopTerminalPolling() {
     clearInterval(terminalPoller);
     terminalPoller = null;
   }
+  terminalPollSeq += 1;
+  terminalPollInFlight = false;
 }
 
 async function pollTerminalOutput() {
-  if (!activeTerminalId) return;
+  if (!activeTerminalId || terminalPollInFlight) return;
   const id = activeTerminalId;
+  const seq = ++terminalPollSeq;
+  terminalPollInFlight = true;
   try {
     const offset = terminalOutputOffsets[id] ?? terminalOutputOffset;
     const data = await api(`/api/terminals/output?id=${encodeURIComponent(id)}&offset=${offset}`);
+    if (id !== activeTerminalId || seq !== terminalPollSeq) return;
     terminalOutputOffset = Number(data.offset || terminalOutputOffset || 0);
     terminalOutputOffsets[id] = terminalOutputOffset;
-    
+
     if (data.output) {
       appendTerminalBuffer(id, data.output);
-      if (id === activeTerminalId && term) {
-        term.write(data.output);
+      if (id === activeTerminalId) {
+        queueTerminalWrite(data.output);
       }
     }
-    
+
     const item = activeTerminal();
     if (item) item.pty = Boolean(data.pty);
-    
+
     if (!data.running) {
       terminalItems = terminalItems.filter(item => item.id !== id);
       delete terminalOutputBuffers[id];
@@ -123,18 +185,17 @@ async function pollTerminalOutput() {
       stopTerminalPolling();
       renderTerminalState();
       if (activeTerminalId) {
-        if (term) {
-          term.reset();
-          term.write(terminalOutputBuffers[activeTerminalId] || '');
-        }
+        resetTerminalWithReplay(terminalOutputBuffers[activeTerminalId] || '');
         startTerminalPolling();
       }
     }
   } catch (error) {
-    stopTerminalPolling();
-    if (term) {
-      term.write(`\r\n[读取终端失败: ${error.message || error}]\r\n`);
+    if (id === activeTerminalId) {
+      stopTerminalPolling();
+      queueTerminalWrite(`\r\n[读取终端失败: ${error.message || error}]\r\n`);
     }
+  } finally {
+    if (seq === terminalPollSeq) terminalPollInFlight = false;
   }
 }
 
@@ -149,13 +210,12 @@ async function selectTerminalPanel(id) {
   activeTerminalId = id;
   terminalOutputOffset = terminalOutputOffsets[id] || 0;
   if (term) {
-    term.reset();
-    term.write(terminalOutputBuffers[id] || '');
+    resetTerminalWithReplay(terminalOutputBuffers[id] || '');
   }
   renderTerminalState();
   startTerminalPolling();
   focusTerminal();
-  await resizeActiveTerminal();
+  scheduleTerminalResize();
 }
 
 function initXterm() {
@@ -191,11 +251,15 @@ function initXterm() {
     fontFamily: 'Consolas, "Cascadia Mono", "Courier New", monospace',
     convertEol: true,
     scrollback: 5000,
-    cols: 120,
-    rows: 30,
   });
-  
+
+  if (window.FitAddon?.FitAddon) {
+    fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+  }
+
   term.open(container);
+  scheduleTerminalResize();
   
   term.onData(data => {
     void writeTerminalRaw(data);
@@ -229,16 +293,16 @@ async function loadTerminalPanel(force = false) {
       terminalOutputOffset = terminalOutputOffsets[activeTerminalId] || 0;
     }
     if (activeTerminalId && term) {
-      term.reset();
-      term.write(terminalOutputBuffers[activeTerminalId] || '');
+      resetTerminalWithReplay(terminalOutputBuffers[activeTerminalId] || '');
     }
     renderTerminalState();
     if (activeTerminalId) startTerminalPolling();
     focusTerminal();
+    scheduleTerminalResize();
     terminalPanelLoaded = true;
   } catch (error) {
     if (term) {
-      term.write(`加载终端失败: ${error.message || error}`);
+      queueTerminalWrite(`加载终端失败: ${error.message || error}`);
     }
   }
 }
@@ -256,12 +320,12 @@ async function openTerminalPanel(kind) {
     terminalOutputBuffers[activeTerminalId] = '';
     terminalOutputOffsets[activeTerminalId] = 0;
     if (term) {
-      term.reset();
+      resetTerminalWithReplay('');
     }
     renderTerminalState();
     startTerminalPolling();
     focusTerminal();
-    await resizeActiveTerminal();
+    scheduleTerminalResize();
   } catch (error) {
     showMessage(error.message || '打开终端失败。', true);
   }
@@ -278,8 +342,7 @@ async function closeTerminalPanel(id) {
       activeTerminalId = terminalItems[0]?.id || '';
       terminalOutputOffset = terminalOutputOffsets[activeTerminalId] || 0;
       if (term) {
-        term.reset();
-        term.write(activeTerminalId ? (terminalOutputBuffers[activeTerminalId] || '') : '');
+        resetTerminalWithReplay(activeTerminalId ? (terminalOutputBuffers[activeTerminalId] || '') : '');
       }
     }
     renderTerminalState();
@@ -301,7 +364,7 @@ async function writeTerminalRaw(text) {
     await api('/api/terminals/input', 'POST', { id: activeTerminalId, text });
   } catch (error) {
     if (term) {
-      term.write(`\r\n[写入终端失败: ${error.message || error}]\r\n`);
+      queueTerminalWrite(`\r\n[写入终端失败: ${error.message || error}]\r\n`);
     }
   }
 }
@@ -310,6 +373,10 @@ document.addEventListener('click', (event) => {
   if (event.target?.closest?.('.terminal-control-panel')) return;
   if (!event.target?.closest?.('.terminal-output, .terminal-body')) return;
   focusTerminal();
+});
+
+window.addEventListener('resize', () => {
+  if (isTerminalVisible()) scheduleTerminalResize(120);
 });
 
 

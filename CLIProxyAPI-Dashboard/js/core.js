@@ -93,6 +93,34 @@ function toggleTheme() {
   applyTheme();
 }
 
+const DASHBOARD_SIDEBAR_COLLAPSED_KEY = 'dashboard_sidebar_collapsed_v1';
+
+function isSidebarCollapsed() {
+  return localStorage.getItem(DASHBOARD_SIDEBAR_COLLAPSED_KEY) === '1';
+}
+
+function applySidebarCollapsed() {
+  const sidebar = document.getElementById('app-sidebar');
+  const shell = document.querySelector('.app-shell');
+  const toggle = document.getElementById('sidebar-collapse-toggle');
+  const collapsed = isSidebarCollapsed();
+
+  sidebar?.classList.toggle('sidebar-collapsed', collapsed);
+  shell?.classList.toggle('sidebar-is-collapsed', collapsed);
+
+  if (toggle) {
+    toggle.textContent = collapsed ? '›' : '‹';
+    toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    toggle.setAttribute('title', collapsed ? '展开侧栏' : '折叠侧栏');
+  }
+}
+
+function toggleSidebarCollapsed() {
+  localStorage.setItem(DASHBOARD_SIDEBAR_COLLAPSED_KEY, isSidebarCollapsed() ? '0' : '1');
+  applySidebarCollapsed();
+  window.requestAnimationFrame(layoutBubbleNav);
+}
+
 function getNavGroups() {
   return {
     runtime: ['account', 'chat', 'requests', 'model-stats', 'clients', 'auth-health'],
@@ -398,25 +426,53 @@ function initBubbleNavDrag() {
   window.requestAnimationFrame(layoutBubbleNav);
 }
 
+const DASHBOARD_NAV_COLLAPSED_GROUPS_KEY = 'dashboard_nav_collapsed_groups_v1';
+
+function getCollapsedNavGroups() {
+  try {
+    const raw = localStorage.getItem(DASHBOARD_NAV_COLLAPSED_GROUPS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function setCollapsedNavGroups(list) {
+  localStorage.setItem(DASHBOARD_NAV_COLLAPSED_GROUPS_KEY, JSON.stringify(list));
+}
+
+function toggleNavGroup(group) {
+  const el = document.getElementById('navgroup-' + group);
+  if (!el) return;
+  const collapsed = el.classList.toggle('is-collapsed');
+  const list = getCollapsedNavGroups();
+  const idx = list.indexOf(group);
+  if (collapsed && idx < 0) list.push(group);
+  if (!collapsed && idx >= 0) list.splice(idx, 1);
+  setCollapsedNavGroups(list);
+}
+
+function applyNavGroupCollapsed() {
+  const collapsed = getCollapsedNavGroups();
+  document.querySelectorAll('.nav-group').forEach(el => {
+    const group = el.dataset.group;
+    el.classList.toggle('is-collapsed', collapsed.includes(group));
+  });
+}
+
 function updateGroupNavigation(activeGroup) {
-  document.querySelectorAll('.group-pill').forEach(el => {
-    const key = String(el.id || '').replace(/^tab-/, '').trim();
-    const isGroupTab = key.endsWith('-group');
-    if (!isGroupTab) return;
-    const groupKey = key.replace(/-group$/, '');
-    el.classList.toggle('active', groupKey === activeGroup);
-  });
+  // In the new grouped sidebar all groups are always visible.
+  // Just highlight the active nav button - no hiding needed.
   document.querySelectorAll('.top-nav-btn').forEach(el => {
-    const group = String(el.dataset.group || '').trim();
-    el.classList.toggle('nav-hidden', group !== activeGroup);
+    el.classList.remove('nav-hidden');
   });
-  window.requestAnimationFrame(layoutBubbleNav);
 }
 
 function showGroup(group) {
+  // No-op in grouped sidebar: all groups are visible simultaneously.
+  // Switch to the first section of the group if current section is in a different group.
   const value = String(group || '').trim() || 'runtime';
   persistActiveGroup(value);
-  updateGroupNavigation(value);
   const groups = getNavGroups();
   const activeSection = getActiveSection();
   if (!groups[value] || !groups[value].includes(activeSection)) {

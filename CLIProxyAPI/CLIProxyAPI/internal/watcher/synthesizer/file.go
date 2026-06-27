@@ -148,8 +148,8 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) []
 		return nil
 	}
 	provider := strings.ToLower(t)
-	// Normalize generic "oauth" type to the actual provider name.
-	if provider == "oauth" {
+	// Normalize generic "oauth" or "api_key" type to the actual provider name.
+	if provider == "oauth" || provider == "api_key" {
 		if p, ok := metadata["provider"].(string); ok && p != "" {
 			provider = strings.ToLower(strings.TrimSpace(p))
 		}
@@ -214,6 +214,40 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) []
 		Metadata:  metadata,
 		CreatedAt: now,
 		UpdatedAt: now,
+	}
+
+	// For API key based credentials of custom providers, populate key attributes for the executor.
+	if strings.ToLower(t) == "api_key" {
+		var apiKey, baseURL string
+		if content, ok := metadata["content"].(map[string]any); ok && content != nil {
+			if k, ok := content["api_key"].(string); ok && k != "" {
+				apiKey = k
+			}
+			if b, ok := content["base_url"].(string); ok && b != "" {
+				baseURL = b
+			}
+		}
+		if apiKey == "" {
+			if k, ok := metadata["api_key"].(string); ok && k != "" {
+				apiKey = k
+			}
+		}
+		if baseURL == "" {
+			if b, ok := metadata["base_url"].(string); ok && b != "" {
+				baseURL = b
+			}
+		}
+		if a.Attributes == nil {
+			a.Attributes = make(map[string]string)
+		}
+		if apiKey != "" {
+			a.Attributes["api_key"] = apiKey
+		}
+		if baseURL != "" {
+			a.Attributes["base_url"] = baseURL
+		}
+		a.Attributes["compat_name"] = provider
+		a.Attributes["provider_key"] = provider
 	}
 	// Read priority from auth file.
 	if rawPriority, ok := metadata["priority"]; ok {

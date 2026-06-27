@@ -4,63 +4,91 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CLIProxyAPI Codex Dashboard</title>
-  <link rel="stylesheet" href="/dashboard.css?v=20260608-dark-bubble" />
+  <link rel="stylesheet" href="/dashboard.css?v=20260610-smooth-accordion" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
 </head>
 <body>
 <div class="app-shell">
-  <aside class="sidebar">
+  <aside class="sidebar" id="app-sidebar">
     <div class="sidebar-block brand-block">
-      <div class="brand-title">CLIProxyAPI</div>
-      <div class="brand-sub" data-i18n="hero.title">CLIProxyAPI Codex Dashboard</div>
+      <div>
+        <div class="brand-title">CLIProxyAPI</div>
+        <div class="brand-sub" data-i18n="hero.title">CLIProxyAPI Codex Dashboard</div>
+      </div>
+      <button class="sidebar-collapse-toggle" id="sidebar-collapse-toggle" type="button" onclick="toggleSidebarCollapsed()" aria-expanded="true" title="折叠侧栏">‹</button>
     </div>
 
     <div class="sidebar-block nav-block" id="sidebar-nav-list">
-      <div class="group-pill-bar">
-        <button class="group-pill active" id="tab-runtime-group" onclick="showGroup('runtime')">
-          <span data-i18n="nav.group.runtime">运行</span>
-        </button>
-        <button class="group-pill" id="tab-config-group" onclick="showGroup('config')">
-          <span data-i18n="nav.group.config">配置</span>
-        </button>
-        <button class="group-pill" id="tab-access-group" onclick="showGroup('access')">
-          <span data-i18n="nav.group.access">接入</span>
-        </button>
-        <button class="group-pill" id="tab-system-group" onclick="showGroup('system')">
-          <span data-i18n="nav.group.system">系统</span>
-        </button>
-      </div>
+      <nav class="sidebar-grouped-nav" id="top-page-nav-list">
 
-      <div class="workspace-tabs sidebar-bubble-nav" id="top-page-nav-list">
-        <button class="nav-pill top-nav-btn active" id="tab-account" data-group="runtime" onclick="showSection('account')"><span data-i18n="nav.account">账号</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-requests" data-group="runtime" onclick="showSection('requests')"><span data-i18n="nav.requests">请求</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-model-stats" data-group="runtime" onclick="showSection('model-stats')"><span data-i18n="nav.modelStats">模型统计</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-clients" data-group="runtime" onclick="showSection('clients')"><span data-i18n="nav.clients">客户端</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-auth-health" data-group="runtime" onclick="showSection('auth-health')"><span data-i18n="nav.authHealth">认证健康</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-providers" data-group="config" onclick="showSection('providers')"><span data-i18n="nav.providers">提供方</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-aggregates" data-group="config" onclick="showSection('aggregates')"><span data-i18n="nav.aggregates">聚合</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-model-map" data-group="config" onclick="showSection('model-map')"><span data-i18n="nav.modelMap">映射</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-api-key-intake" data-group="config" onclick="showSection('api-key-intake')"><span>API Key 接入</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-auths" data-group="config" onclick="showSection('auths')"><span data-i18n="nav.auths">OAuth</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-network-access" data-group="system" onclick="showSection('network-access')"><span data-i18n="nav.networkAccess">网络接入</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-advanced-config" data-group="system" onclick="showSection('advanced-config')"><span data-i18n="nav.advancedConfig">高级配置</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-cloaking-config" data-group="system" onclick="showSection('cloaking-config')"><span data-i18n="nav.cloakingConfig">请求伪装</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-amp-config" data-group="system" onclick="showSection('amp-config')"><span data-i18n="nav.ampConfig">AMP</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-firewall-access" data-group="access" onclick="showSection('firewall-access')"><span data-i18n="nav.firewallAccess">端口放行</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-terminals" data-group="access" onclick="showSection('terminals')"><span data-i18n="nav.terminals">终端</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-external-access" data-group="access" onclick="showSection('external-access')"><span data-i18n="nav.externalAccess">外部 IP</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-model-proxy" data-group="system" onclick="showSection('model-proxy')"><span data-i18n="nav.modelProxy">模型代理</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-chat" data-group="runtime" onclick="showSection('chat')"><span data-i18n="nav.chat">聊天</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-tools" data-group="access" onclick="showSection('tools')"><span data-i18n="nav.tools">工具</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-virtual-keys" data-group="access" onclick="showSection('virtual-keys')"><span data-i18n="nav.virtualKeys">密钥管理</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-cooldown" data-group="system" onclick="showSection('cooldown')"><span data-i18n="nav.cooldown">冷却状态</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-storage-config" data-group="system" onclick="showSection('storage-config')"><span data-i18n="nav.storageConfig">存储后端</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-home-config" data-group="system" onclick="showSection('home-config')"><span data-i18n="nav.homeConfig">Home</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-docker-deploy" data-group="system" onclick="showSection('docker-deploy')"><span data-i18n="nav.dockerDeploy">Docker</span></button>
-        <button class="nav-pill top-nav-btn" id="tab-doc" data-group="access" onclick="showSection('doc')"><span data-i18n="nav.doc">文档</span></button>
-      </div>
-      <div class="bubble-resize-rail" id="bubble-nav-resize-rail" title="拖动调整气泡区域大小"></div>
+        <!-- 运行 -->
+        <div class="nav-group" id="navgroup-runtime" data-group="runtime">
+          <button class="nav-group-header" onclick="toggleNavGroup('runtime')" type="button">
+            <span class="nav-group-icon">▾</span>
+            <span class="nav-group-label" data-i18n="nav.group.runtime">运行</span>
+          </button>
+          <div class="nav-group-items-wrap"><div class="nav-group-items">
+            <button class="nav-pill top-nav-btn active" id="tab-account" data-group="runtime" onclick="showSection('account')"><span data-i18n="nav.account">账号</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-chat" data-group="runtime" onclick="showSection('chat')"><span data-i18n="nav.chat">聊天</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-requests" data-group="runtime" onclick="showSection('requests')"><span data-i18n="nav.requests">请求</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-model-stats" data-group="runtime" onclick="showSection('model-stats')"><span data-i18n="nav.modelStats">模型统计</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-clients" data-group="runtime" onclick="showSection('clients')"><span data-i18n="nav.clients">客户端</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-auth-health" data-group="runtime" onclick="showSection('auth-health')"><span data-i18n="nav.authHealth">认证健康</span></button>
+          </div></div>
+        </div>
+
+        <!-- 配置 -->
+        <div class="nav-group" id="navgroup-config" data-group="config">
+          <button class="nav-group-header" onclick="toggleNavGroup('config')" type="button">
+            <span class="nav-group-icon">▾</span>
+            <span class="nav-group-label" data-i18n="nav.group.config">配置</span>
+          </button>
+          <div class="nav-group-items-wrap"><div class="nav-group-items">
+            <button class="nav-pill top-nav-btn" id="tab-providers" data-group="config" onclick="showSection('providers')"><span data-i18n="nav.providers">提供方</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-aggregates" data-group="config" onclick="showSection('aggregates')"><span data-i18n="nav.aggregates">聚合</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-model-map" data-group="config" onclick="showSection('model-map')"><span data-i18n="nav.modelMap">映射</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-api-key-intake" data-group="config" onclick="showSection('api-key-intake')"><span>API Key 接入</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-auths" data-group="config" onclick="showSection('auths')"><span data-i18n="nav.auths">OAuth</span></button>
+          </div></div>
+        </div>
+
+        <!-- 接入 -->
+        <div class="nav-group" id="navgroup-access" data-group="access">
+          <button class="nav-group-header" onclick="toggleNavGroup('access')" type="button">
+            <span class="nav-group-icon">▾</span>
+            <span class="nav-group-label" data-i18n="nav.group.access">接入</span>
+          </button>
+          <div class="nav-group-items-wrap"><div class="nav-group-items">
+            <button class="nav-pill top-nav-btn" id="tab-firewall-access" data-group="access" onclick="showSection('firewall-access')"><span data-i18n="nav.firewallAccess">端口放行</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-terminals" data-group="access" onclick="showSection('terminals')"><span data-i18n="nav.terminals">终端</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-external-access" data-group="access" onclick="showSection('external-access')"><span data-i18n="nav.externalAccess">外部 IP</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-tools" data-group="access" onclick="showSection('tools')"><span data-i18n="nav.tools">工具</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-virtual-keys" data-group="access" onclick="showSection('virtual-keys')"><span data-i18n="nav.virtualKeys">密钥管理</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-doc" data-group="access" onclick="showSection('doc')"><span data-i18n="nav.doc">文档</span></button>
+          </div></div>
+        </div>
+
+        <!-- 系统 -->
+        <div class="nav-group" id="navgroup-system" data-group="system">
+          <button class="nav-group-header" onclick="toggleNavGroup('system')" type="button">
+            <span class="nav-group-icon">▾</span>
+            <span class="nav-group-label" data-i18n="nav.group.system">系统</span>
+          </button>
+          <div class="nav-group-items-wrap"><div class="nav-group-items">
+            <button class="nav-pill top-nav-btn" id="tab-network-access" data-group="system" onclick="showSection('network-access')"><span data-i18n="nav.networkAccess">网络接入</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-model-proxy" data-group="system" onclick="showSection('model-proxy')"><span data-i18n="nav.modelProxy">模型代理</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-cooldown" data-group="system" onclick="showSection('cooldown')"><span data-i18n="nav.cooldown">冷却状态</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-storage-config" data-group="system" onclick="showSection('storage-config')"><span data-i18n="nav.storageConfig">存储后端</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-home-config" data-group="system" onclick="showSection('home-config')"><span data-i18n="nav.homeConfig">Home</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-docker-deploy" data-group="system" onclick="showSection('docker-deploy')"><span data-i18n="nav.dockerDeploy">Docker</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-advanced-config" data-group="system" onclick="showSection('advanced-config')"><span data-i18n="nav.advancedConfig">高级配置</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-cloaking-config" data-group="system" onclick="showSection('cloaking-config')"><span data-i18n="nav.cloakingConfig">请求伪装</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-amp-config" data-group="system" onclick="showSection('amp-config')"><span data-i18n="nav.ampConfig">AMP</span></button>
+          </div></div>
+        </div>
+
+      </nav>
     </div>
 
     <div class="sidebar-block sidebar-controls">
@@ -78,16 +106,16 @@
 </div>
 
 <script src="/js/i18n.js?v=20260527-firewall-page"></script>
-<script src="/js/core.js?v=20260608-ip-helper-home-2"></script>
+<script src="/js/core.js?v=20260610-grouped-sidebar"></script>
 <script src="/js/status.js?v=20260608-openclaw-control"></script>
 <script src="/js/overview-panel.js?v=20260504-2"></script>
 <script src="/js/auth.js?v=20260511-static-entry"></script>
 <script src="/js/providers.js?v=20260504-2"></script>
 <script src="/js/api-key-intake.js?v=20260608-provider-sync"></script>
-<script src="/js/aggregates.js?v=20260608-copy-alias"></script>
+<script src="/js/aggregates.js?v=20260608-scroll-no-restart"></script>
 <script src="/js/model-proxies.js?v=20260504-2"></script>
-<script src="/js/requests-panel.js?v=20260507-requests-tight-hide-models"></script>
-<script src="/js/clients-panel.js?v=20260504-2"></script>
+<script src="/js/requests-panel.js?v=20260608-request-model-placeholder"></script>
+<script src="/js/clients-panel.js?v=20260608-ip-clients-redesign"></script>
 <script src="/js/models-panel.js?v=20260528-provider-only"></script>
 <script src="/js/auth-health-panel.js?v=20260504-2"></script>
 <script src="/js/cooldown-panel.js?v=20260504-2"></script>
@@ -106,7 +134,7 @@
 <script src="/js/storage-config.js?v=20260522-1"></script>
 <script src="/js/home-config.js?v=20260522-1"></script>
 <script src="/js/docker-deploy.js?v=20260522-1"></script>
-<script src="/js/boot.js?v=20260508-hash-section"></script>
+<script src="/js/boot.js?v=20260610-grouped-sidebar"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="/js/chat.js?v=20260511-image-mode"></script>

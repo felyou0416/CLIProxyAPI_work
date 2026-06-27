@@ -384,6 +384,43 @@ def handle_post(handler, parsed, data):
             'runtime_validation': rebuild.get('validation'),
         })
         return True
+    if parsed.path == '/api/aggregate-models/apply-runtime':
+        try:
+            rebuild = rebuild_runtime_config_from_state(load_state())
+            if rebuild.get('reason') == 'validation_failed':
+                message = rebuild.get('error') or (rebuild.get('validation') or {}).get('message') or 'Runtime config validation failed.'
+                send_json(handler, {
+                    'ok': False,
+                    'message': f'Failed to rebuild aggregate runtime config: {message}',
+                    'runtime_rebuilt': False,
+                    'runtime_validation': rebuild.get('validation'),
+                }, status=500)
+                return True
+            status_after_apply = current_status()
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': f'Failed to rebuild aggregate runtime config: {e}'}, status=500)
+            return True
+
+        rebuilt = bool(rebuild.get('rebuilt'))
+        proxy_running = bool(status_after_apply.get('proxy_running'))
+        if not rebuilt:
+            message = 'No storage/auth account files to rebuild right now.'
+        elif proxy_running:
+            message = 'Aggregate runtime config rebuilt. Running proxy will hot-reload the updated config.'
+        else:
+            message = 'Aggregate runtime config rebuilt. Start proxy to use the updated config.'
+        send_json(handler, {
+            'ok': True,
+            'message': message,
+            'runtime_rebuilt': rebuilt,
+            'runtime_applied': False,
+            'proxy_restarted': False,
+            'proxy_running': proxy_running,
+            'restart_required': False,
+            'apply_result': {'applied': False, 'restarted': False},
+            'runtime_validation': rebuild.get('validation'),
+        })
+        return True
     if parsed.path == '/api/aggregate-models':
         if not isinstance(data, dict):
             send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
@@ -448,33 +485,17 @@ def handle_post(handler, parsed, data):
         except Exception as e:
             send_json(handler, {'ok': False, 'message': f'Failed to update aggregate IDs: {e}'}, status=500)
             return True
-        status_before_apply = current_status()
-        rebuild = rebuild_runtime_config_from_state(load_state())
-        apply_result = {'applied': False, 'restarted': False}
-        skip_restart = bool(data.get('skip_restart')) if isinstance(data, dict) else False
-        if not rebuild.get('rebuilt'):
-            message += '. No storage/auth account files to rebuild right now.'
-        elif status_before_apply.get('proxy_running') and not skip_restart:
-            apply_result = restart_proxy()
-            apply_result['applied'] = bool(apply_result.get('ok'))
-            apply_result['restarted'] = bool(apply_result.get('ok'))
-            if apply_result.get('ok'):
-                message += '. Runtime applied to running proxy.'
-            else:
-                message += f'. Runtime config was rebuilt, but proxy restart failed: {apply_result.get("message") or "unknown error"}'
-        elif skip_restart:
-            message += '. Runtime config rebuilt; restart skipped.'
-        else:
-            message += '. Runtime config rebuilt; start proxy to apply.'
+        message += '. Runtime config not rebuilt; click Apply Runtime on the aggregate page when ready.'
         send_json(handler, {
             'ok': True,
             'message': message,
             'item': item,
-            'runtime_rebuilt': bool(rebuild.get('rebuilt')),
-            'runtime_applied': bool(apply_result.get('applied')),
-            'proxy_restarted': bool(apply_result.get('restarted')),
-            'apply_result': apply_result,
-            'runtime_validation': rebuild.get('validation'),
+            'runtime_rebuilt': False,
+            'runtime_applied': False,
+            'proxy_restarted': False,
+            'restart_required': False,
+            'apply_result': {'applied': False, 'restarted': False},
+            'runtime_validation': None,
         })
         return True
     if parsed.path == '/api/test-provider-models':

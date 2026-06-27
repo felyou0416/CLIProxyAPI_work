@@ -53,10 +53,16 @@ def _append_output(terminal_id, text):
         item = terminal_processes.get(terminal_id)
         if not item:
             return
-        item['output'] = (item.get('output') or '') + text
-        if len(item['output']) > MAX_OUTPUT_CHARS:
-            item['output'] = item['output'][-MAX_OUTPUT_CHARS:]
+        chunks = item.setdefault('output_chunks', [])
+        chunks.append(text)
+        item['output_size'] = int(item.get('output_size') or 0) + len(text)
+        item.setdefault('output_base_offset', 0)
+        while chunks and item['output_size'] > MAX_OUTPUT_CHARS:
+            removed = chunks.pop(0)
+            item['output_size'] -= len(removed)
+            item['output_base_offset'] += len(removed)
             item['trimmed'] = True
+        item['output'] = ''.join(chunks)
 
 
 def _reader_thread(terminal_id, proc):
@@ -182,6 +188,9 @@ def open_terminal(kind='powershell', cwd=None):
         'cwd': workdir,
         'process': proc,
         'created_at': time.time(),
+        'output_chunks': [output] if output else [],
+        'output_base_offset': 0,
+        'output_size': len(output),
         'output': output,
         'trimmed': False,
         'pty': is_pty,
@@ -214,15 +223,36 @@ def read_terminal(terminal_id, offset=0):
     item = terminal_processes.get(key)
     if not item:
         raise ValueError('Terminal not found.')
-    output = item.get('output') or ''
-    start = max(0, min(int(offset or 0), len(output)))
+    with terminal_lock:
+        chunks = item.get('output_chunks')
+        if chunks is None:
+            output = item.get('output') or ''
+            chunks = [output] if output else []
+            item['output_chunks'] = chunks
+            item['output_base_offset'] = 0
+            item['output_size'] = len(output)
+        base_offset = int(item.get('output_base_offset') or 0)
+        output = ''.join(chunks)
+        end_offset = base_offset + len(output)
+        try:
+            requested_offset = max(0, int(offset or 0))
+        except (TypeError, ValueError):
+            requested_offset = 0
+        was_trimmed = requested_offset < base_offset or bool(item.get('trimmed'))
+        if requested_offset < base_offset:
+            start = 0
+        else:
+            start = max(0, min(requested_offset - base_offset, len(output)))
+        result_output = output[start:]
+        proc = item.get('process')
+        pty = bool(item.get('pty'))
     return {
         'id': key,
-        'output': output[start:],
-        'offset': len(output),
-        'running': _terminal_alive(item.get('process')),
-        'trimmed': bool(item.get('trimmed')),
-        'pty': bool(item.get('pty')),
+        'output': result_output,
+        'offset': end_offset,
+        'running': _terminal_alive(proc),
+        'trimmed': was_trimmed,
+        'pty': pty,
     }
 
 

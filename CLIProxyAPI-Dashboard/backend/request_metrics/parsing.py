@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import re
 import threading
@@ -21,6 +22,14 @@ _AUTHORIZATION_RE = re.compile(r'^Authorization:\s*Bearer\s+(.+)$', re.MULTILINE
 _SECTION_HEADER_RE = re.compile(r'^=== .+ ===$', re.MULTILINE)
 _API_REQUEST_HEADER_RE = re.compile(r'^=== API REQUEST(?:\s+\d+)? ===$', re.MULTILINE)
 _API_REQUEST_AUTH_PROVIDER_RE = re.compile(r'^Auth:\s*provider=([^,\s]+)', re.MULTILINE)
+# Prefer full proxy chains over single-hop headers so the dashboard shows the original client.
+_PROXY_HEADER_PRIORITY = (
+    'x-forwarded-for',
+    'cf-connecting-ip',
+    'true-client-ip',
+    'x-real-ip',
+    'x-client-ip',
+)
 
 
 _PRECISE_EVENT_KEYS = (
@@ -51,6 +60,72 @@ _OBSERVABILITY_EVENT_LIMIT = 300
 _OBSERVABILITY_SUMMARY_LIMIT = 200
 _REQUEST_LOG_KEEP_FILES = 50
 _REQUEST_EVENT_ARCHIVE_KEEP_ENTRIES = 2000
+
+
+def _normalize_client_ip(raw: str) -> str:
+    value = str(raw or '').strip().strip('"[]')
+    if not value:
+        return ''
+    if value.startswith('::ffff:'):
+        value = value.rsplit(':', 1)[-1]
+    if '%' in value:
+        value = value.split('%', 1)[0]
+    try:
+        parsed = ipaddress.ip_address(value)
+    except ValueError:
+        if ':' in value:
+            host = value.rsplit(':', 1)[0].strip('[]')
+            try:
+                parsed = ipaddress.ip_address(host)
+            except ValueError:
+                return ''
+        else:
+            return ''
+    if getattr(parsed, 'ipv4_mapped', None):
+        parsed = parsed.ipv4_mapped
+    return str(parsed)
+
+
+def _first_forwarded_ip(raw: str) -> str:
+    for part in str(raw or '').split(','):
+        ip = _normalize_client_ip(part)
+        if ip:
+            return ip
+    return ''
+
+
+def _extract_headers(content: str) -> dict[str, list[str]]:
+    raw = str(content or '')
+    marker = '=== HEADERS ===\n'
+    if marker not in raw:
+        return {}
+    section = raw.split(marker, 1)[1]
+    next_header = _SECTION_HEADER_RE.search(section)
+    if next_header:
+        section = section[:next_header.start()]
+    headers: dict[str, list[str]] = {}
+    for line in section.splitlines():
+        if ':' not in line:
+            continue
+        key, value = line.split(':', 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key and value:
+            headers.setdefault(key, []).append(value)
+    return headers
+
+
+def _extract_client_ip_from_headers(content: str) -> tuple[str, str]:
+    headers = _extract_headers(content)
+    for header in _PROXY_HEADER_PRIORITY:
+        values = headers.get(header) or []
+        for value in values:
+            ip = _first_forwarded_ip(value) if header == 'x-forwarded-for' else _normalize_client_ip(value)
+            if ip:
+                return ip, header
+    return '', ''
+
+
 
 
 def _safe_timestamp(raw: str | None, fallback: int = 0) -> int:
@@ -400,9 +475,12 @@ def _parse_request_log_file(path: Path, content: str, stat, error_log: bool = Fa
         if message_match:
             error_message = str(message_match.group(1) or '').strip()
 
+    client_ip, client_ip_source = _extract_client_ip_from_headers(content)
+
     return {
         'timestamp': _safe_timestamp(request_time_match.group(1) if request_time_match else '', int(stat.st_mtime)),
-        'client_ip': '',
+        'client_ip': client_ip,
+        'client_ip_source': client_ip_source,
         'path': _normalize_path(url_match.group(1) if url_match else path.stem),
         'requested_model': requested_model,
         'status_code': status_code,

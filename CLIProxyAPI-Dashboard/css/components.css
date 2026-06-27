@@ -965,7 +965,7 @@ pre,
   .sidebar {
     position: relative;
     height: auto;
-    max-height: none;
+    max-height: 320px;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }

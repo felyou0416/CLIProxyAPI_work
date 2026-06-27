@@ -1025,10 +1025,67 @@ func (h *Handler) buildAuthFromFileData(path string, data []byte) (*coreauth.Aut
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		return nil, fmt.Errorf("invalid auth file: %w", err)
 	}
-	provider, _ := metadata["type"].(string)
+	// Support new auth file format where type/provider are nested inside "content".
+	// Promote relevant fields to root level so existing logic handles them transparently.
+	if content, ok := metadata["content"].(map[string]any); ok && content != nil {
+		if _, hasType := metadata["type"]; !hasType {
+			if ct, ok := content["type"].(string); ok && ct != "" {
+				metadata["type"] = ct
+			}
+		}
+		if _, hasProvider := metadata["provider"]; !hasProvider {
+			if cp, ok := content["provider"].(string); ok && cp != "" {
+				metadata["provider"] = cp
+			}
+		}
+		if _, hasIDToken := metadata["id_token"]; !hasIDToken {
+			if idt, ok := content["id_token"].(string); ok && idt != "" {
+				metadata["id_token"] = idt
+			}
+		}
+		if _, hasAccessToken := metadata["access_token"]; !hasAccessToken {
+			if at, ok := content["access"].(string); ok && at != "" {
+				metadata["access_token"] = at
+			}
+		}
+		if _, hasRefreshToken := metadata["refresh_token"]; !hasRefreshToken {
+			if rt, ok := content["refresh"].(string); ok && rt != "" {
+				metadata["refresh_token"] = rt
+			}
+		}
+		if _, hasAccountID := metadata["account_id"]; !hasAccountID {
+			if aid, ok := content["accountId"].(string); ok && aid != "" {
+				metadata["account_id"] = aid
+			}
+		}
+	}
+	// Promote email from nested metadata sub-object when missing at root.
+	if _, hasEmail := metadata["email"]; !hasEmail {
+		if meta, ok := metadata["metadata"].(map[string]any); ok && meta != nil {
+			if em, ok := meta["email"].(string); ok && em != "" {
+				metadata["email"] = em
+			}
+		}
+	}
+
+	t, _ := metadata["type"].(string)
+	provider := strings.ToLower(t)
+	if provider == "oauth" || provider == "api_key" {
+		if p, ok := metadata["provider"].(string); ok && p != "" {
+			provider = strings.ToLower(strings.TrimSpace(p))
+		}
+	}
+	// Map compound provider names to short form used by executor/router.
+	switch provider {
+	case "openai-codex":
+		provider = "codex"
+	case "gemini":
+		provider = "gemini-cli"
+	}
 	if provider == "" {
 		provider = "unknown"
 	}
+
 	label := provider
 	if email, ok := metadata["email"].(string); ok && email != "" {
 		label = email
@@ -1042,6 +1099,37 @@ func (h *Handler) buildAuthFromFileData(path string, data []byte) (*coreauth.Aut
 	attr := map[string]string{
 		"path":   path,
 		"source": path,
+	}
+
+	// For API key based credentials of custom providers, populate key attributes for the executor.
+	if strings.ToLower(t) == "api_key" {
+		var apiKey, baseURL string
+		if content, ok := metadata["content"].(map[string]any); ok && content != nil {
+			if k, ok := content["api_key"].(string); ok && k != "" {
+				apiKey = k
+			}
+			if b, ok := content["base_url"].(string); ok && b != "" {
+				baseURL = b
+			}
+		}
+		if apiKey == "" {
+			if k, ok := metadata["api_key"].(string); ok && k != "" {
+				apiKey = k
+			}
+		}
+		if baseURL == "" {
+			if b, ok := metadata["base_url"].(string); ok && b != "" {
+				baseURL = b
+			}
+		}
+		if apiKey != "" {
+			attr["api_key"] = apiKey
+		}
+		if baseURL != "" {
+			attr["base_url"] = baseURL
+		}
+		attr["compat_name"] = provider
+		attr["provider_key"] = provider
 	}
 	auth := &coreauth.Auth{
 		ID:         authID,

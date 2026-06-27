@@ -1,7 +1,32 @@
+import ipaddress
 from collections import Counter, defaultdict
 
 from backend.auth import list_auth_files, get_configured_aggregate_models
 from backend.request_metrics.merge import _provider_lookup
+
+def _client_ip_type(ip: str) -> str:
+    value = str(ip or '').strip()
+    if not value or value == 'unknown':
+        return 'unknown'
+    try:
+        parsed = ipaddress.ip_address(value)
+    except ValueError:
+        return 'unknown'
+    if getattr(parsed, 'ipv4_mapped', None):
+        parsed = parsed.ipv4_mapped
+    if parsed.is_loopback:
+        return 'loopback'
+    if parsed.is_private:
+        return 'private'
+    return 'public'
+
+
+def _client_status(success_rate: float, count_5xx: int, count_4xx: int) -> str:
+    if count_5xx > 0 or success_rate < 0.8:
+        return 'warning'
+    if count_4xx > 0 or success_rate < 0.95:
+        return 'notice'
+    return 'healthy'
 
 
 def summarize_clients(events: list[dict]) -> list[dict]:
@@ -17,19 +42,27 @@ def summarize_clients(events: list[dict]) -> list[dict]:
         latencies = [int(item.get('latency_ms')) for item in items if isinstance(item.get('latency_ms'), int)]
         model_counter = Counter(str(item.get('requested_model') or '').strip() for item in items if str(item.get('requested_model') or '').strip())
         path_counter = Counter(str(item.get('path') or '').strip() for item in items if str(item.get('path') or '').strip())
+        success_rate = round((success / total) if total else 0, 4)
+        count_4xx = sum(1 for item in items if 400 <= int(item.get('status_code') or 0) < 500)
+        count_5xx = sum(1 for item in items if int(item.get('status_code') or 0) >= 500)
         rows.append({
             'ip': ip,
+            'ip_type': _client_ip_type(ip),
             'total_requests': total,
             'last_seen': max(int(item.get('timestamp') or 0) for item in items),
-            'success_rate': round((success / total) if total else 0, 4),
-            'count_4xx': sum(1 for item in items if 400 <= int(item.get('status_code') or 0) < 500),
-            'count_5xx': sum(1 for item in items if int(item.get('status_code') or 0) >= 500),
+            'success_rate': success_rate,
+            'failure_count': total - success,
+            'error_rate': round(((total - success) / total) if total else 0, 4),
+            'count_4xx': count_4xx,
+            'count_5xx': count_5xx,
+            'status': _client_status(success_rate, count_5xx, count_4xx),
             'top_model': model_counter.most_common(1)[0][0] if model_counter else '',
             'top_path': path_counter.most_common(1)[0][0] if path_counter else '',
             'avg_latency_ms': int(sum(latencies) / len(latencies)) if latencies else None,
             'prompt_tokens': sum(int(item.get('prompt_tokens') or 0) for item in items),
             'completion_tokens': sum(int(item.get('completion_tokens') or 0) for item in items),
             'total_tokens': sum(int(item.get('total_tokens') or 0) for item in items),
+            'client_ip_source': next((str(item.get('client_ip_source') or '').strip() for item in items if str(item.get('client_ip_source') or '').strip()), ''),
         })
     rows.sort(key=lambda item: (-int(item.get('total_requests') or 0), -int(item.get('last_seen') or 0)))
     return rows

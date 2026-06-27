@@ -1,10 +1,10 @@
 @import url('/css/variables.css');
-@import url('/css/layout.css');
-@import url('/css/components.css');
+@import url('/css/layout.css?v=20260610-smooth-accordion');
+@import url('/css/components.css?v=20260609-mobile-sidebar');
 @import url('/css/motion.css');
 @import url('/css/panels/cooldown.css');
 @import url('/css/panels/model-proxy.css');
-@import url('/css/panels/aggregates.css');
+@import url('/css/panels/aggregates.css?v=20260608-scroll-no-restart');
 @import url('/css/panels/chat.css');
 @import url('/css/panels/virtual-keys.css');
 @import url('/css/panels/network-access.css');

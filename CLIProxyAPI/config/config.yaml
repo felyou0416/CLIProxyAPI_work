@@ -43,6 +43,8 @@ openai-compatibility:
     models:
       - name: "glm-4.6-flash"
         alias: "glm-4.6-flash"
+      - name: "glm-4.6-flash"
+        alias: "openclaw"
       - name: "glm-4.7-flash"
         alias: "glm-4.7-flash"
       - name: "glm-4.5-flash"
@@ -127,6 +129,9 @@ oauth-model-alias:
   zhipu:
     - name: "glm-4.6-flash"
       alias: "glm-4.6-flash"
+      fork: true
+    - name: "glm-4.6-flash"
+      alias: "openclaw"
       fork: true
     - name: "glm-4.7-flash"
       alias: "glm-4.7-flash"

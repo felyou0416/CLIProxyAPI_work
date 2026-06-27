@@ -148,6 +148,16 @@ function setRequestEventsMeta(data, shownCount, append) {
   meta.textContent = `${cachedLabel} · ${modeLabel} · ${shownCount}/${total || shownCount} · ${freshness}`;
 }
 
+function getRequestModelPlaceholder(item) {
+  const source = String(item?.source || '').trim().toLowerCase();
+  const noteText = (item?.notes || []).join(' ').toLowerCase();
+  const ageSeconds = Math.max(0, Math.floor(Date.now() / 1000) - Number(item?.timestamp || 0));
+  if (source === 'proxy' && ageSeconds <= 90) return '等待详细日志';
+  if (source === 'proxy') return '未匹配详情';
+  if (source === 'error-log' || noteText.includes('error-')) return '错误日志未记录模型';
+  return '未记录模型';
+}
+
 function requestEventRowHtml(item) {
   const statusCode = Number(item.status_code || 0);
   const success = !!item.success;
@@ -159,6 +169,7 @@ function requestEventRowHtml(item) {
   const routeSource = getRequestEventRouteSource(item);
   const routeConfidence = getRequestEventRouteConfidence(item);
   const requestedModel = getRequestEventModelLabel(item);
+  const modelPlaceholder = getRequestModelPlaceholder(item);
   const routedModel = getRequestEventModelLabel({
     requested_model: item?.routed_model,
     routed_model: item?.actual_model,
@@ -198,7 +209,7 @@ function requestEventRowHtml(item) {
       </td>
       <td>
         <div style="display: flex; align-items: center; gap: 6px;">
-          <code style="font-size: 11px;">${escapeHtml(requestedModel || '待解析')}</code>
+          <code style="font-size: 11px;">${escapeHtml(requestedModel || modelPlaceholder)}</code>
           ${hasActualRoute ? `<span style="color: var(--text-muted); font-size: 11px;">→</span><code style="font-size: 11px;">${escapeHtml(routedModel)}</code>` : ''}
           ${routeChips.length ? `<div style="display: inline-flex; gap: 4px;">${routeChips.join('')}</div>` : ''}
         </div>

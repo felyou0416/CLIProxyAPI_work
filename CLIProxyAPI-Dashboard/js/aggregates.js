@@ -14,7 +14,6 @@ let aggregateModelsRunningSet = new Set();
 let aggregateModelStatePollTimer = null;
 let aggregateRoutePreviewCache = {};
 let aggregateRouteHealthCache = {};
-const aggregateExpandedAliases = new Set();
 let aggregateSourceListLoaded = false;
 let aggregateSourceListLoading = false;
 let aggregateModelsLoaded = false;
@@ -24,6 +23,9 @@ const aggregateMemberPendingKeys = new Set();
 const aggregateAliasPendingIds = new Set();
 const aggregateMemberSavingAliases = new Set();
 const aggregateMemberSaveChains = new Map();
+const aggregateMemberSaveDebounces = new Map();
+const aggregateMemberRollbackSnapshots = new Map();
+const AGGREGATE_MEMBER_SAVE_DEBOUNCE_MS = 200;
 const aggregateMemberMutationVersions = new Map();
 let aggregateRefreshVersion = 0;
 let draggedAliasId = null;
@@ -237,17 +239,6 @@ function aggregateModelStatusClass(status) {
   return 'status-pending';
 }
 
-function isAggregateExpanded(aliasId) {
-  return aggregateExpandedAliases.has(String(aliasId || '').trim());
-}
-
-function setAggregateExpanded(aliasId, expanded) {
-  const key = String(aliasId || '').trim();
-  if (!key) return;
-  if (expanded) aggregateExpandedAliases.add(key);
-  else aggregateExpandedAliases.delete(key);
-}
-
 function cloneAggregateItems(items = aggregateItemsCache) {
   return items.map((item) => ({
     ...item,
@@ -276,7 +267,9 @@ function aggregateMemberPayload(members) {
 function hasAggregatePendingWork() {
   return aggregateMemberPendingKeys.size > 0
     || aggregateAliasPendingIds.size > 0
-    || aggregateMemberSavingAliases.size > 0;
+    || aggregateMemberSavingAliases.size > 0
+    || aggregateMemberSaveDebounces.size > 0
+    || aggregateMemberSaveChains.size > 0;
 }
 
 function renderAggregateCurrentViews(includeSources = false) {
@@ -305,28 +298,77 @@ function nextAggregateMemberMutationVersion(aliasId) {
   return nextVersion;
 }
 
+async function applyAggregateRuntime(button) {
+  const run = async () => {
+    try {
+      const hasMemberSaveWork = aggregateMemberSavingAliases.size > 0
+        || aggregateMemberSaveDebounces.size > 0
+        || aggregateMemberSaveChains.size > 0;
+      if (hasMemberSaveWork) {
+        const saved = await flushPendingAggregateMemberSaves();
+        if (!saved) throw new Error(getLanguage() === 'zh' ? '仍有聚合成员修改保存失败，未应用 Runtime。' : 'Some aggregate member changes failed to save; runtime was not applied.');
+      }
+      if (aggregateAliasPendingIds.size > 0 || aggregateMemberPendingKeys.size > 0) {
+        throw new Error(getLanguage() === 'zh' ? '仍有聚合修改正在保存，请稍后再应用 Runtime。' : 'Aggregate changes are still saving; apply runtime again in a moment.');
+      }
+      const res = await api('/api/aggregate-models/apply-runtime', 'POST');
+      showMessage(res.message || (getLanguage() === 'zh' ? '聚合 Runtime 配置已重建。' : 'Aggregate runtime config rebuilt.'));
+      if (typeof refreshStatus === 'function') await refreshStatus();
+      return res;
+    } catch (error) {
+      showMessage(error.message, true);
+      return null;
+    }
+  };
+  if (typeof withRuntimeAction === 'function') {
+    return withRuntimeAction(button, getLanguage() === 'zh' ? '应用中...' : 'Applying...', run);
+  }
+  if (!button) return run();
+  const previousText = button.textContent;
+  const previousDisabled = button.disabled;
+  button.disabled = true;
+  button.textContent = getLanguage() === 'zh' ? '应用中...' : 'Applying...';
+  try {
+    return await run();
+  } catch (error) {
+    showMessage(error.message, true);
+    return null;
+  } finally {
+    button.disabled = previousDisabled;
+    button.textContent = previousText;
+  }
+}
+
 function isLatestAggregateMemberMutation(aliasId, version) {
   return aggregateMemberMutationVersions.get(String(aliasId || '').trim()) === version;
 }
 
-async function queueAggregateMemberSave(aliasId, members, successMessage = '', skipRestart = false) {
+function hasAggregateMemberSaveWork(aliasId) {
   const targetId = String(aliasId || '').trim();
-  if (!targetId) return false;
-  const payloadMembers = aggregateMemberPayload(members);
-  renderAggregateCurrentViews(true);
+  return Boolean(targetId) && (
+    aggregateMemberSavingAliases.has(targetId)
+    || aggregateMemberSaveDebounces.has(targetId)
+    || aggregateMemberSaveChains.has(targetId)
+  );
+}
+
+function flushAggregateMemberSave(targetId, entry) {
+  if (aggregateMemberSaveDebounces.get(targetId) === entry) {
+    aggregateMemberSaveDebounces.delete(targetId);
+  }
 
   const previous = aggregateMemberSaveChains.get(targetId) || Promise.resolve(true);
-  const next = previous.then(async () => {
+  const next = previous.catch(() => false).then(async () => {
     aggregateMemberSavingAliases.add(targetId);
     renderAggregateAliasList();
     try {
       await api('/api/aggregate-models', 'POST', {
         action: 'set_members',
         alias_id: targetId,
-        members: payloadMembers,
-        skip_restart: skipRestart,
+        members: entry.payloadMembers,
+        skip_restart: entry.skipRestart,
       });
-      if (successMessage) showMessage(successMessage);
+      if (entry.successMessage) showMessage(entry.successMessage);
       return true;
     } catch (err) {
       showMessage(err.message, true);
@@ -340,7 +382,64 @@ async function queueAggregateMemberSave(aliasId, members, successMessage = '', s
     if (aggregateMemberSaveChains.get(targetId) === tracked) aggregateMemberSaveChains.delete(targetId);
   });
   aggregateMemberSaveChains.set(targetId, tracked);
-  return next;
+  tracked.then(
+    (ok) => entry.resolvers.forEach((resolve) => resolve(Boolean(ok))),
+    () => entry.resolvers.forEach((resolve) => resolve(false))
+  );
+  return tracked;
+}
+
+async function flushPendingAggregateMemberSaves() {
+  const saves = [];
+  aggregateMemberSaveDebounces.forEach((entry, targetId) => {
+    if (entry.timer) {
+      clearTimeout(entry.timer);
+      entry.timer = null;
+    }
+    saves.push(flushAggregateMemberSave(targetId, entry));
+  });
+  if (saves.length) {
+    const results = await Promise.all(saves);
+    if (results.some((ok) => !ok)) return false;
+  }
+  const activeChains = Array.from(aggregateMemberSaveChains.values());
+  if (activeChains.length) {
+    const results = await Promise.all(activeChains);
+    if (results.some((ok) => !ok)) return false;
+  }
+  await Promise.resolve();
+  return true;
+}
+
+async function queueAggregateMemberSave(aliasId, members, successMessage = '', skipRestart = true) {
+  const targetId = String(aliasId || '').trim();
+  if (!targetId) return false;
+  const payloadMembers = aggregateMemberPayload(members);
+  renderAggregateCurrentViews(true);
+
+  return new Promise((resolve) => {
+    let entry = aggregateMemberSaveDebounces.get(targetId);
+    if (!entry) {
+      entry = {
+        timer: null,
+        payloadMembers,
+        successMessage,
+        skipRestart: Boolean(skipRestart),
+        resolvers: [],
+      };
+      aggregateMemberSaveDebounces.set(targetId, entry);
+    }
+
+    entry.payloadMembers = payloadMembers;
+    entry.successMessage = successMessage;
+    entry.skipRestart = Boolean(skipRestart);
+    entry.resolvers.push(resolve);
+
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => {
+      flushAggregateMemberSave(targetId, entry);
+    }, AGGREGATE_MEMBER_SAVE_DEBOUNCE_MS);
+  });
 }
 
 function updateAggregateWorkbenchStats() {
@@ -640,6 +739,7 @@ async function reorderAggregateAliases(draggedId, targetId) {
     await api('/api/aggregate-models', 'POST', {
       action: 'reorder',
       ordered_ids: orderedIds,
+      skip_restart: true,
     });
     showMessage(getLanguage() === 'zh' ? '已保存聚合顺序。' : 'Saved aggregate order.');
   } catch (error) {
@@ -674,6 +774,7 @@ async function moveAggregateAlias(aliasId, direction) {
       action: 'move',
       alias_id: targetId,
       direction,
+      skip_restart: true,
     });
     showMessage(getLanguage() === 'zh' ? `已保存聚合顺序：${targetId}。` : `Saved aggregate order: ${targetId}.`);
   } catch (error) {
@@ -701,6 +802,7 @@ async function deleteAggregateAlias(aliasId) {
     await api('/api/aggregate-models', 'POST', {
       action: 'delete',
       alias_id: targetId,
+      skip_restart: true,
     });
     showMessage(getLanguage() === 'zh' ? `已删除聚合 ID：${targetId}。` : `Deleted aggregate ID: ${targetId}.`);
   } catch (error) {
@@ -735,6 +837,7 @@ async function toggleAggregateAliasEnabled(aliasId, enabled) {
       action: 'set_enabled',
       alias_id: targetId,
       enabled: Boolean(enabled),
+      skip_restart: true,
     });
     showMessage(res.message || (getLanguage() === 'zh'
       ? `${enabled ? '已启用' : '已禁用'}聚合 ID：${targetId}。`
@@ -782,6 +885,7 @@ async function copyAggregateAlias(aliasId) {
       action: 'copy',
       alias_id: sourceId,
       new_alias_id: normalized,
+      skip_restart: true,
     });
     activeAggregateAliasId = normalized;
     aggregateEditMode = false;
@@ -815,6 +919,7 @@ async function renameAggregateAlias(aliasId) {
       action: 'rename',
       alias_id: targetId,
       new_alias_id: normalized,
+      skip_restart: true,
     });
     activeAggregateAliasId = String(res.item?.alias_id || normalized);
     aggregateEditMode = false;
@@ -876,7 +981,7 @@ async function saveAggregateMemberEdit() {
   }).filter((member) => member.provider && member.upstream_id);
   const ok = await saveCurrentAggregateMembers(members, getLanguage() === 'zh'
     ? `已保存 ${current.alias_id} 的成员修改。`
-    : `Saved member edits for ${current.alias_id}.`);
+    : `Saved member edits for ${current.alias_id}.`, true);
   if (ok) {
     aggregateEditMode = false;
     aggregateEditMembers.clear();
@@ -930,20 +1035,7 @@ function renderAggregateActiveDetails() {
     return;
   }
 
-  const collapseCount = Math.min(Math.max(aggregateItemsCache.length, 2), 8);
-  const shouldCollapse = members.length > collapseCount;
-  const expanded = shouldCollapse ? isAggregateExpanded(aliasId) : true;
-  const visibleMembers = expanded ? members : members.slice(0, collapseCount);
-
-  if (toggleBtn && shouldCollapse) {
-    toggleBtn.style.display = 'inline-flex';
-    toggleBtn.textContent = expanded ? '▲' : '▼';
-    toggleBtn.onclick = (event) => {
-      event.stopPropagation();
-      setAggregateExpanded(aliasId, !isAggregateExpanded(aliasId));
-      renderAggregateActiveDetails();
-    };
-  }
+  const visibleMembers = members;
 
   root.innerHTML = visibleMembers.map((member) => {
     const key = aggregateMemberKey(member.provider, member.upstream_id);
@@ -1355,7 +1447,11 @@ async function createAggregateAlias() {
   aggregateAliasPendingIds.add(aliasId);
   renderAggregateAliasList();
   try {
-    const res = await api('/api/aggregate-models', 'POST', { action: 'create', alias_id: aliasId });
+    const res = await api('/api/aggregate-models', 'POST', {
+      action: 'create',
+      alias_id: aliasId,
+      skip_restart: true,
+    });
     if (input) input.value = '';
     activeAggregateAliasId = String(res.item?.alias_id || aliasId);
     aggregateAliasPendingIds.delete(aliasId);
@@ -1376,7 +1472,7 @@ async function addSingleModelToAggregate(key) {
     return;
   }
   const aliasId = String(current.alias_id || '').trim();
-  if (aggregateMemberSavingAliases.has(aliasId)) return;
+  if (hasAggregateMemberSaveWork(aliasId)) return;
 
   const [provider, ...rest] = String(key).split('::');
   const upstreamId = rest.join('::');
@@ -1396,7 +1492,7 @@ async function addSingleModelToAggregate(key) {
       : [...(Array.isArray(current.members) ? current.members : []), { provider, upstream_id: upstreamId }];
     updateAggregateMembersInCache(aliasId, nextMembers);
     showMessage(res.message || (getLanguage() === 'zh' ? '已添加模型。' : 'Model added.'));
-    await loadAggregateModels(true);
+    renderAggregateCurrentViews(true);
     if (typeof loadProviderModels === 'function') void loadProviderModels();
   } catch (err) {
     showMessage(err.message, true);
@@ -1406,7 +1502,7 @@ async function addSingleModelToAggregate(key) {
   }
 }
 
-async function saveCurrentAggregateMembers(reorderedMembers, successMessage, skipRestart = false) {
+async function saveCurrentAggregateMembers(reorderedMembers, successMessage, skipRestart = true) {
   const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
   if (!current?.alias_id) {
     showMessage('Please select an aggregate ID first.', true);
@@ -1414,6 +1510,9 @@ async function saveCurrentAggregateMembers(reorderedMembers, successMessage, ski
   }
   const aliasId = String(current.alias_id || '').trim();
   const previousItems = cloneAggregateItems();
+  if (!aggregateMemberRollbackSnapshots.has(aliasId)) {
+    aggregateMemberRollbackSnapshots.set(aliasId, previousItems);
+  }
   const mutationVersion = nextAggregateMemberMutationVersion(aliasId);
   const nextMembers = Array.isArray(reorderedMembers) ? reorderedMembers : [];
   updateAggregateMembersInCache(aliasId, nextMembers);
@@ -1421,8 +1520,12 @@ async function saveCurrentAggregateMembers(reorderedMembers, successMessage, ski
 
   const ok = await queueAggregateMemberSave(aliasId, nextMembers, successMessage || `Saved aggregate order: ${aliasId}.`, skipRestart);
   if (!ok && isLatestAggregateMemberMutation(aliasId, mutationVersion)) {
-    aggregateItemsCache = previousItems;
+    aggregateItemsCache = aggregateMemberRollbackSnapshots.get(aliasId) || previousItems;
+    aggregateMemberRollbackSnapshots.delete(aliasId);
     renderAggregateCurrentViews(true);
+  }
+  if (ok && isLatestAggregateMemberMutation(aliasId, mutationVersion)) {
+    aggregateMemberRollbackSnapshots.delete(aliasId);
   }
   return ok;
 }
@@ -1487,7 +1590,7 @@ async function sortCurrentAggregateByScore() {
     .map((member, idx) => ({ member, idx, score: aggregateMemberScore(member) }))
     .sort((a, b) => (b.score - a.score) || (a.idx - b.idx))
     .map((item) => item.member);
-  await saveCurrentAggregateMembers(reordered, `Sorted by score: ${current.alias_id}.`);
+  await saveCurrentAggregateMembers(reordered, `Sorted by score: ${current.alias_id}.`, true);
 }
 
 async function sortCurrentAggregateUnavailableLast() {
@@ -1509,7 +1612,7 @@ async function sortCurrentAggregateUnavailableLast() {
     .map((member, idx) => ({ member, idx, rank: rankOf(member) }))
     .sort((a, b) => (a.rank - b.rank) || (a.idx - b.idx))
     .map((item) => item.member);
-  await saveCurrentAggregateMembers(reordered, `Moved unavailable models to the end: ${current.alias_id}.`);
+  await saveCurrentAggregateMembers(reordered, `Moved unavailable models to the end: ${current.alias_id}.`, true);
 }
 
 async function moveAggregateMember(key, direction) {
@@ -1550,6 +1653,9 @@ async function removeAggregateMember(key) {
 
   const previousItems = cloneAggregateItems();
   const mutationVersion = nextAggregateMemberMutationVersion(aliasId);
+  if (!aggregateMemberRollbackSnapshots.has(aliasId)) {
+    aggregateMemberRollbackSnapshots.set(aliasId, previousItems);
+  }
   aggregateMemberPendingKeys.add(key);
   updateAggregateMembersInCache(aliasId, filtered);
   renderAggregateCurrentViews(true);
@@ -1557,7 +1663,11 @@ async function removeAggregateMember(key) {
   const ok = await queueAggregateMemberSave(aliasId, filtered, `Removed model from ${aliasId}.`, true);
   aggregateMemberPendingKeys.delete(key);
   if (!ok && isLatestAggregateMemberMutation(aliasId, mutationVersion)) {
-    aggregateItemsCache = previousItems;
+    aggregateItemsCache = aggregateMemberRollbackSnapshots.get(aliasId) || previousItems;
+    aggregateMemberRollbackSnapshots.delete(aliasId);
+  }
+  if (ok && isLatestAggregateMemberMutation(aliasId, mutationVersion)) {
+    aggregateMemberRollbackSnapshots.delete(aliasId);
   }
   renderAggregateCurrentViews(true);
 }
@@ -1765,6 +1875,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+window.applyAggregateRuntime = applyAggregateRuntime;
 window.showCreateAggregateModal = showCreateAggregateModal;
 window.hideCreateAggregateModal = hideCreateAggregateModal;
 window.handleCreateAggregateSubmit = handleCreateAggregateSubmit;

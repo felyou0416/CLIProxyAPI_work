@@ -53,6 +53,141 @@ class ProjectControlTests(unittest.TestCase):
         payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
         self.assertTrue(payload["proxy_running"])
 
+    def test_aggregate_update_skips_runtime_rebuild(self):
+        handler = _FakeHandler()
+        with patch.object(post_routes, "create_custom_aggregate_alias", return_value={"alias_id": "demo"}) as create_alias, patch.object(
+            post_routes, "current_status", return_value={"proxy_running": True}
+        ) as current_status, patch.object(
+            post_routes, "load_state", return_value={}
+        ) as load_state, patch.object(
+            post_routes, "rebuild_runtime_config_from_state", return_value={"rebuilt": True, "validation": {"ok": True}}
+        ) as rebuild_runtime, patch.object(
+            post_routes, "restart_proxy", return_value={"ok": True, "message": "restarted"}
+        ) as restart_proxy:
+            handled = post_routes.handle_post(
+                handler,
+                SimpleNamespace(path="/api/aggregate-models"),
+                {"action": "create", "alias_id": "demo"},
+            )
+
+        self.assertTrue(handled)
+        self.assertEqual(handler.status, 200)
+        create_alias.assert_called_once_with("demo")
+        current_status.assert_not_called()
+        load_state.assert_not_called()
+        rebuild_runtime.assert_not_called()
+        restart_proxy.assert_not_called()
+        payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+        self.assertFalse(payload["runtime_rebuilt"])
+        self.assertFalse(payload["proxy_restarted"])
+        self.assertFalse(payload["restart_required"])
+
+    def test_aggregate_set_members_does_not_rebuild_when_skip_restart_false(self):
+        handler = _FakeHandler()
+        with patch.object(post_routes, "set_custom_aggregate_alias_members", return_value={"alias_id": "demo"}) as set_members, patch.object(
+            post_routes, "current_status", return_value={"proxy_running": True}
+        ) as current_status, patch.object(
+            post_routes, "rebuild_runtime_config_from_state", return_value={"rebuilt": True}
+        ) as rebuild_runtime, patch.object(
+            post_routes, "restart_proxy", return_value={"ok": True}
+        ) as restart_proxy:
+            handled = post_routes.handle_post(
+                handler,
+                SimpleNamespace(path="/api/aggregate-models"),
+                {"action": "set_members", "alias_id": "demo", "members": [], "skip_restart": False},
+            )
+
+        self.assertTrue(handled)
+        self.assertEqual(handler.status, 200)
+        set_members.assert_called_once_with("demo", [])
+        current_status.assert_not_called()
+        rebuild_runtime.assert_not_called()
+        restart_proxy.assert_not_called()
+        payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+        self.assertFalse(payload["runtime_rebuilt"])
+        self.assertFalse(payload["proxy_restarted"])
+
+    def test_aggregate_apply_runtime_rebuilds_without_restart(self):
+        handler = _FakeHandler()
+        with patch.object(post_routes, "load_state", return_value={"state": "demo"}) as load_state, patch.object(
+            post_routes, "rebuild_runtime_config_from_state", return_value={"rebuilt": True, "validation": {"ok": True}}
+        ) as rebuild_runtime, patch.object(
+            post_routes, "current_status", return_value={"proxy_running": True}
+        ) as current_status, patch.object(
+            post_routes, "restart_proxy", return_value={"ok": True}
+        ) as restart_proxy:
+            handled = post_routes.handle_post(
+                handler,
+                SimpleNamespace(path="/api/aggregate-models/apply-runtime"),
+                {},
+            )
+
+        self.assertTrue(handled)
+        self.assertEqual(handler.status, 200)
+        load_state.assert_called_once()
+        rebuild_runtime.assert_called_once_with({"state": "demo"})
+        current_status.assert_called_once()
+        restart_proxy.assert_not_called()
+        payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+        self.assertTrue(payload["runtime_rebuilt"])
+        self.assertFalse(payload["proxy_restarted"])
+        self.assertTrue(payload["proxy_running"])
+        self.assertFalse(payload["restart_required"])
+
+    def test_aggregate_apply_runtime_reports_no_rebuild(self):
+        handler = _FakeHandler()
+        with patch.object(post_routes, "load_state", return_value={}) as load_state, patch.object(
+            post_routes, "rebuild_runtime_config_from_state", return_value={"rebuilt": False, "validation": {"ok": True}}
+        ) as rebuild_runtime, patch.object(
+            post_routes, "current_status", return_value={"proxy_running": False}
+        ), patch.object(
+            post_routes, "restart_proxy", return_value={"ok": True}
+        ) as restart_proxy:
+            handled = post_routes.handle_post(
+                handler,
+                SimpleNamespace(path="/api/aggregate-models/apply-runtime"),
+                {},
+            )
+
+        self.assertTrue(handled)
+        self.assertEqual(handler.status, 200)
+        load_state.assert_called_once()
+        rebuild_runtime.assert_called_once_with({})
+        restart_proxy.assert_not_called()
+        payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+        self.assertFalse(payload["runtime_rebuilt"])
+        self.assertFalse(payload["restart_required"])
+
+    def test_aggregate_apply_runtime_reports_validation_failure(self):
+        handler = _FakeHandler()
+        with patch.object(post_routes, "load_state", return_value={}), patch.object(
+            post_routes,
+            "rebuild_runtime_config_from_state",
+            return_value={
+                "rebuilt": False,
+                "reason": "validation_failed",
+                "error": "bad config",
+                "validation": {"ok": False, "message": "bad config"},
+            },
+        ), patch.object(
+            post_routes, "current_status", return_value={"proxy_running": True}
+        ) as current_status, patch.object(
+            post_routes, "restart_proxy", return_value={"ok": True}
+        ) as restart_proxy:
+            handled = post_routes.handle_post(
+                handler,
+                SimpleNamespace(path="/api/aggregate-models/apply-runtime"),
+                {},
+            )
+
+        self.assertTrue(handled)
+        self.assertEqual(handler.status, 500)
+        current_status.assert_not_called()
+        restart_proxy.assert_not_called()
+        payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["runtime_rebuilt"])
+
     def test_stop_project_stops_proxy_and_device_login_then_shutdown_all(self):
         with patch.object(processes, "stop_proxy", return_value={"ok": True, "message": "Stopped RelayX."}) as stop_proxy, patch.object(
             processes, "stop_device_login", return_value={"ok": True, "message": "Stopped device login."}

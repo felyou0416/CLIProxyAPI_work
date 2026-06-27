@@ -1707,8 +1707,8 @@ def start_proxy():
             pass
         merged_env = os.environ.copy()
         merged_env.update(proxy_env)
-        stdout = open(PROXY_STDOUT, 'w', encoding='utf-8', errors='ignore')
-        stderr = open(PROXY_STDERR, 'w', encoding='utf-8', errors='ignore')
+        stdout = open(PROXY_STDOUT, 'a', encoding='utf-8', errors='ignore')
+        stderr = open(PROXY_STDERR, 'a', encoding='utf-8', errors='ignore')
         proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), stdout=stdout, stderr=stderr, stdin=subprocess.DEVNULL, creationflags=_creationflags(), env=merged_env)
         processes['proxy'] = proc
     selected_items = auth_files

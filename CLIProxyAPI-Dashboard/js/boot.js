@@ -1,15 +1,16 @@
 async function boot() {
   applyTheme();
   applyLanguage();
+  applySidebarCollapsed();
   applySidebarNavOrder();
+  applyNavGroupCollapsed();
   setLanguageToggleLabel();
   const hashSection = String(window.location.hash || '').replace(/^#/, '').trim();
   if (hashSection && document.getElementById('tab-' + hashSection)) {
     showSection(hashSection);
   } else {
-    showGroup(getActiveGroup());
+    showSection(getActiveSection());
   }
-  initBubbleNavDrag();
   await refreshStatus();
   if (getActiveSection() === 'auths') {
     await loadAuthFiles();

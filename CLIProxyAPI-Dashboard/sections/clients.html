@@ -1,31 +1,79 @@
 <section id="section-clients" class="panel panel-scroll section-view" hidden>
-  <div class="panel-head">
+  <div class="panel-head clients-hero">
     <div>
       <div class="section-kicker" data-i18n="section.clientsKicker">Observability</div>
-      <h2 class="section-title" data-i18n="section.clientsTitle">Clients / IPs</h2>
+      <h2 class="section-title" data-i18n="section.clientsTitle">客户端 / IP</h2>
+      <p class="clients-subtitle">按真实客户端 IP 汇总请求质量、模型使用、Token 与延迟；代理链会优先识别 X-Forwarded-For / X-Real-IP 等来源。</p>
     </div>
     <div class="action-row">
       <button class="secondary" type="button" onclick="loadClientsPanel(true)" data-i18n="btn.refresh">刷新</button>
       <span class="auth-chip" id="request-clients-meta">-</span>
     </div>
   </div>
-  <div class="metric-table-wrap">
-    <table class="metric-table">
-      <thead>
-        <tr>
-          <th>IP</th>
-          <th>请求数</th>
-          <th>成功率</th>
-          <th>4xx</th>
-          <th>5xx</th>
-          <th>常用模型</th>
-          <th>常用路径</th>
-          <th>总 Token</th>
-          <th>平均延迟</th>
-          <th>最近访问</th>
-        </tr>
-      </thead>
-      <tbody id="request-clients-body"></tbody>
-    </table>
+
+  <div class="clients-summary-grid" id="clients-summary-grid"></div>
+
+  <div class="clients-workbench">
+    <div class="clients-main-card">
+      <div class="clients-toolbar">
+        <label class="clients-search-box">
+          <span>搜索</span>
+          <input id="clients-search" type="search" placeholder="IP / 模型 / 路径" oninput="renderClientsPanel()">
+        </label>
+        <label>
+          <span>状态</span>
+          <select id="client-status-filter" onchange="renderClientsPanel()">
+            <option value="">全部</option>
+            <option value="warning">需关注</option>
+            <option value="notice">有 4xx</option>
+            <option value="healthy">健康</option>
+          </select>
+        </label>
+        <label>
+          <span>类型</span>
+          <select id="client-type-filter" onchange="renderClientsPanel()">
+            <option value="">全部</option>
+            <option value="public">公网</option>
+            <option value="private">内网</option>
+            <option value="loopback">本机</option>
+            <option value="unknown">未知</option>
+          </select>
+        </label>
+        <label>
+          <span>排序</span>
+          <select id="client-sort-select" onchange="renderClientsPanel()">
+            <option value="total_requests:desc">请求数 ↓</option>
+            <option value="last_seen:desc">最近访问 ↓</option>
+            <option value="success_rate:asc">成功率 ↑</option>
+            <option value="avg_latency_ms:desc">平均延迟 ↓</option>
+            <option value="total_tokens:desc">Token ↓</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="metric-table-wrap clients-table-wrap">
+        <table class="metric-table clients-table">
+          <thead>
+            <tr>
+              <th>客户端</th>
+              <th>状态</th>
+              <th>请求</th>
+              <th>错误</th>
+              <th>成功率</th>
+              <th>平均延迟</th>
+              <th>总 Token</th>
+              <th>常用路径</th>
+              <th>常用模型</th>
+              <th>最近访问</th>
+            </tr>
+          </thead>
+          <tbody id="request-clients-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <aside class="clients-detail-card" id="client-detail">
+      <div class="clients-detail-empty">选择一行查看客户端详情</div>
+    </aside>
   </div>
 </section>
