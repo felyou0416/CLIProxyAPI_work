@@ -33,10 +33,11 @@ func (w *Watcher) start(ctx context.Context) error {
 	}
 	log.Debugf("watching config file: %s", w.configPath)
 
-	if errAddAuthDir := w.addAuthDirWatches(w.authDir); errAddAuthDir != nil {
+	if errAddAuthDir := w.watcher.Add(w.authDir); errAddAuthDir != nil {
 		log.Errorf("failed to watch auth directory %s: %v", w.authDir, errAddAuthDir)
 		return errAddAuthDir
 	}
+	log.Debugf("watching auth directory: %s", w.authDir)
 
 	go w.processEvents(ctx)
 
@@ -63,22 +64,6 @@ func (w *Watcher) processEvents(ctx context.Context) {
 	}
 }
 
-func (w *Watcher) addAuthDirWatches(root string) error {
-	if _, errStat := os.Stat(root); errStat != nil {
-		return errStat
-	}
-	return filepath.WalkDir(root, func(path string, entry os.DirEntry, errWalk error) error {
-		if errWalk != nil || entry == nil || !entry.IsDir() {
-			return nil
-		}
-		if errAdd := w.watcher.Add(path); errAdd != nil {
-			return errAdd
-		}
-		log.Debugf("watching auth directory: %s", path)
-		return nil
-	})
-}
-
 func (w *Watcher) handleEvent(event fsnotify.Event) {
 	// Filter only relevant events: config file or auth-dir JSON files.
 	configOps := fsnotify.Write | fsnotify.Create | fsnotify.Rename
@@ -87,15 +72,7 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 	normalizedAuthDir := w.normalizeAuthPath(w.authDir)
 	isConfigEvent := normalizedName == normalizedConfigPath && event.Op&configOps != 0
 	authOps := fsnotify.Create | fsnotify.Write | fsnotify.Remove | fsnotify.Rename
-	isAuthJSON := isAuthPathWithinDir(normalizedName, normalizedAuthDir) && strings.HasSuffix(normalizedName, ".json") && event.Op&authOps != 0
-	if !isConfigEvent && event.Op&fsnotify.Create != 0 && isAuthPathWithinDir(normalizedName, normalizedAuthDir) {
-		if info, errStat := os.Stat(event.Name); errStat == nil && info.IsDir() {
-			if errAdd := w.addAuthDirWatches(event.Name); errAdd != nil {
-				log.Errorf("failed to watch auth directory %s: %v", event.Name, errAdd)
-			}
-			return
-		}
-	}
+	isAuthJSON := filepath.Dir(normalizedName) == normalizedAuthDir && strings.HasSuffix(normalizedName, ".json") && event.Op&authOps != 0
 	if !isConfigEvent && !isAuthJSON {
 		// Ignore unrelated files (e.g., cookie snapshots *.cookie) and other noise.
 		return
@@ -112,6 +89,9 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 	}
 
 	// Handle auth directory changes incrementally (.json only)
+	w.authRescanMu.Lock()
+	defer w.authRescanMu.Unlock()
+
 	if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
 		if w.shouldDebounceRemove(normalizedName, now) {
 			log.Debugf("debouncing remove event for %s", filepath.Base(event.Name))
@@ -126,7 +106,7 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 				return
 			}
 			log.Infof("auth file changed (%s): %s, processing incrementally", event.Op.String(), filepath.Base(event.Name))
-			w.addOrUpdateClient(event.Name)
+			w.addOrUpdateClientLocked(event.Name)
 			return
 		}
 		if !w.isKnownAuthFile(event.Name) {
@@ -134,7 +114,7 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 			return
 		}
 		log.Infof("auth file changed (%s): %s, processing incrementally", event.Op.String(), filepath.Base(event.Name))
-		w.removeClient(event.Name)
+		w.removeClientLocked(event.Name)
 		return
 	}
 	if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
@@ -143,7 +123,7 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 			return
 		}
 		log.Infof("auth file changed (%s): %s, processing incrementally", event.Op.String(), filepath.Base(event.Name))
-		w.addOrUpdateClient(event.Name)
+		w.addOrUpdateClientLocked(event.Name)
 	}
 }
 
@@ -174,17 +154,6 @@ func (w *Watcher) isKnownAuthFile(path string) bool {
 	defer w.clientsMutex.RUnlock()
 	_, ok := w.lastAuthHashes[normalized]
 	return ok
-}
-
-func isAuthPathWithinDir(path, dir string) bool {
-	if path == "" || dir == "" || path == dir {
-		return false
-	}
-	rel, errRel := filepath.Rel(dir, path)
-	if errRel != nil || rel == "." || rel == ".." {
-		return false
-	}
-	return !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func (w *Watcher) normalizeAuthPath(path string) string {

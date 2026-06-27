@@ -62,6 +62,71 @@ func TestGinLogrusRecoveryHandlesRegularPanic(t *testing.T) {
 	}
 }
 
+func TestIsAIAPIPathIncludesImages(t *testing.T) {
+	if !isAIAPIPath("/v1/images/generations") {
+		t.Fatalf("expected /v1/images/generations to be treated as AI API path")
+	}
+	if !isAIAPIPath("/v1/images/edits") {
+		t.Fatalf("expected /v1/images/edits to be treated as AI API path")
+	}
+	if !isAIAPIPath("/v1/videos") {
+		t.Fatalf("expected /v1/videos to be treated as AI API path")
+	}
+	if !isAIAPIPath("/v1/videos/video_123") {
+		t.Fatalf("expected /v1/videos/video_123 to be treated as AI API path")
+	}
+	if !isAIAPIPath("/openai/v1/videos") {
+		t.Fatalf("expected /openai/v1/videos to be treated as AI API path")
+	}
+	if !isAIAPIPath("/openai/v1/videos/video_123/content") {
+		t.Fatalf("expected /openai/v1/videos/video_123/content to be treated as AI API path")
+	}
+}
+
+func TestIsAIAPIPathIncludesCodexBackend(t *testing.T) {
+	paths := []string{
+		"/backend-api/codex/responses",
+		"/backend-api/codex/responses/compact",
+	}
+	for _, path := range paths {
+		if !isAIAPIPath(path) {
+			t.Fatalf("expected %s to be treated as AI API path", path)
+		}
+	}
+	if isAIAPIPath("/backend-api/codex-status") {
+		t.Fatalf("expected /backend-api/codex-status not to be treated as AI API path")
+	}
+}
+
+func TestGinLogrusLoggerAddsRequestIDForCodexBackend(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	engine := gin.New()
+	engine.Use(GinLogrusLogger())
+
+	var requestIDFromContext string
+	var requestIDFromGin string
+	engine.POST("/backend-api/codex/responses", func(c *gin.Context) {
+		requestIDFromContext = GetRequestID(c.Request.Context())
+		requestIDFromGin = GetGinRequestID(c)
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/backend-api/codex/responses", nil)
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	if requestIDFromContext == "" {
+		t.Fatalf("expected request ID in request context")
+	}
+	if requestIDFromGin != requestIDFromContext {
+		t.Fatalf("expected Gin request ID %q to match context request ID %q", requestIDFromGin, requestIDFromContext)
+	}
+}
+
 func TestGinLogrusLoggerPrefersProxyHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -105,7 +170,8 @@ func TestProxyAwareClientIPNormalizesIPv6MappedAddress(t *testing.T) {
 	req.Header.Set("X-Real-IP", "::ffff:155.254.108.7")
 	c.Request = req
 
-	if got := proxyAwareClientIP(c); got != "155.254.108.7" {
-		t.Fatalf("proxyAwareClientIP = %q, want 155.254.108.7", got)
+	if got := ProxyAwareClientIP(c); got != "155.254.108.7" {
+		t.Fatalf("ProxyAwareClientIP = %q, want 155.254.108.7", got)
 	}
 }
+

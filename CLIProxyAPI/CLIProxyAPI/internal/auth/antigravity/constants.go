@@ -3,8 +3,8 @@ package antigravity
 
 // OAuth client credentials and configuration
 const (
-	ClientID     = "YOUR_GOOGLE_CLIENT_ID"     // TODO: replace with your own credentials
-	ClientSecret = "YOUR_GOOGLE_CLIENT_SECRET" // TODO: replace with your own credentials
+	ClientID     = "YOUR_CLIENT_ID"
+	ClientSecret = "YOUR_CLIENT_SECRET"
 	CallbackPort = 51121
 )
 

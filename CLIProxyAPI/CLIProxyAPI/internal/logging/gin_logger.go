@@ -6,7 +6,6 @@ package logging
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -25,16 +24,9 @@ var aiAPIPrefixes = []string{
 	"/v1/videos",
 	"/v1/messages",
 	"/v1/responses",
+	"/openai/v1/videos",
 	"/v1beta/models/",
-	"/api/provider/",
-}
-
-var clientIPHeaderPriority = []string{
-	"X-Forwarded-For",
-	"CF-Connecting-IP",
-	"True-Client-IP",
-	"X-Real-IP",
-	"X-Client-IP",
+	"/backend-api/codex/",
 }
 
 const (
@@ -42,65 +34,10 @@ const (
 	creditsUsedKey = "__antigravity_credits_used__"
 )
 
-func normalizeClientIP(raw string) string {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return ""
-	}
-	value = strings.Trim(value, "\"[]")
-	if strings.Contains(value, ":") {
-		if host, _, err := net.SplitHostPort(value); err == nil {
-			value = host
-			value = strings.Trim(value, "[]")
-		}
-	}
-	if zoneLess, _, ok := strings.Cut(value, "%"); ok {
-		value = zoneLess
-	}
-	parsed := net.ParseIP(value)
-	if parsed == nil {
-		return ""
-	}
-	if ip4 := parsed.To4(); ip4 != nil {
-		return ip4.String()
-	}
-	return parsed.String()
-}
-
-func firstForwardedClientIP(value string) string {
-	for _, part := range strings.Split(value, ",") {
-		if ip := normalizeClientIP(part); ip != "" {
-			return ip
-		}
-	}
-	return ""
-}
-
-func proxyAwareClientIP(c *gin.Context) string {
-	if c == nil || c.Request == nil {
-		return ""
-	}
-	for _, header := range clientIPHeaderPriority {
-		value := c.GetHeader(header)
-		if strings.TrimSpace(value) == "" {
-			continue
-		}
-		if header == "X-Forwarded-For" {
-			if ip := firstForwardedClientIP(value); ip != "" {
-				return ip
-			}
-			continue
-		}
-		if ip := normalizeClientIP(value); ip != "" {
-			return ip
-		}
-	}
-	return normalizeClientIP(c.ClientIP())
-}
 
 // GinLogrusLogger returns a Gin middleware handler that logs HTTP requests and responses
 // using logrus. It captures request details including method, path, status code, latency,
-// proxy-aware client IP, and any error messages. Request ID is only added for AI API requests.
+// client IP, and any error messages. Request ID is only added for AI API requests.
 //
 // Output format (AI API): [2025-12-23 20:14:10] [info ] | a1b2c3d4 | 200 |       23.559s | ...
 // Output format (others): [2025-12-23 20:14:10] [info ] | -------- | 200 |       23.559s | ...
@@ -140,7 +77,7 @@ func GinLogrusLogger() gin.HandlerFunc {
 		}
 
 		statusCode := c.Writer.Status()
-		clientIP := proxyAwareClientIP(c)
+		clientIP := ProxyAwareClientIP(c)
 		method := c.Request.Method
 		errorMessage := c.Errors.ByType(gin.ErrorTypePrivate).String()
 

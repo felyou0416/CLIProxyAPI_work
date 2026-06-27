@@ -43,7 +43,7 @@ func assertUnsupportedImagesModelResponse(t *testing.T, resp *httptest.ResponseR
 	}
 
 	message := gjson.GetBytes(resp.Body.Bytes(), "error.message").String()
-	expectedMessage := "Model " + model + " is not supported on " + imagesGenerationsPath + " or " + imagesEditsPath + ". Use " + defaultImagesToolModel + ", " + defaultXAIImagesModel + ", " + xaiImagesQualityModel + ", or a configured openai-compatibility image model."
+	expectedMessage := "Model " + model + " is not supported on " + imagesGenerationsPath + " or " + imagesEditsPath + ". Use " + gptImage15Model + ", " + defaultImagesToolModel + ", " + defaultXAIImagesModel + ", " + xaiImagesQualityModel + ", or a configured openai-compatibility image model."
 	if message != expectedMessage {
 		t.Fatalf("error message = %q, want %q", message, expectedMessage)
 	}
@@ -52,8 +52,8 @@ func assertUnsupportedImagesModelResponse(t *testing.T, resp *httptest.ResponseR
 	}
 }
 
-func TestImagesModelValidationAllowsGPTImage2AndXAIModels(t *testing.T) {
-	for _, model := range []string{"gpt-image-2", "codex/gpt-image-2", "grok-imagine-image", "xai/grok-imagine-image", "grok-imagine-image-quality", "xai/grok-imagine-image-quality"} {
+func TestImagesModelValidationAllowsGPTImageAndXAIModels(t *testing.T) {
+	for _, model := range []string{"gpt-image-1.5", "codex/gpt-image-1.5", "gpt-image-2", "codex/gpt-image-2", "grok-imagine-image", "xai/grok-imagine-image", "grok-imagine-image-quality", "xai/grok-imagine-image-quality"} {
 		if !isSupportedImagesModel(model) {
 			t.Fatalf("expected %s to be supported", model)
 		}
@@ -82,27 +82,6 @@ func TestImagesModelValidationAllowsOpenAICompatImageModels(t *testing.T) {
 	}
 	if isSupportedImagesModel("compat-chat-model") {
 		t.Fatal("expected non-image openai-compatibility model to be rejected")
-	}
-}
-
-func TestImagesModelValidationAllowsGPTImage2Alias(t *testing.T) {
-	modelRegistry := registry.GetGlobalRegistry()
-	clientID := "test-codex-image-alias-model-validation"
-	modelRegistry.RegisterClient(clientID, "coc", []*registry.ModelInfo{
-		{ID: "coc-gpt-image", Object: "model", OwnedBy: "coc", Type: registry.OpenAIImageModelType, Version: "gpt-image-2"},
-	})
-	t.Cleanup(func() {
-		modelRegistry.UnregisterClient(clientID)
-	})
-
-	if !isSupportedImagesModel("coc-gpt-image") {
-		t.Fatal("expected openai-compat gpt-image-2 alias to be supported")
-	}
-	if isDefaultImagesToolModel("coc-gpt-image") {
-		t.Fatal("expected openai-compat alias to stay on openai-compat route")
-	}
-	if got := openAICompatImagesUpstreamModel("coc-gpt-image"); got != "gpt-image-2" {
-		t.Fatalf("upstream model = %q, want gpt-image-2", got)
 	}
 }
 

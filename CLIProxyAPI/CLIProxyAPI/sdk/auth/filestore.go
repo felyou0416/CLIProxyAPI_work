@@ -2,22 +2,55 @@ package auth
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
+
+// PluginAuthParser parses auth JSON owned by plugin providers.
+type PluginAuthParser interface {
+	ParseAuth(context.Context, pluginapi.AuthParseRequest) (*cliproxyauth.Auth, bool, error)
+}
+
+// PluginMultiAuthParser expands one auth JSON payload into multiple plugin auth records.
+// Returning handled=true with an empty slice means the plugin intentionally suppresses built-in parsing.
+type PluginMultiAuthParser interface {
+	ParseAuths(context.Context, pluginapi.AuthParseRequest) ([]*cliproxyauth.Auth, bool, error)
+}
+
+type pluginAuthParserHolder struct {
+	parser PluginAuthParser
+}
+
+var pluginAuthParserValue atomic.Value
+
+// RegisterPluginAuthParser registers the current plugin auth parser.
+func RegisterPluginAuthParser(parser PluginAuthParser) {
+	pluginAuthParserValue.Store(pluginAuthParserHolder{parser: parser})
+}
+
+func currentPluginAuthParser() PluginAuthParser {
+	value := pluginAuthParserValue.Load()
+	if value == nil {
+		return nil
+	}
+	holder, ok := value.(pluginAuthParserHolder)
+	if !ok {
+		return nil
+	}
+	return holder.parser
+}
 
 // FileTokenStore persists token records and auth metadata using the filesystem as backing storage.
 type FileTokenStore struct {
@@ -118,7 +151,9 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 	if auth.Attributes == nil {
 		auth.Attributes = make(map[string]string)
 	}
-	auth.Attributes["path"] = path
+	auth.Attributes[cliproxyauth.AttributePath] = path
+	auth.Attributes[cliproxyauth.AttributeSource] = path
+	auth.Attributes[cliproxyauth.AttributeSourceBackend] = cliproxyauth.AuthSourceFile
 
 	if strings.TrimSpace(auth.FileName) == "" {
 		auth.FileName = auth.ID
@@ -144,12 +179,12 @@ func (s *FileTokenStore) List(ctx context.Context) ([]*cliproxyauth.Auth, error)
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".json") {
 			return nil
 		}
-		auth, err := s.readAuthFile(path, dir)
-		if err != nil {
+		auths, errReadAuths := s.readAuthFiles(path, dir)
+		if errReadAuths != nil {
 			return nil
 		}
-		if auth != nil {
-			entries = append(entries, auth)
+		if len(auths) > 0 {
+			entries = append(entries, auths...)
 		}
 		return nil
 	})
@@ -186,7 +221,7 @@ func (s *FileTokenStore) resolveDeletePath(id string) (string, error) {
 	return filepath.Join(dir, id), nil
 }
 
-func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth, error) {
+func (s *FileTokenStore) readAuthFiles(path, baseDir string) ([]*cliproxyauth.Auth, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
@@ -198,87 +233,57 @@ func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth,
 	if err = json.Unmarshal(data, &metadata); err != nil {
 		return nil, fmt.Errorf("unmarshal auth json: %w", err)
 	}
-
-	// Support new auth file format where type/provider are nested inside "content".
-	if content, ok := metadata["content"].(map[string]any); ok && content != nil {
-		if _, hasType := metadata["type"]; !hasType {
-			if ct, ok := content["type"].(string); ok && ct != "" {
-				metadata["type"] = ct
-			}
-		}
-		if _, hasProvider := metadata["provider"]; !hasProvider {
-			if cp, ok := content["provider"].(string); ok && cp != "" {
-				metadata["provider"] = cp
-			}
-		}
-		if _, hasIDToken := metadata["id_token"]; !hasIDToken {
-			if idt, ok := content["id_token"].(string); ok && idt != "" {
-				metadata["id_token"] = idt
-			}
-		}
-		if _, hasAccessToken := metadata["access_token"]; !hasAccessToken {
-			if at, ok := content["access"].(string); ok && at != "" {
-				metadata["access_token"] = at
-			}
-		}
-		if _, hasRefreshToken := metadata["refresh_token"]; !hasRefreshToken {
-			if rt, ok := content["refresh"].(string); ok && rt != "" {
-				metadata["refresh_token"] = rt
-			}
-		}
-		if _, hasAccountID := metadata["account_id"]; !hasAccountID {
-			if aid, ok := content["accountId"].(string); ok && aid != "" {
-				metadata["account_id"] = aid
-			}
-		}
-	}
-	// Promote email from nested metadata sub-object when missing at root.
-	if _, hasEmail := metadata["email"]; !hasEmail {
-		if meta, ok := metadata["metadata"].(map[string]any); ok && meta != nil {
-			if em, ok := meta["email"].(string); ok && em != "" {
-				metadata["email"] = em
-			}
-		}
-	}
-
-	// Expiration extraction from JWT
-	if expStr, ok := metadata["expired"].(string); !ok || strings.TrimSpace(expStr) == "" {
-		accessToken := extractAccessToken(metadata)
-		if exp, ok := parseJWTExp(accessToken); ok {
-			metadata["expired"] = exp.Format(time.RFC3339)
-		} else if idToken, ok := metadata["id_token"].(string); ok && idToken != "" {
-			if exp, ok := parseJWTExp(idToken); ok {
-				metadata["expired"] = exp.Format(time.RFC3339)
-			}
-		}
-	}
-
 	provider, _ := metadata["type"].(string)
+	provider = strings.TrimSpace(provider)
+	if strings.EqualFold(provider, "gemini") {
+		return nil, nil
+	}
+	info, errStat := os.Stat(path)
+	if errStat != nil {
+		return nil, fmt.Errorf("stat file: %w", errStat)
+	}
+	if parser := currentPluginAuthParser(); parser != nil {
+		auths, handled, errParse := parsePluginAuthFile(parser, pluginapi.AuthParseRequest{
+			Provider: provider,
+			Path:     path,
+			FileName: s.idFor(path, baseDir),
+			RawJSON:  data,
+		})
+		if errParse == nil && handled {
+			auths = compactPluginAuths(auths)
+			if len(auths) == 0 {
+				return nil, nil
+			}
+			for index, auth := range auths {
+				if auth == nil {
+					continue
+				}
+				if len(auths) > 1 {
+					cliproxyauth.MarkPluginVirtualAuth(auth, path, index)
+				}
+				auth.CreatedAt = info.ModTime()
+				auth.UpdatedAt = info.ModTime()
+				if auth.Attributes == nil {
+					auth.Attributes = make(map[string]string)
+				}
+				auth.Attributes[cliproxyauth.AttributePath] = path
+				auth.Attributes[cliproxyauth.AttributeSource] = path
+				auth.Attributes[cliproxyauth.AttributeSourceBackend] = cliproxyauth.AuthSourceFile
+				cliproxyauth.ApplyCustomHeadersFromMetadata(auth)
+			}
+			return auths, nil
+		}
+	}
 	if provider == "" {
 		provider = "unknown"
 	}
-	// Normalize generic "oauth" type to the actual provider name.
-	if provider == "oauth" {
-		if p, ok := metadata["provider"].(string); ok && p != "" {
-			provider = strings.ToLower(strings.TrimSpace(p))
-		}
-	}
-	if provider == "antigravity" || provider == "gemini" {
+	if provider == "antigravity" {
 		projectID := ""
 		if pid, ok := metadata["project_id"].(string); ok {
 			projectID = strings.TrimSpace(pid)
 		}
 		if projectID == "" {
 			accessToken := extractAccessToken(metadata)
-			// For gemini type, the stored access_token is likely expired (~1h lifetime).
-			// Refresh it using the long-lived refresh_token before querying.
-			if provider == "gemini" {
-				if tokenMap, ok := metadata["token"].(map[string]any); ok {
-					if refreshed, errRefresh := refreshGeminiAccessToken(tokenMap, http.DefaultClient); errRefresh == nil {
-						accessToken = refreshed
-					}
-				}
-			}
 			if accessToken != "" {
 				fetchedProjectID, errFetch := FetchAntigravityProjectID(context.Background(), accessToken, http.DefaultClient)
 				if errFetch == nil && strings.TrimSpace(fetchedProjectID) != "" {
@@ -293,9 +298,9 @@ func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth,
 			}
 		}
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, fmt.Errorf("stat file: %w", err)
+	info, errStat = os.Stat(path)
+	if errStat != nil {
+		return nil, fmt.Errorf("stat file: %w", errStat)
 	}
 	id := s.idFor(path, baseDir)
 	disabled, _ := metadata["disabled"].(bool)
@@ -304,13 +309,17 @@ func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth,
 		status = cliproxyauth.StatusDisabled
 	}
 	auth := &cliproxyauth.Auth{
-		ID:               id,
-		Provider:         provider,
-		FileName:         id,
-		Label:            s.labelFor(metadata),
-		Status:           status,
-		Disabled:         disabled,
-		Attributes:       map[string]string{"path": path},
+		ID:       id,
+		Provider: provider,
+		FileName: id,
+		Label:    s.labelFor(metadata),
+		Status:   status,
+		Disabled: disabled,
+		Attributes: map[string]string{
+			cliproxyauth.AttributePath:          path,
+			cliproxyauth.AttributeSource:        path,
+			cliproxyauth.AttributeSourceBackend: cliproxyauth.AuthSourceFile,
+		},
 		Metadata:         metadata,
 		CreatedAt:        info.ModTime(),
 		UpdatedAt:        info.ModTime(),
@@ -321,7 +330,43 @@ func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth,
 		auth.Attributes["email"] = email
 	}
 	cliproxyauth.ApplyCustomHeadersFromMetadata(auth)
-	return auth, nil
+	return []*cliproxyauth.Auth{auth}, nil
+}
+
+func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth, error) {
+	auths, errReadAuths := s.readAuthFiles(path, baseDir)
+	if errReadAuths != nil || len(auths) == 0 {
+		return nil, errReadAuths
+	}
+	return auths[0], nil
+}
+
+func parsePluginAuthFile(parser PluginAuthParser, req pluginapi.AuthParseRequest) ([]*cliproxyauth.Auth, bool, error) {
+	if parser == nil {
+		return nil, false, nil
+	}
+	if multiParser, ok := parser.(PluginMultiAuthParser); ok {
+		return multiParser.ParseAuths(context.Background(), req)
+	}
+	auth, handled, errParse := parser.ParseAuth(context.Background(), req)
+	if errParse != nil || !handled || auth == nil {
+		return nil, handled, errParse
+	}
+	return []*cliproxyauth.Auth{auth}, true, nil
+}
+
+func compactPluginAuths(auths []*cliproxyauth.Auth) []*cliproxyauth.Auth {
+	if len(auths) == 0 {
+		return nil
+	}
+	out := auths[:0]
+	for _, auth := range auths {
+		if auth == nil {
+			continue
+		}
+		out = append(out, auth)
+	}
+	return out
 }
 
 func (s *FileTokenStore) idFor(path, baseDir string) string {
@@ -407,51 +452,6 @@ func extractAccessToken(metadata map[string]any) string {
 	return ""
 }
 
-func refreshGeminiAccessToken(tokenMap map[string]any, httpClient *http.Client) (string, error) {
-	refreshToken, _ := tokenMap["refresh_token"].(string)
-	clientID, _ := tokenMap["client_id"].(string)
-	clientSecret, _ := tokenMap["client_secret"].(string)
-	tokenURI, _ := tokenMap["token_uri"].(string)
-
-	if refreshToken == "" || clientID == "" || clientSecret == "" {
-		return "", fmt.Errorf("missing refresh credentials")
-	}
-	if tokenURI == "" {
-		tokenURI = "https://oauth2.googleapis.com/token"
-	}
-
-	data := url.Values{
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {refreshToken},
-		"client_id":     {clientID},
-		"client_secret": {clientSecret},
-	}
-
-	resp, err := httpClient.PostForm(tokenURI, data)
-	if err != nil {
-		return "", fmt.Errorf("refresh request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("refresh failed: status %d", resp.StatusCode)
-	}
-
-	var result map[string]any
-	if errUnmarshal := json.Unmarshal(body, &result); errUnmarshal != nil {
-		return "", fmt.Errorf("decode refresh response: %w", errUnmarshal)
-	}
-
-	newAccessToken, _ := result["access_token"].(string)
-	if newAccessToken == "" {
-		return "", fmt.Errorf("no access_token in refresh response")
-	}
-
-	tokenMap["access_token"] = newAccessToken
-	return newAccessToken, nil
-}
-
 // jsonEqual compares two JSON blobs by parsing them into Go objects and deep comparing.
 func jsonEqual(a, b []byte) bool {
 	var objA any
@@ -513,39 +513,4 @@ func deepEqualJSON(a, b any) bool {
 	default:
 		return false
 	}
-}
-
-func parseJWTExp(token string) (time.Time, bool) {
-	parts := strings.Split(token, ".")
-	if len(parts) < 2 {
-		return time.Time{}, false
-	}
-	payloadSegment := parts[1]
-
-	var data []byte
-	var err error
-	if data, err = base64.RawURLEncoding.DecodeString(payloadSegment); err != nil {
-		if data, err = base64.URLEncoding.DecodeString(payloadSegment); err != nil {
-			padded := payloadSegment
-			if l := len(padded) % 4; l > 0 {
-				padded += strings.Repeat("=", 4-l)
-			}
-			if data, err = base64.URLEncoding.DecodeString(padded); err != nil {
-				if data, err = base64.StdEncoding.DecodeString(padded); err != nil {
-					return time.Time{}, false
-				}
-			}
-		}
-	}
-
-	var claims struct {
-		Exp int64 `json:"exp"`
-	}
-	if err := json.Unmarshal(data, &claims); err != nil {
-		return time.Time{}, false
-	}
-	if claims.Exp == 0 {
-		return time.Time{}, false
-	}
-	return time.Unix(claims.Exp, 0), true
 }

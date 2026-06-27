@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/auth/codex"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -344,8 +343,7 @@ func nextRefreshCheckAt(now time.Time, auth *Auth, interval time.Duration) (time
 		return time.Time{}, false
 	}
 
-	accountType, _ := auth.AccountInfo()
-	if accountType == "api_key" {
+	if auth.AuthKind() == AuthKindAPIKey {
 		return time.Time{}, false
 	}
 
@@ -391,23 +389,6 @@ func nextRefreshCheckAt(now time.Time, auth *Auth, interval time.Duration) (time
 			return now, true
 		}
 		return next, true
-	}
-
-	if strings.ToLower(auth.Provider) == "codex" {
-		refreshToken := ""
-		if auth.Metadata != nil {
-			if rt, ok := auth.Metadata["refresh_token"].(string); ok {
-				refreshToken = strings.TrimSpace(rt)
-			}
-		}
-		if refreshToken == "" && auth.Storage != nil {
-			if tokenStorage, ok := auth.Storage.(*codex.CodexTokenStorage); ok && tokenStorage != nil {
-				refreshToken = strings.TrimSpace(tokenStorage.RefreshToken)
-			}
-		}
-		if refreshToken == "" {
-			return time.Time{}, false
-		}
 	}
 
 	provider := strings.ToLower(auth.Provider)
