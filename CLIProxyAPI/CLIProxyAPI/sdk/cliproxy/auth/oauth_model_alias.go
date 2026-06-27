@@ -23,6 +23,14 @@ type oauthModelAliasEntry struct {
 	forceMapping  bool
 }
 
+// AliasChannelEntry pairs a channel name with its resolved alias entry.
+type AliasChannelEntry struct {
+	Channel       string
+	UpstreamModel string
+	ForceMapping  bool
+	ConfigAlias   string
+}
+
 type oauthModelAliasTable struct {
 	// reverse maps channel -> alias (lower) -> entry with upstream model and flags.
 	reverse map[string]map[string]oauthModelAliasEntry
@@ -73,6 +81,39 @@ func compileOAuthModelAliasTable(aliases map[string][]internalconfig.OAuthModelA
 	}
 	if len(out.reverse) == 0 {
 		out.reverse = nil
+	}
+	return out
+}
+
+// entriesForAlias returns all entries across all channels that match the given alias.
+// Returns nil if the table is nil, empty, or no entries match.
+func (t *oauthModelAliasTable) entriesForAlias(requestedModel string) []AliasChannelEntry {
+	if t == nil || t.reverse == nil {
+		return nil
+	}
+	requestResult, candidates := modelAliasLookupCandidates(requestedModel)
+	if len(candidates) == 0 {
+		return nil
+	}
+	var out []AliasChannelEntry
+	for channel, rev := range t.reverse {
+		for _, candidate := range candidates {
+			key := strings.ToLower(strings.TrimSpace(candidate))
+			if key == "" {
+				continue
+			}
+			entry, exists := rev[key]
+			if !exists {
+				continue
+			}
+			out = append(out, AliasChannelEntry{
+				Channel:       channel,
+				UpstreamModel: preserveResolvedModelSuffix(entry.upstreamModel, requestResult),
+				ForceMapping:  entry.forceMapping,
+				ConfigAlias:   entry.configAlias,
+			})
+			break
+		}
 	}
 	return out
 }

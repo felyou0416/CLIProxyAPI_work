@@ -1262,6 +1262,22 @@ func executionAliasPoolModel(auth *Auth, requestedModel string, aliasResult OAut
 	return requestedModel
 }
 
+// resolveAggregateMembers returns all OAuth model alias entries for the given
+// requested model across all configured channels. Returns nil if no aggregate
+// members exist. This is used to determine the full set of aggregate members
+// so the execution loop can retry across them when one fails.
+func (m *Manager) resolveAggregateMembers(requestedModel string) []AliasChannelEntry {
+	if m == nil || requestedModel == "" {
+		return nil
+	}
+	raw := m.oauthModelAlias.Load()
+	table, _ := raw.(*oauthModelAliasTable)
+	if table == nil {
+		return nil
+	}
+	return table.entriesForAlias(requestedModel)
+}
+
 func (m *Manager) resolveAPIKeyModelAliasWithResult(auth *Auth, requestedModel string) OAuthModelAliasResult {
 	if m == nil || auth == nil {
 		return OAuthModelAliasResult{}
@@ -2475,13 +2491,19 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 	homeAuthCount := 1
 	tried := make(map[string]struct{})
 	attempted := make(map[string]struct{})
+	aggMembers := m.resolveAggregateMembers(routeModel)
+	aggTriedModels := make(map[string]struct{})
 	var lastErr error
 	for {
 		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials {
-			if lastErr != nil {
+			if len(aggMembers) > 1 && len(aggTriedModels) < len(aggMembers) {
+				// Aggregate alias: continue trying even if credential limit reached,
+				// as long as untried aggregate members remain.
+			} else if lastErr != nil {
 				return cliproxyexecutor.Response{}, lastErr
+			} else {
+				return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 			}
-			return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 		}
 		pickOpts := opts
 		if homeMode {
@@ -2531,6 +2553,9 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 			execOpts := opts
 			execReq, execOpts = applyRequestAfterAuthInterceptor(execCtx, executor, provider, execReq, execOpts, requestedModelAliasFromOptions(execOpts, routeModel))
 			resp, errExec := executor.Execute(execCtx, auth, execReq, execOpts)
+			if len(aggMembers) > 1 {
+				aggTriedModels[upstreamModel] = struct{}{}
+			}
 			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: errExec == nil}
 			if errExec != nil {
 				if errCtx := execCtx.Err(); errCtx != nil {
@@ -2577,13 +2602,19 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 	homeAuthCount := 1
 	tried := make(map[string]struct{})
 	attempted := make(map[string]struct{})
+	aggMembers := m.resolveAggregateMembers(routeModel)
+	aggTriedModels := make(map[string]struct{})
 	var lastErr error
 	for {
 		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials {
-			if lastErr != nil {
+			if len(aggMembers) > 1 && len(aggTriedModels) < len(aggMembers) {
+				// Aggregate alias: continue trying even if credential limit reached,
+				// as long as untried aggregate members remain.
+			} else if lastErr != nil {
 				return cliproxyexecutor.Response{}, lastErr
+			} else {
+				return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 			}
-			return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 		}
 		pickOpts := opts
 		if homeMode {
@@ -2633,6 +2664,9 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 			execOpts := opts
 			execReq, execOpts = applyRequestAfterAuthInterceptor(execCtx, executor, provider, execReq, execOpts, requestedModelAliasFromOptions(execOpts, routeModel))
 			resp, errExec := executor.CountTokens(execCtx, auth, execReq, execOpts)
+			if len(aggMembers) > 1 {
+				aggTriedModels[upstreamModel] = struct{}{}
+			}
 			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: errExec == nil}
 			if errExec != nil {
 				if errCtx := execCtx.Err(); errCtx != nil {
@@ -2679,13 +2713,19 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 	homeAuthCount := 1
 	tried := make(map[string]struct{})
 	attempted := make(map[string]struct{})
+	aggMembers := m.resolveAggregateMembers(routeModel)
+	aggTriedModels := make(map[string]struct{})
 	var lastErr error
 	for {
 		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials {
-			if lastErr != nil {
+			if len(aggMembers) > 1 && len(aggTriedModels) < len(aggMembers) {
+				// Aggregate alias: continue trying even if credential limit reached,
+				// as long as untried aggregate members remain.
+			} else if lastErr != nil {
 				return nil, lastErr
+			} else {
+				return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
 			}
-			return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
 		}
 		pickOpts := opts
 		if homeMode {
@@ -2726,6 +2766,11 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 			continue
 		}
 		execReq := sanitizeDownstreamWebsocketFallbackRequest(execCtx, auth, req)
+		if len(aggMembers) > 1 {
+			for _, upstreamModel := range models {
+				aggTriedModels[upstreamModel] = struct{}{}
+			}
+		}
 		streamResult, errStream := m.executeStreamWithModelPool(execCtx, executor, auth, provider, execReq, opts, routeModel, models, pooled, aliasResult)
 		if errStream != nil {
 			if errCtx := execCtx.Err(); errCtx != nil {
