@@ -1,4 +1,5 @@
 import subprocess
+import psutil
 import threading
 import time
 import socket
@@ -30,6 +31,13 @@ from backend.state import load_state, save_state, get_proxy_bind_host, get_proxy
 from backend.runtime_env import command_exists, is_windows, cli_binary_hint
 
 process_lock = threading.Lock()
+
+def get_process_name(pid):
+    """Return the process name for a given PID using psutil, or None if unavailable."""
+    try:
+        return psutil.Process(pid).name()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return None
 processes = {'device_login': None, 'proxy': None, 'oauth_manager': None, 'openclaw': None}
 tool_processes: dict = {}
 tool_states: dict = {}
@@ -1804,11 +1812,11 @@ def current_status(include_logs: bool = True):
 
     status = {
         'selected_auth': selected_display,
-        'selected_auth_ref': selected_refs[0] if selected_refs else selected_ref,
+        'selected_auth_ref': selected_refs[0] if selected_refs else None,
         'selected_auths': [item.get('name') for item in selected_items],
         'selected_auth_refs': [item.get('id') for item in selected_items],
         'applied_auth': applied_display,
-        'applied_auth_ref': applied_refs[0] if applied_refs else applied_ref,
+        'applied_auth_ref': applied_refs[0] if applied_refs else None,
         'applied_auths': [item.get('name') for item in applied_items],
         'applied_auth_refs': [item.get('id') for item in applied_items],
         'selected_provider': ', '.join(sorted({item.get('provider') for item in selected_items if item.get('provider')})) or None,
