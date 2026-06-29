@@ -13,7 +13,7 @@ const PROXY_PORT = parseInt(process.env.CLIPROXYAPI_PROXY_PORT || '8317', 10);
 
 function getResourcesPath() {
   return app.isPackaged
-    ? path.join(process.resourcesPath, 'resources')
+    ? process.resourcesPath
     : path.join(__dirname, 'resources');
 }
 

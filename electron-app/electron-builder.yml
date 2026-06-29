@@ -24,4 +24,4 @@ files:
 
 extraResources:
   - from: resources/
-    to: resources/
+    to: "."
