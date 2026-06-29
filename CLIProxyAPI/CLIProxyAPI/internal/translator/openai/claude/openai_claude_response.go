@@ -374,6 +374,20 @@ func convertOpenAIDoneToAnthropic(param *ConvertOpenAIResponseToAnthropicParams)
 
 	stopTextContentBlock(param, &results)
 
+	// If no content blocks were started and no tool calls, add an empty text content block to satisfy Anthropic requirements.
+	if !param.ContentBlocksStopped && param.TextContentBlockIndex == -1 && len(param.ToolCallsAccumulator) == 0 {
+		param.TextContentBlockIndex = param.NextContentBlockIndex
+		param.NextContentBlockIndex++
+		contentBlockStartJSON := []byte(`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
+		contentBlockStartJSON, _ = sjson.SetBytes(contentBlockStartJSON, "index", param.TextContentBlockIndex)
+		results = append(results, translatorcommon.AppendSSEEventBytes(nil, "content_block_start", contentBlockStartJSON, 2))
+		// Immediately stop it.
+		contentBlockStopJSON := []byte(`{"type":"content_block_stop","index":0}`)
+		contentBlockStopJSON, _ = sjson.SetBytes(contentBlockStopJSON, "index", param.TextContentBlockIndex)
+		results = append(results, translatorcommon.AppendSSEEventBytes(nil, "content_block_stop", contentBlockStopJSON, 2))
+		param.ContentBlocksStopped = true
+	}
+
 	if !param.ContentBlocksStopped {
 		for _, index := range toolCallAccumulatorIndexes(param.ToolCallsAccumulator) {
 			accumulator := param.ToolCallsAccumulator[index]
@@ -482,6 +496,12 @@ func convertOpenAINonStreamingToAnthropic(rawJSON []byte) [][]byte {
 		if cachedTokens > 0 {
 			out, _ = sjson.SetBytes(out, "usage.cache_read_input_tokens", cachedTokens)
 		}
+	}
+
+	// Ensure there is at least one content block (empty text) if none were added.
+	if gjson.ParseBytes(out).Get("content").Array() == nil || len(gjson.ParseBytes(out).Get("content").Array()) == 0 {
+		emptyBlock := []byte(`{"type":"text","text":""}`)
+		out, _ = sjson.SetRawBytes(out, "content.-1", emptyBlock)
 	}
 
 	return [][]byte{out}

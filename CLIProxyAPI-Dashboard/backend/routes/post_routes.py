@@ -1,4 +1,4 @@
-from backend.auth import create_manual_auth_entry, create_manual_auth_bundle_entry, list_auth_files, build_auth_ref, set_provider_model_override, delete_provider_model_override, create_custom_aggregate_alias, add_custom_aggregate_alias_members, set_custom_aggregate_alias_members, delete_custom_aggregate_alias, move_custom_aggregate_alias, rename_custom_aggregate_alias, copy_custom_aggregate_alias, set_custom_aggregate_alias_enabled, delete_auth_entries, save_model_proxy_rules, rebuild_runtime_config_from_state, get_configured_provider_models, reorder_custom_aggregate_aliases
+from backend.auth import create_manual_auth_entry, create_manual_auth_bundle_entry, list_auth_files, build_auth_ref, set_provider_model_override, delete_provider_model_override, create_custom_aggregate_alias, add_custom_aggregate_alias_members, set_custom_aggregate_alias_members, delete_custom_aggregate_alias, move_custom_aggregate_alias, rename_custom_aggregate_alias, copy_custom_aggregate_alias, set_custom_aggregate_alias_enabled, delete_auth_entries, save_model_proxy_rules, rebuild_runtime_config_from_state, get_configured_provider_models, reorder_custom_aggregate_aliases, set_custom_aggregate_alias_version
 from backend.api_keys import create_api_key, update_api_key, delete_api_key, reset_api_key_usage, reveal_api_key
 from backend.state import load_state, save_state, normalize_route_strategy
 from backend.processes import start_device_login, stop_device_login, start_proxy, stop_proxy, restart_proxy, start_project, start_oauth_manager, stop_oauth_manager, start_openclaw_gateway, stop_openclaw_gateway, restart_openclaw_gateway, current_status, ensure_firewall_access, ensure_custom_firewall_ports, remove_custom_firewall_ports, ensure_external_firewall_ports, remove_external_firewall_ports, ensure_port_bindings, remove_port_bindings, set_ip_helper_service, stop_dashboard_panel, restart_dashboard_panel
@@ -464,6 +464,12 @@ def handle_post(handler, parsed, data):
                     bool(data.get('enabled')),
                 )
                 message = f'{"Enabled" if item.get("enabled") else "Disabled"} aggregate ID: {item.get("alias_id")}'
+            elif action == 'set_version':
+                item = set_custom_aggregate_alias_version(
+                    data.get('alias_id', ''),
+                    data.get('version', '1'),
+                )
+                message = f'Switched aggregate ID: {item.get("alias_id")} to version {item.get("active_version")}'
             elif action == 'add_members':
                 item = add_custom_aggregate_alias_members(
                     data.get('alias_id', ''),

@@ -420,16 +420,54 @@ button.danger {
 button:disabled { opacity: .55; cursor: not-allowed; }
 .message {
   display: none;
-  padding: 8px 10px;
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  z-index: 9999;
+  min-width: 220px;
+  max-width: 420px;
+  padding: 12px 18px 12px 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 12px;
   background: var(--panel);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.08);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  pointer-events: auto;
+  backdrop-filter: blur(8px);
 }
-.message.show { display: block; }
+.message.show {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.message.show::before {
+  content: '✓';
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--success, #10b981);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
 .message.error {
   color: var(--danger);
-  border-color: #fecaca;
-  background: #fff5f5;
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+  background: color-mix(in srgb, var(--danger) 6%, var(--panel));
+}
+.message.error.show::before {
+  content: '!';
+  background: var(--danger, #ef4444);
+}
+.message.hiding {
+  animation: toast-out 0.3s cubic-bezier(0.4, 0, 1, 1) forwards;
 }
 .status-item-accent {
   background: #f1f1ff;

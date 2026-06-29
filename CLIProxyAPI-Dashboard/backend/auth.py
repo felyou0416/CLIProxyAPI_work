@@ -1968,7 +1968,29 @@ def _save_aggregate_model_aliases(
     copy_groups: dict | None = None,
 ):
     AGGREGATE_MODEL_ALIASES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    payload = dict(aliases or {})
+    raw_payload = {}
+    if AGGREGATE_MODEL_ALIASES_FILE.exists():
+        try:
+            raw_payload = json.loads(AGGREGATE_MODEL_ALIASES_FILE.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    if not isinstance(raw_payload, dict):
+        raw_payload = {}
+
+    payload = {}
+    for alias_id, new_members in (aliases or {}).items():
+        if alias_id in ('__hidden_builtin__', '__disabled__', '__copy_groups__'):
+            continue
+        old_val = raw_payload.get(alias_id)
+        if isinstance(old_val, dict):
+            active_ver = str(old_val.get('active_version') or '1')
+            updated_dict = dict(old_val)
+            updated_dict['members'] = new_members
+            updated_dict[f'version_{active_ver}_members'] = new_members
+            payload[alias_id] = updated_dict
+        else:
+            payload[alias_id] = new_members
+
     if hidden_aliases is None:
         hidden_aliases = _load_hidden_aggregate_aliases()
     if disabled_aliases is None:
@@ -2008,6 +2030,43 @@ def _save_aggregate_model_aliases(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding='utf-8',
     )
+
+
+def resolve_aggregate_members(raw_members: list[dict]):
+    resolved = []
+    seen = set()
+    for member in raw_members or []:
+        if not isinstance(member, dict):
+            continue
+        provider = str(member.get('provider') or '').strip().lower()
+        upstream_id = str(member.get('upstream_id') or '').strip()
+        if not provider or not upstream_id:
+            continue
+        mapped = resolve_provider_mapping(provider, upstream_id, upstream_id)
+        runtime_upstream_id = normalize_runtime_model_id(
+            str(mapped.get('target_provider') or provider).strip(),
+            str(mapped.get('upstream_id') or upstream_id).strip(),
+        ) or upstream_id
+        call_id = str(mapped.get('call_id') or '').strip()
+        key = (provider, upstream_id, call_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        resolved.append({
+            'provider': provider,
+            'canonical_provider': _canonical_provider_name(provider),
+            'upstream_id': upstream_id,
+            'call_id': call_id,
+            'target_provider': str(mapped.get('target_provider') or provider).strip().lower() or provider,
+            'route_kind': _provider_route_kind(provider, str(mapped.get('target_provider') or provider).strip().lower() or provider),
+            'runtime_upstream_id': runtime_upstream_id,
+            'capability_score': max(0, min(100, int(_model_capability_raw_score(provider, upstream_id, call_id)))),
+            'runtime_registered': bool(mapped.get('runtime_registered')),
+            'matched_auth_count': int(mapped.get('matched_auth_count') or 0),
+            'issue_code': str(mapped.get('issue_code') or '').strip() or None,
+            'issue_message': str(mapped.get('issue_message') or '').strip() or None,
+        })
+    return resolved
 
 
 def _ordered_aggregate_alias_ids(alias_map: dict, saved_aliases: dict | None = None):
@@ -2147,11 +2206,6 @@ def set_custom_aggregate_alias_enabled(alias_id: str, enabled: bool):
     copy_groups = _load_aggregate_copy_groups()
     if bool(enabled):
         disabled_aliases.discard(alias_value)
-        group_id = _copy_group_id_for_alias(copy_groups, alias_value)
-        if group_id:
-            for sibling_alias in copy_groups.get(group_id, []):
-                if sibling_alias != alias_value:
-                    disabled_aliases.add(sibling_alias)
     else:
         disabled_aliases.add(alias_value)
         hidden_aliases.discard(alias_value)
@@ -2281,12 +2335,41 @@ def rename_custom_aggregate_alias(alias_id: str, new_alias_id: str):
     }
 
 
-def add_custom_aggregate_alias_members(alias_id: str, members: list[dict] | None):
+def add_custom_aggregate_alias_members(alias_id: str, members: list[dict] | None, version: str | None = None):
     alias_value = _safe_name(alias_id, '')
     if not alias_value:
         raise ValueError('aggregate alias id is required.')
-    aliases = _load_aggregate_model_aliases()
-    alias_members = aliases.setdefault(alias_value, [])
+
+    raw_payload = {}
+    if AGGREGATE_MODEL_ALIASES_FILE.exists():
+        try:
+            raw_payload = json.loads(AGGREGATE_MODEL_ALIASES_FILE.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    if not isinstance(raw_payload, dict):
+        raw_payload = {}
+
+    old_val = raw_payload.get(alias_value)
+    if not isinstance(old_val, dict):
+        members_list = old_val if isinstance(old_val, list) else []
+        old_val = {
+            'active_version': '1',
+            'version_1_members': members_list,
+            'version_2_members': [],
+            'version_3_members': [],
+            'members': members_list
+        }
+
+    target_version = str(version or old_val.get('active_version') or '1').strip()
+    if target_version not in ('1', '2', '3'):
+        target_version = '1'
+
+    target_key = f'version_{target_version}_members'
+    alias_members = old_val.setdefault(target_key, [])
+    if not isinstance(alias_members, list):
+        alias_members = []
+        old_val[target_key] = alias_members
+
     seen = {(str(item.get('provider') or '').strip().lower(), str(item.get('upstream_id') or '').strip()) for item in alias_members if isinstance(item, dict)}
     added = 0
     for raw_member in members or []:
@@ -2305,19 +2388,52 @@ def add_custom_aggregate_alias_members(alias_id: str, members: list[dict] | None
             'upstream_id': upstream_id,
         })
         added += 1
-    _save_aggregate_model_aliases(aliases)
+
+    if target_version == str(old_val.get('active_version') or '1'):
+        old_val['members'] = alias_members
+
+    raw_payload[alias_value] = old_val
+    AGGREGATE_MODEL_ALIASES_FILE.write_text(
+        json.dumps(raw_payload, ensure_ascii=False, indent=2),
+        encoding='utf-8',
+    )
+
     return {
         'alias_id': alias_value,
-        'members': alias_members,
+        'members': old_val['members'],
         'added_count': added,
     }
 
 
-def set_custom_aggregate_alias_members(alias_id: str, members: list[dict] | None):
+def set_custom_aggregate_alias_members(alias_id: str, members: list[dict] | None, version: str | None = None):
     alias_value = _safe_name(alias_id, '')
     if not alias_value:
         raise ValueError('aggregate alias id is required.')
-    aliases = _load_aggregate_model_aliases()
+
+    raw_payload = {}
+    if AGGREGATE_MODEL_ALIASES_FILE.exists():
+        try:
+            raw_payload = json.loads(AGGREGATE_MODEL_ALIASES_FILE.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    if not isinstance(raw_payload, dict):
+        raw_payload = {}
+
+    old_val = raw_payload.get(alias_value)
+    if not isinstance(old_val, dict):
+        members_list = old_val if isinstance(old_val, list) else []
+        old_val = {
+            'active_version': '1',
+            'version_1_members': members_list,
+            'version_2_members': [],
+            'version_3_members': [],
+            'members': members_list
+        }
+
+    target_version = str(version or old_val.get('active_version') or '1').strip()
+    if target_version not in ('1', '2', '3'):
+        target_version = '1'
+
     normalized = []
     seen = set()
     for raw_member in members or []:
@@ -2335,12 +2451,66 @@ def set_custom_aggregate_alias_members(alias_id: str, members: list[dict] | None
             'provider': provider,
             'upstream_id': upstream_id,
         })
-    aliases[alias_value] = normalized
-    _save_aggregate_model_aliases(aliases)
+
+    old_val[f'version_{target_version}_members'] = normalized
+    if target_version == str(old_val.get('active_version') or '1'):
+        old_val['members'] = normalized
+
+    raw_payload[alias_value] = old_val
+    AGGREGATE_MODEL_ALIASES_FILE.write_text(
+        json.dumps(raw_payload, ensure_ascii=False, indent=2),
+        encoding='utf-8',
+    )
+
     return {
         'alias_id': alias_value,
-        'members': normalized,
+        'members': old_val['members'],
         'saved_count': len(normalized),
+    }
+
+
+def set_custom_aggregate_alias_version(alias_id: str, version: str):
+    alias_value = _safe_name(alias_id, '')
+    if not alias_value:
+        raise ValueError('aggregate alias id is required.')
+
+    raw_payload = {}
+    if AGGREGATE_MODEL_ALIASES_FILE.exists():
+        try:
+            raw_payload = json.loads(AGGREGATE_MODEL_ALIASES_FILE.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    if not isinstance(raw_payload, dict):
+        raw_payload = {}
+
+    old_val = raw_payload.get(alias_value)
+    if not isinstance(old_val, dict):
+        members_list = old_val if isinstance(old_val, list) else []
+        old_val = {
+            'active_version': '1',
+            'version_1_members': members_list,
+            'version_2_members': [],
+            'version_3_members': [],
+            'members': members_list
+        }
+
+    target_version = str(version or '1').strip()
+    if target_version not in ('1', '2', '3'):
+        target_version = '1'
+
+    old_val['active_version'] = target_version
+    old_val['members'] = old_val.get(f'version_{target_version}_members') or []
+    raw_payload[alias_value] = old_val
+
+    AGGREGATE_MODEL_ALIASES_FILE.write_text(
+        json.dumps(raw_payload, ensure_ascii=False, indent=2),
+        encoding='utf-8',
+    )
+
+    return {
+        'alias_id': alias_value,
+        'active_version': target_version,
+        'members': old_val['members']
     }
 
 
@@ -3575,19 +3745,46 @@ def get_configured_aggregate_models():
                 str(item.get('call_id') or ''),
             )
         )
-
     result = []
     hidden_aliases = _load_hidden_aggregate_aliases()
+    raw_payload = {}
+    if AGGREGATE_MODEL_ALIASES_FILE.exists():
+        try:
+            raw_payload = json.loads(AGGREGATE_MODEL_ALIASES_FILE.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    if not isinstance(raw_payload, dict):
+        raw_payload = {}
+
     for alias_id in _ordered_aggregate_alias_ids(alias_map, saved_aliases):
         if alias_id in hidden_aliases:
             continue
         entry = alias_map[alias_id]
+        raw_val = raw_payload.get(alias_id) or {}
+        active_version = '1'
+        version_1_members = []
+        version_2_members = []
+        version_3_members = []
+        if isinstance(raw_val, dict):
+            active_version = str(raw_val.get('active_version') or '1')
+            version_1_members = raw_val.get('version_1_members') or []
+            version_2_members = raw_val.get('version_2_members') or []
+            version_3_members = raw_val.get('version_3_members') or []
+        else:
+            version_1_members = raw_val if isinstance(raw_val, list) else []
+            version_2_members = []
+            version_3_members = []
+
         result.append({
             'alias_id': alias_id,
             'builtin': bool(entry.get('builtin')),
             'enabled': alias_id not in disabled_aliases,
             'members': entry.get('members') or [],
             'member_count': len(entry.get('members') or []),
+            'active_version': active_version,
+            'version_1_members': resolve_aggregate_members(version_1_members),
+            'version_2_members': resolve_aggregate_members(version_2_members),
+            'version_3_members': resolve_aggregate_members(version_3_members),
         })
     return result
 

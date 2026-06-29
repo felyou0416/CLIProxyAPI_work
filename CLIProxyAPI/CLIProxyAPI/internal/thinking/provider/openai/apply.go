@@ -31,6 +31,16 @@ func init() {
 	thinking.RegisterProvider("openai", NewApplier())
 }
 
+// setOrStripReasoningEffort either strips reasoning_effort (for "none") or sets it.
+func setOrStripReasoningEffort(body []byte, effort string) ([]byte, error) {
+	if effort == string(thinking.LevelNone) {
+		result, _ := sjson.DeleteBytes(body, "reasoning_effort")
+		return result, nil
+	}
+	result, _ := sjson.SetBytes(body, "reasoning_effort", effort)
+	return result, nil
+}
+
 // Apply applies thinking configuration to OpenAI request body.
 //
 // Expected output format:
@@ -56,8 +66,7 @@ func (a *Applier) Apply(body []byte, config thinking.ThinkingConfig, modelInfo *
 	}
 
 	if config.Mode == thinking.ModeLevel {
-		result, _ := sjson.SetBytes(body, "reasoning_effort", string(config.Level))
-		return result, nil
+		return setOrStripReasoningEffort(body, string(config.Level))
 	}
 
 	effort := ""
@@ -77,8 +86,7 @@ func (a *Applier) Apply(body []byte, config thinking.ThinkingConfig, modelInfo *
 		return body, nil
 	}
 
-	result, _ := sjson.SetBytes(body, "reasoning_effort", effort)
-	return result, nil
+	return setOrStripReasoningEffort(body, effort)
 }
 
 func applyCompatibleOpenAI(body []byte, config thinking.ThinkingConfig) ([]byte, error) {
@@ -112,6 +120,6 @@ func applyCompatibleOpenAI(body []byte, config thinking.ThinkingConfig) ([]byte,
 		return body, nil
 	}
 
-	result, _ := sjson.SetBytes(body, "reasoning_effort", effort)
-	return result, nil
+	return setOrStripReasoningEffort(body, effort)
 }
+

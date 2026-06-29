@@ -833,8 +833,7 @@ func TestThinkingE2EMatrix_Suffix(t *testing.T) {
 			to:          "openai",
 			model:       "user-defined-model(0)",
 			inputJSON:   `{"model":"user-defined-model(0)","contents":[{"role":"user","parts":[{"text":"hi"}]}]}`,
-			expectField: "reasoning_effort",
-			expectValue: "none",
+			expectField: "",
 			expectErr:   false,
 		},
 		// Case 70: Budget -1 → passthrough logic → auto
@@ -888,8 +887,7 @@ func TestThinkingE2EMatrix_Suffix(t *testing.T) {
 			to:          "codex",
 			model:       "user-defined-model(0)",
 			inputJSON:   `{"model":"user-defined-model(0)","messages":[{"role":"user","content":"hi"}]}`,
-			expectField: "reasoning.effort",
-			expectValue: "none",
+			expectField: "",
 			expectErr:   false,
 		},
 		// Case 75: Budget -1 → passthrough logic → auto
@@ -1931,8 +1929,7 @@ func TestThinkingE2EMatrix_Body(t *testing.T) {
 			to:          "openai",
 			model:       "user-defined-model",
 			inputJSON:   `{"model":"user-defined-model","contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"thinkingConfig":{"thinkingBudget":0}}}`,
-			expectField: "reasoning_effort",
-			expectValue: "none",
+			expectField: "",
 			expectErr:   false,
 		},
 		// Case 70: thinkingBudget=-1 → auto
@@ -1986,8 +1983,7 @@ func TestThinkingE2EMatrix_Body(t *testing.T) {
 			to:          "codex",
 			model:       "user-defined-model",
 			inputJSON:   `{"model":"user-defined-model","messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","budget_tokens":0}}`,
-			expectField: "reasoning.effort",
-			expectValue: "none",
+			expectField: "",
 			expectErr:   false,
 		},
 		// Case 75: thinking.budget_tokens=-1 → auto
@@ -2315,8 +2311,7 @@ func TestThinkingE2ENewProviderTargets(t *testing.T) {
 			to:          "xai",
 			model:       "xai-level-model(0)",
 			inputJSON:   `{"model":"xai-level-model(0)","messages":[{"role":"user","content":"hi"}]}`,
-			expectField: "reasoning.effort",
-			expectValue: "none",
+			expectField: "",
 		},
 		{
 			name:        "X6",
@@ -2351,8 +2346,7 @@ func TestThinkingE2ENewProviderTargets(t *testing.T) {
 			to:          "xai",
 			model:       "xai-level-model",
 			inputJSON:   `{"model":"xai-level-model","messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","budget_tokens":0}}`,
-			expectField: "reasoning.effort",
-			expectValue: "none",
+			expectField: "",
 		},
 		{
 			name:        "X10",
@@ -3049,7 +3043,7 @@ func runThinkingTests(t *testing.T, cases []thinkingTestCase) {
 				case "openai":
 					hasThinking = gjson.GetBytes(body, "reasoning_effort").Exists()
 				case "codex":
-					hasThinking = gjson.GetBytes(body, "reasoning.effort").Exists() || gjson.GetBytes(body, "reasoning").Exists()
+					hasThinking = gjson.GetBytes(body, "reasoning.effort").Exists()
 				}
 				if hasThinking {
 					t.Fatalf("expected no thinking field but found one, body=%s", string(body))

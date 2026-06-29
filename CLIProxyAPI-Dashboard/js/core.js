@@ -661,11 +661,35 @@ function setText(id, value, fallback = '') {
   if (el) el.textContent = value || fallback;
 }
 
+let _messageTimer = null;
+let _messageHideTimer = null;
+
 function showMessage(text, isError = false) {
   const el = document.getElementById('message');
   if (!el) return;
+
+  // Cancel any pending timers
+  if (_messageTimer) { clearTimeout(_messageTimer); _messageTimer = null; }
+  if (_messageHideTimer) { clearTimeout(_messageHideTimer); _messageHideTimer = null; }
+
+  // Reset animation by removing and re-adding .show
+  el.className = 'message';
   el.textContent = text;
+
+  // Force reflow so animation re-triggers
+  void el.offsetWidth;
+
   el.className = `message show ${isError ? 'error' : 'success'}`;
+
+  // Auto-dismiss: errors stay longer (6s), success 4s
+  const delay = isError ? 6000 : 4000;
+  _messageTimer = setTimeout(() => {
+    el.classList.add('hiding');
+    _messageHideTimer = setTimeout(() => {
+      el.className = 'message';
+      el.textContent = '';
+    }, 320);
+  }, delay);
 }
 
 function statusPill(running) {

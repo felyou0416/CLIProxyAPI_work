@@ -27,6 +27,9 @@ const aggregateMemberSaveDebounces = new Map();
 const aggregateMemberRollbackSnapshots = new Map();
 const AGGREGATE_MEMBER_SAVE_DEBOUNCE_MS = 200;
 const aggregateMemberMutationVersions = new Map();
+let aggregateSortMode = 'name';
+let editingAliasId = '';
+let viewedAggregateAliasVersion = '1';
 let aggregateRefreshVersion = 0;
 let draggedAliasId = null;
 let draggedMemberKey = null;
@@ -278,16 +281,22 @@ function renderAggregateCurrentViews(includeSources = false) {
   if (includeSources && aggregateSourceListLoaded) renderAggregateProviderSourceList();
 }
 
-function updateAggregateMembersInCache(aliasId, members) {
+function updateAggregateMembersInCache(aliasId, members, version = null) {
   const targetId = String(aliasId || '').trim();
   const index = aggregateItemsCache.findIndex((item) => String(item.alias_id || '').trim() === targetId);
   if (index < 0) return false;
   const normalizedMembers = Array.isArray(members) ? members : [];
-  aggregateItemsCache[index] = {
+  const updatedItem = {
     ...aggregateItemsCache[index],
-    members: normalizedMembers,
-    member_count: normalizedMembers.length,
   };
+  const targetVersion = version || viewedAggregateAliasVersion || '1';
+  updatedItem[`version_${targetVersion}_members`] = normalizedMembers;
+  const activeVersion = updatedItem.active_version || '1';
+  if (targetVersion === activeVersion) {
+    updatedItem.members = normalizedMembers;
+    updatedItem.member_count = normalizedMembers.length;
+  }
+  aggregateItemsCache[index] = updatedItem;
   return true;
 }
 
@@ -367,6 +376,7 @@ function flushAggregateMemberSave(targetId, entry) {
         alias_id: targetId,
         members: entry.payloadMembers,
         skip_restart: entry.skipRestart,
+        version: entry.version,
       });
       if (entry.successMessage) showMessage(entry.successMessage);
       return true;
@@ -411,11 +421,13 @@ async function flushPendingAggregateMemberSaves() {
   return true;
 }
 
-async function queueAggregateMemberSave(aliasId, members, successMessage = '', skipRestart = true) {
+async function queueAggregateMemberSave(aliasId, members, successMessage = '', skipRestart = true, version = null) {
   const targetId = String(aliasId || '').trim();
   if (!targetId) return false;
   const payloadMembers = aggregateMemberPayload(members);
   renderAggregateCurrentViews(true);
+
+  const targetVersion = version || viewedAggregateAliasVersion || '1';
 
   return new Promise((resolve) => {
     let entry = aggregateMemberSaveDebounces.get(targetId);
@@ -425,6 +437,7 @@ async function queueAggregateMemberSave(aliasId, members, successMessage = '', s
         payloadMembers,
         successMessage,
         skipRestart: Boolean(skipRestart),
+        version: targetVersion,
         resolvers: [],
       };
       aggregateMemberSaveDebounces.set(targetId, entry);
@@ -433,6 +446,7 @@ async function queueAggregateMemberSave(aliasId, members, successMessage = '', s
     entry.payloadMembers = payloadMembers;
     entry.successMessage = successMessage;
     entry.skipRestart = Boolean(skipRestart);
+    entry.version = targetVersion;
     entry.resolvers.push(resolve);
 
     if (entry.timer) clearTimeout(entry.timer);
@@ -614,12 +628,18 @@ function renderAggregateAliasList() {
     root.innerHTML = `<div class="auth-empty">${getLanguage() === 'zh' ? '暂无聚合 ID。' : 'No aggregate IDs yet.'}</div>`;
     return;
   }
-
-  if (!aggregateItemsCache.some((item) => item.alias_id === activeAggregateAliasId)) {
-    activeAggregateAliasId = String(aggregateItemsCache[0]?.alias_id || '');
+  let items = [...aggregateItemsCache];
+  if (aggregateSortMode === 'name') {
+    items.sort((a, b) => String(a.alias_id || '').localeCompare(String(b.alias_id || '')));
   }
 
-  root.innerHTML = aggregateItemsCache.map((item, index) => {
+  if (!items.some((item) => item.alias_id === activeAggregateAliasId)) {
+    activeAggregateAliasId = String(items[0]?.alias_id || '');
+  }
+
+  const isSorted = aggregateSortMode !== 'default';
+
+  root.innerHTML = items.map((item) => {
     const aliasId = String(item.alias_id || '').trim();
     const count = Number(item.member_count || 0);
     const enabled = item.enabled !== false;
@@ -629,23 +649,36 @@ function renderAggregateAliasList() {
     const toggleLabel = enabled
       ? (getLanguage() === 'zh' ? '禁用' : 'Disable')
       : (getLanguage() === 'zh' ? '启用' : 'Enable');
-    return `
-      <div class="aggregate-alias-row ${isActive ? 'is-active' : ''} ${aliasPending ? 'is-pending' : ''} ${enabled ? '' : 'is-disabled'}" draggable="true" data-alias-id="${escapeAggregateHtml(aliasId)}">
-        <div class="aggregate-alias-drag-handle" title="${getLanguage() === 'zh' ? '拖动排序' : 'Drag to reorder'}">☰</div>
-        <button type="button" class="aggregate-alias-chip ${isActive ? 'is-active' : ''}" data-aggregate-alias="${escapeAggregateHtml(aliasId)}" ${aliasPending ? 'disabled' : ''}>
+    const dragHandleHtml = isSorted
+      ? `<div class="aggregate-alias-drag-handle is-disabled" style="opacity: 0.25; cursor: not-allowed;" title="${getLanguage() === 'zh' ? '当前排序模式下不可拖动' : 'Cannot drag in current sort mode'}">☰</div>`
+      : `<div class="aggregate-alias-drag-handle" title="${getLanguage() === 'zh' ? '拖动排序' : 'Drag to reorder'}">☰</div>`;
+
+    const isEditing = editingAliasId === aliasId;
+    const chipHtml = isEditing
+      ? `<input type="text" class="aggregate-alias-rename-input" data-rename-original="${escapeAggregateHtml(aliasId)}" value="${escapeAggregateHtml(aliasId)}" style="flex: 1; height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--accent); background: var(--panel-2); color: var(--text); font-size: 13px; font-weight: 800; min-width: 0;" />`
+      : `<button type="button" class="aggregate-alias-chip ${isActive ? 'is-active' : ''}" data-aggregate-alias="${escapeAggregateHtml(aliasId)}" ${aliasPending ? 'disabled' : ''}>
           <span>${escapeAggregateHtml(aliasId)}</span>
           <strong>${count} ${getLanguage() === 'zh' ? '个' : ''}</strong>
-        </button>
+        </button>`;
+
+    const actionsHtml = isEditing
+      ? `<button type="button" class="secondary aggregate-alias-action" data-aggregate-alias-save="${escapeAggregateHtml(aliasId)}">${getLanguage() === 'zh' ? '保存' : 'Save'}</button>
+         <button type="button" class="secondary aggregate-alias-action" data-aggregate-alias-cancel="${escapeAggregateHtml(aliasId)}">${getLanguage() === 'zh' ? '取消' : 'Cancel'}</button>`
+      : `<button type="button" class="secondary aggregate-alias-action aggregate-alias-enable-action" data-aggregate-alias-enabled="${escapeAggregateHtml(aliasId)}" data-enabled="${enabled ? '1' : '0'}" ${controlsDisabled}>${toggleLabel}</button>
+         <button type="button" class="secondary aggregate-alias-action" data-aggregate-alias-copy="${escapeAggregateHtml(aliasId)}" ${controlsDisabled}>复制</button>
+         <button type="button" class="secondary aggregate-alias-action" data-aggregate-alias-rename="${escapeAggregateHtml(aliasId)}" ${controlsDisabled}>改名</button>
+         <button type="button" class="danger aggregate-alias-action" data-aggregate-alias-delete="${escapeAggregateHtml(aliasId)}" ${controlsDisabled}>删除</button>`;
+
+    return `
+      <div class="aggregate-alias-row ${isActive ? 'is-active' : ''} ${aliasPending ? 'is-pending' : ''} ${enabled ? '' : 'is-disabled'}" ${isSorted ? '' : 'draggable="true"'} data-alias-id="${escapeAggregateHtml(aliasId)}">
+        ${dragHandleHtml}
+        ${chipHtml}
         <div class="aggregate-alias-actions">
-          <button type="button" class="secondary aggregate-alias-action aggregate-alias-enable-action" data-aggregate-alias-enabled="${escapeAggregateHtml(aliasId)}" data-enabled="${enabled ? '1' : '0'}" ${controlsDisabled}>${toggleLabel}</button>
-          <button type="button" class="secondary aggregate-alias-action" data-aggregate-alias-copy="${escapeAggregateHtml(aliasId)}" ${controlsDisabled}>复制</button>
-          <button type="button" class="secondary aggregate-alias-action" data-aggregate-alias-rename="${escapeAggregateHtml(aliasId)}" ${controlsDisabled}>改名</button>
-          <button type="button" class="danger aggregate-alias-action" data-aggregate-alias-delete="${escapeAggregateHtml(aliasId)}" ${controlsDisabled}>删除</button>
+          ${actionsHtml}
         </div>
       </div>
     `;
   }).join('');
-
   root.querySelectorAll('[data-aggregate-alias]').forEach((btn) => {
     btn.onclick = () => {
       activeAggregateAliasId = btn.getAttribute('data-aggregate-alias') || '';
@@ -665,12 +698,53 @@ function renderAggregateAliasList() {
       await deleteAggregateAlias(btn.getAttribute('data-aggregate-alias-delete') || '');
     };
   });
+
   root.querySelectorAll('[data-aggregate-alias-rename]').forEach((btn) => {
-    btn.onclick = async (event) => {
+    btn.onclick = (event) => {
       event.stopPropagation();
-      await renameAggregateAlias(btn.getAttribute('data-aggregate-alias-rename') || '');
+      editingAliasId = btn.getAttribute('data-aggregate-alias-rename') || '';
+      renderAggregateAliasList();
+      setTimeout(() => {
+        const input = root.querySelector('.aggregate-alias-rename-input');
+        if (input) {
+          input.focus();
+          input.select();
+        }
+      }, 50);
     };
   });
+  root.querySelectorAll('[data-aggregate-alias-save]').forEach((btn) => {
+    btn.onclick = async (event) => {
+      event.stopPropagation();
+      const originalId = btn.getAttribute('data-aggregate-alias-save');
+      const input = root.querySelector(`.aggregate-alias-rename-input[data-rename-original="${escapeAggregateHtml(originalId)}"]`);
+      if (input) {
+        await renameAggregateAlias(originalId, input.value.trim());
+      }
+    };
+  });
+  root.querySelectorAll('[data-aggregate-alias-cancel]').forEach((btn) => {
+    btn.onclick = (event) => {
+      event.stopPropagation();
+      editingAliasId = '';
+      renderAggregateAliasList();
+    };
+  });
+  root.querySelectorAll('.aggregate-alias-rename-input').forEach((input) => {
+    input.onkeydown = async (e) => {
+      if (e.key === 'Enter') {
+        const originalId = input.getAttribute('data-rename-original');
+        await renameAggregateAlias(originalId, input.value.trim());
+      } else if (e.key === 'Escape') {
+        editingAliasId = '';
+        renderAggregateAliasList();
+      }
+    };
+    input.onclick = (e) => {
+      e.stopPropagation();
+    };
+  });
+
   root.querySelectorAll('[data-aggregate-alias-copy]').forEach((btn) => {
     btn.onclick = async (event) => {
       event.stopPropagation();
@@ -715,6 +789,17 @@ function renderAggregateAliasList() {
       }
     });
   });
+}
+
+function changeAggregateSort(mode) {
+  aggregateSortMode = mode;
+  const btnDefault = document.getElementById('btn-sort-default');
+  const btnName = document.getElementById('btn-sort-name');
+  if (btnDefault && btnName) {
+    btnDefault.classList.toggle('is-active', mode === 'default');
+    btnName.classList.toggle('is-active', mode === 'name');
+  }
+  renderAggregateAliasList();
 }
 
 async function reorderAggregateAliases(draggedId, targetId) {
@@ -902,17 +987,35 @@ async function copyAggregateAlias(aliasId) {
     renderAggregateAliasList();
   }
 }
-
-async function renameAggregateAlias(aliasId) {
+async function renameAggregateAlias(aliasId, nextId = null) {
   const targetId = String(aliasId || '').trim();
   if (!targetId || aggregateAliasPendingIds.has(targetId) || hasAggregatePendingWork()) return;
-  const nextId = window.prompt(getLanguage() === 'zh' ? '新的聚合 model ID' : 'New aggregate model ID', targetId);
-  if (nextId === null) return;
-  const normalized = String(nextId || '').trim();
-  if (!normalized || normalized === targetId) return;
-
+  let normalized = '';
+  if (nextId === null) {
+    const prompted = window.prompt(getLanguage() === 'zh' ? '新的聚合 model ID' : 'New aggregate model ID', targetId);
+    if (prompted === null) return;
+    normalized = String(prompted || '').trim();
+  } else {
+    normalized = String(nextId || '').trim();
+  }
+  if (!normalized || normalized === targetId) {
+    editingAliasId = '';
+    renderAggregateAliasList();
+    return;
+  }
   const previousItems = cloneAggregateItems();
-  aggregateAliasPendingIds.add(targetId);
+
+  const idx = aggregateItemsCache.findIndex((item) => String(item.alias_id || '').trim() === targetId);
+  if (idx >= 0) {
+    aggregateItemsCache[idx] = {
+      ...aggregateItemsCache[idx],
+      alias_id: normalized,
+    };
+  }
+  activeAggregateAliasId = normalized;
+
+  aggregateAliasPendingIds.add(normalized);
+  editingAliasId = '';
   renderAggregateAliasList();
   try {
     const res = await api('/api/aggregate-models', 'POST', {
@@ -924,7 +1027,7 @@ async function renameAggregateAlias(aliasId) {
     activeAggregateAliasId = String(res.item?.alias_id || normalized);
     aggregateEditMode = false;
     aggregateEditMembers.clear();
-    aggregateAliasPendingIds.delete(targetId);
+    aggregateAliasPendingIds.delete(normalized);
     showMessage(res.message || (getLanguage() === 'zh' ? `已改名为：${activeAggregateAliasId}` : `Renamed to: ${activeAggregateAliasId}`));
     await loadAggregateModels(true);
   } catch (error) {
@@ -933,11 +1036,10 @@ async function renameAggregateAlias(aliasId) {
     renderAggregateActiveDetails();
     showMessage(getLanguage() === 'zh' ? `聚合 ID 改名失败：${error.message}` : `Failed to rename aggregate ID: ${error.message}`, true);
   } finally {
-    aggregateAliasPendingIds.delete(targetId);
+    aggregateAliasPendingIds.delete(normalized);
     renderAggregateAliasList();
   }
 }
-
 async function startAggregateMemberEdit() {
   const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
   if (!current?.alias_id) {
@@ -995,11 +1097,13 @@ function renderAggregateActiveDetails() {
   const root = document.getElementById('aggregate-member-list');
   const testBtn = document.getElementById('aggregate-test-btn');
   const toggleBtn = document.getElementById('aggregate-member-toggle-btn');
+  const versionContainer = document.getElementById('aggregate-version-switch-container');
   if (!badge || !summary || !root) return;
   if (toggleBtn) toggleBtn.style.display = 'none';
 
   const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
   if (!current) {
+    if (versionContainer) versionContainer.innerHTML = '';
     updateAggregateWorkbenchStats();
     badge.textContent = t('common.notSelected', 'Not selected');
     summary.textContent = t('section.aggregatesDetailEmpty', 'Select an aggregate ID on the left.');
@@ -1012,9 +1116,49 @@ function renderAggregateActiveDetails() {
     return;
   }
 
-  const members = Array.isArray(current.members) ? current.members : [];
+  const viewedVersion = viewedAggregateAliasVersion || '1';
+  let members = [];
+  if (viewedVersion === '1') {
+    members = Array.isArray(current.version_1_members) ? current.version_1_members : [];
+  } else if (viewedVersion === '2') {
+    members = Array.isArray(current.version_2_members) ? current.version_2_members : [];
+  } else if (viewedVersion === '3') {
+    members = Array.isArray(current.version_3_members) ? current.version_3_members : [];
+  } else {
+    members = Array.isArray(current.members) ? current.members : [];
+  }
+
   const aliasId = String(current.alias_id || '').trim();
   badge.textContent = current.alias_id || t('common.notSelected', 'Not selected');
+
+  if (versionContainer) {
+    const activeVersion = current.active_version || '1';
+    const isCurrentActive = viewedVersion === activeVersion;
+    const applyButtonHtml = isCurrentActive
+      ? `<span class="aggregate-version-active-badge">✓ ${getLanguage() === 'zh' ? '使用中' : 'Active'}</span>`
+      : `<button type="button" class="aggregate-version-apply-btn" onclick="applyAggregateAliasVersion('${escapeAggregateHtml(aliasId)}', '${viewedVersion}', this)">${getLanguage() === 'zh' ? '应用此版本' : 'Apply Version'}</button>`;
+
+    versionContainer.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <div class="aggregate-version-group">
+          <button type="button" class="aggregate-version-btn ${viewedVersion === '1' ? 'is-active' : ''}" data-version="1">1</button>
+          <button type="button" class="aggregate-version-btn ${viewedVersion === '2' ? 'is-active' : ''}" data-version="2">2</button>
+          <button type="button" class="aggregate-version-btn ${viewedVersion === '3' ? 'is-active' : ''}" data-version="3">3</button>
+        </div>
+        ${applyButtonHtml}
+      </div>
+    `;
+    versionContainer.querySelectorAll('.aggregate-version-btn').forEach((btn) => {
+      btn.onclick = () => {
+        const targetVersion = btn.getAttribute('data-version');
+        if (targetVersion === viewedVersion) return;
+        viewedAggregateAliasVersion = targetVersion;
+        renderAggregateActiveDetails();
+        renderAggregateProviderSourceList();
+      };
+    });
+  }
+
   updateAggregateWorkbenchStats();
   const health = Array.isArray(aggregateRouteHealthCache?.items)
     ? aggregateRouteHealthCache.items.find((item) => String(item?.alias_id || '').trim() === aliasId)
@@ -1099,6 +1243,75 @@ function renderAggregateActiveDetails() {
       }
     });
   });
+}
+
+async function switchAggregateAliasVersion(aliasId, version, button) {
+  const targetId = String(aliasId || '').trim();
+  if (!targetId || hasAggregatePendingWork()) return;
+
+  const previousItems = cloneAggregateItems();
+
+  const idx = aggregateItemsCache.findIndex(item => item.alias_id === targetId);
+  if (idx >= 0) {
+    aggregateItemsCache[idx] = {
+      ...aggregateItemsCache[idx],
+      active_version: version
+    };
+    const nextMembersKey = `version_${version}_members`;
+    if (Array.isArray(aggregateItemsCache[idx][nextMembersKey])) {
+      aggregateItemsCache[idx].members = aggregateItemsCache[idx][nextMembersKey];
+    }
+  }
+
+  renderAggregateActiveDetails();
+
+  try {
+    const res = await api('/api/aggregate-models', 'POST', {
+      action: 'set_version',
+      alias_id: targetId,
+      version: version,
+      skip_restart: true,
+    });
+    showMessage(res.message || (getLanguage() === 'zh'
+      ? `已切换到版本 ${version}。`
+      : `Switched to version ${version}.`));
+    await loadAggregateModels(true);
+  } catch (error) {
+    aggregateItemsCache = previousItems;
+    renderAggregateActiveDetails();
+    showMessage(getLanguage() === 'zh' ? `切换版本失败：${error.message}` : `Failed to switch version: ${error.message}`, true);
+  }
+}
+
+async function applyAggregateAliasVersion(aliasId, version, button) {
+  const targetId = String(aliasId || '').trim();
+  if (!targetId || hasAggregatePendingWork()) return;
+
+  const previousItems = cloneAggregateItems();
+
+  const prevText = button.textContent;
+  button.disabled = true;
+  button.innerHTML = `<span class="runtime-action-spinner" style="margin: 0; width: 12px; height: 12px; border-width: 2px;"></span>`;
+
+  try {
+    const res = await api('/api/aggregate-models', 'POST', {
+      action: 'set_version',
+      alias_id: targetId,
+      version: version,
+      skip_restart: true,
+    });
+    showMessage(res.message || (getLanguage() === 'zh'
+      ? `已成功应用版本 ${version} 到路由。`
+      : `Successfully applied version ${version} to routing.`));
+    await loadAggregateModels(true);
+  } catch (error) {
+    aggregateItemsCache = previousItems;
+    renderAggregateActiveDetails();
+    showMessage(getLanguage() === 'zh' ? `应用版本失败：${error.message}` : `Failed to apply version: ${error.message}`, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = prevText;
+  }
 }
 
 async function reorderAggregateMembers(draggedKey, targetKey) {
@@ -1380,10 +1593,19 @@ function aggregateModelStatusLabel(status, meta = {}) {
   if (status === 'bad') return aggregateFailureKindLabel(meta.failure_kind);
   return t('common.pending', 'Pending');
 }
-
-async function loadAggregateModels(force = false) {
+async function loadAggregateModels(force = false, button = null) {
   if (aggregateModelsLoaded && !force) return;
   const refreshVersion = ++aggregateRefreshVersion;
+
+  let previousText = '';
+  let previousDisabled = false;
+  if (button) {
+    previousText = button.innerHTML;
+    previousDisabled = button.disabled;
+    button.disabled = true;
+    button.innerHTML = `<span class="runtime-action-spinner"></span>${getLanguage() === 'zh' ? '刷新中...' : 'Refreshing...'}`;
+  }
+
   try {
     const res = await api('/api/aggregate-models');
     if (refreshVersion !== aggregateRefreshVersion || hasAggregatePendingWork()) return;
@@ -1411,12 +1633,27 @@ async function loadAggregateModels(force = false) {
     aggregateModelsLoaded = true;
   } catch (err) {
     showMessage(err.message, true);
+  } finally {
+    if (button) {
+      button.disabled = previousDisabled;
+      button.innerHTML = previousText;
+    }
   }
 }
 
-async function loadAggregateSourceModels() {
+async function loadAggregateSourceModels(button = null) {
   if (aggregateSourceListLoading) return;
   aggregateSourceListLoading = true;
+
+  let previousText = '';
+  let previousDisabled = false;
+  if (button) {
+    previousText = button.innerHTML;
+    previousDisabled = button.disabled;
+    button.disabled = true;
+    button.innerHTML = `<span class="runtime-action-spinner"></span>${getLanguage() === 'zh' ? '加载中...' : 'Loading...'}`;
+  }
+
   renderAggregateProviderSourceList();
   try {
     await Promise.all([fetchAggregateProviderSummaries(), syncAggregateModelTestState()]);
@@ -1433,6 +1670,10 @@ async function loadAggregateSourceModels() {
   } finally {
     aggregateSourceListLoading = false;
     renderAggregateProviderSourceList();
+    if (button) {
+      button.disabled = previousDisabled;
+      button.innerHTML = previousText;
+    }
   }
 }
 
@@ -1515,10 +1756,11 @@ async function saveCurrentAggregateMembers(reorderedMembers, successMessage, ski
   }
   const mutationVersion = nextAggregateMemberMutationVersion(aliasId);
   const nextMembers = Array.isArray(reorderedMembers) ? reorderedMembers : [];
-  updateAggregateMembersInCache(aliasId, nextMembers);
+  const targetVersion = viewedAggregateAliasVersion || '1';
+  updateAggregateMembersInCache(aliasId, nextMembers, targetVersion);
   renderAggregateCurrentViews(true);
 
-  const ok = await queueAggregateMemberSave(aliasId, nextMembers, successMessage || `Saved aggregate order: ${aliasId}.`, skipRestart);
+  const ok = await queueAggregateMemberSave(aliasId, nextMembers, successMessage || `Saved aggregate order: ${aliasId}.`, skipRestart, targetVersion);
   if (!ok && isLatestAggregateMemberMutation(aliasId, mutationVersion)) {
     aggregateItemsCache = aggregateMemberRollbackSnapshots.get(aliasId) || previousItems;
     aggregateMemberRollbackSnapshots.delete(aliasId);

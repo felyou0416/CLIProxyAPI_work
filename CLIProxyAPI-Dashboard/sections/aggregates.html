@@ -6,17 +6,18 @@
     </div>
     <div class="action-row">
       <button type="button" onclick="applyAggregateRuntime(this)">应用到 Runtime</button>
-      <button type="button" class="secondary" onclick="loadAggregateModels(true)">刷新</button>
-      <button type="button" class="secondary" onclick="loadAggregateSourceModels()">加载可选模型</button>
+      <button type="button" class="secondary" onclick="loadAggregateModels(true, this)">刷新</button>
+      <button type="button" class="secondary" onclick="loadAggregateSourceModels(this)">加载可选模型</button>
     </div>
   </div>
 
   <div class="aggregate-layout">
     <div class="aggregate-panel-card aggregate-sidebar-card">
       <div class="aggregate-panel-head">
-        <div>
-          <div class="aggregate-step-label">Workspace</div>
-          <h3 data-i18n="section.aggregatesListTitle">聚合 ID 列表</h3>
+        <div class="aggregate-list-sort-bar" style="margin: 0; padding: 0;">
+          <span style="font-size: 11px; color: var(--text-muted); font-weight: 800; text-transform: uppercase;">排序:</span>
+          <button type="button" class="secondary is-active" id="btn-sort-name" onclick="changeAggregateSort('name')">按名称</button>
+          <button type="button" class="secondary" id="btn-sort-default" onclick="changeAggregateSort('default')">默认/时间</button>
         </div>
         <div style="display: flex; align-items: center; gap: 8px;">
           <span class="auth-chip" id="aggregate-total-count">0</span>
@@ -28,19 +29,16 @@
 
     <div class="aggregate-panel-card aggregate-detail-card">
       <div class="aggregate-panel-head">
-        <div>
-          <div class="aggregate-step-label">Step 3</div>
-          <h3 data-i18n="section.aggregatesDetailTitle">当前聚合详情</h3>
-        </div>
+        <div id="aggregate-version-switch-container" class="aggregate-version-switch-container"></div>
         <div class="aggregate-detail-actions">
           <span class="auth-chip active-chip" id="aggregate-active-name">未选择</span>
           <button type="button" class="secondary" id="aggregate-member-toggle-btn" style="min-width: 32px; width: 32px; height: 28px; padding: 0; display: none; align-items: center; justify-content: center; font-size: 10px; border-radius: 6px;"></button>
           <button type="button" class="secondary" id="aggregate-test-btn" onclick="testCurrentAggregateMembers()" data-i18n="btn.testAvailability">检测可用</button>
           <button type="button" class="secondary" onclick="sortCurrentAggregateByScore()" data-i18n="btn.sortByScore">按分数排序</button>
           <button type="button" class="secondary" onclick="sortCurrentAggregateUnavailableLast()" data-i18n="btn.moveUnavailableLast">不可用后置</button>
-          <button type="button" class="secondary" onclick="startAggregateMemberEdit()">编辑成员</button>
-          <button type="button" class="secondary" onclick="saveAggregateMemberEdit()">保存修改</button>
-          <button type="button" class="secondary" onclick="cancelAggregateMemberEdit()">取消编辑</button>
+          <button type="button" class="secondary" onclick="startAggregateMemberEdit()" style="display: none;">编辑成员</button>
+          <button type="button" class="secondary" onclick="saveAggregateMemberEdit()" style="display: none;">保存修改</button>
+          <button type="button" class="secondary" onclick="cancelAggregateMemberEdit()" style="display: none;">取消编辑</button>
         </div>
       </div>
       <div id="aggregate-active-summary" class="tool-desc-zh" data-i18n="section.aggregatesDetailEmpty">请选择左侧一个聚合 ID。</div>

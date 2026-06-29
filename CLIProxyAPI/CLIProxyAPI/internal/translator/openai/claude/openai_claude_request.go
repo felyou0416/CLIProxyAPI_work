@@ -252,8 +252,11 @@ func ConvertClaudeRequestToOpenAI(modelName string, inputRawJSON []byte, stream 
 							msgJSON, _ = sjson.SetBytes(msgJSON, "content", "")
 						}
 
-						// Add reasoning_content if present
-						if hasReasoning {
+						// Add reasoning_content if present.
+						// To save input tokens, only pass reasoning_content back to upstream models if the message
+						// has no other content (no text, no tool calls). This prevents 400 errors for reasoning-only messages
+						// while optimizing token usage for standard turns.
+						if hasReasoning && !hasContent && !hasToolCalls {
 							msgJSON, _ = sjson.SetBytes(msgJSON, "reasoning_content", reasoningContent)
 						}
 
@@ -375,7 +378,12 @@ func normalizeObjectSchemaProperties(schema any) any {
 func shouldMapClaudeThinkingToGPTReasoning(part gjson.Result) bool {
 	signature := part.Get("signature")
 	if !signature.Exists() || strings.TrimSpace(signature.String()) == "" {
-		return false
+		// Allow thinking blocks without a signature through.
+		// This covers thinking content produced by non-Claude models (DeepSeek, OpenAI,
+		// Gemini, Kimi, etc.) whose reasoning_content was re-exported as a thinking block
+		// by the response translator.  Strip-signature thinking is also safe here because
+		// the caller already gates on role == "assistant".
+		return true
 	}
 	_, ok := sigcompat.CompatibleSignatureForProvider(sigcompat.SignatureProviderGPT, signature.String())
 	return ok

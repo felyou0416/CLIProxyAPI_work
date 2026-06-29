@@ -54,7 +54,7 @@ func TestConvertClaudeRequestToOpenAI_ThinkingToReasoningContent(t *testing.T) {
 			wantHasContent:          true,
 		},
 		{
-			name: "AC3: unsigned thinking-only message is dropped",
+			name: "AC3: unsigned thinking-only message is kept to prevent 400 error",
 			inputJSON: `{
 				"model": "claude-3-opus",
 				"messages": [{
@@ -64,8 +64,8 @@ func TestConvertClaudeRequestToOpenAI_ThinkingToReasoningContent(t *testing.T) {
 					]
 				}]
 			}`,
-			wantReasoningContent:    "",
-			wantHasReasoningContent: false,
+			wantReasoningContent:    "Internal reasoning only.",
+			wantHasReasoningContent: true,
 			wantContentText:         "",
 			wantHasContent:          false,
 		},
@@ -287,8 +287,7 @@ func TestConvertClaudeRequestToOpenAI_SignedThinkingCompatibility(t *testing.T) 
 				"messages": [{
 					"role": "assistant",
 					"content": [
-						{"type": "thinking", "thinking": "provider state", "signature": "` + tt.signature + `"},
-						{"type": "text", "text": "visible answer"}
+						{"type": "thinking", "thinking": "provider state", "signature": "` + tt.signature + `"}
 					]
 				}]
 			}`
@@ -304,16 +303,14 @@ func TestConvertClaudeRequestToOpenAI_SignedThinkingCompatibility(t *testing.T) 
 			if gotReasoningContent != tt.wantReasoningContent {
 				t.Fatalf("reasoning_content = %q, want %q. Output: %s", gotReasoningContent, tt.wantReasoningContent, string(result))
 			}
-			if got := assistantMsg.Get("content.0.text").String(); got != "visible answer" {
-				t.Fatalf("visible content = %q, want visible answer. Output: %s", got, string(result))
-			}
 		})
 	}
 }
 
-// TestConvertClaudeRequestToOpenAI_UnsignedThinkingOnlyMessageDropped verifies
-// that unsigned Claude thinking is not migrated into GPT reasoning state.
-func TestConvertClaudeRequestToOpenAI_UnsignedThinkingOnlyMessageDropped(t *testing.T) {
+// TestConvertClaudeRequestToOpenAI_UnsignedThinkingOnlyMessagePreserved verifies
+// that unsigned Claude thinking-only messages are preserved in the request
+// as assistant messages with reasoning_content, to prevent 400 errors.
+func TestConvertClaudeRequestToOpenAI_UnsignedThinkingOnlyMessagePreserved(t *testing.T) {
 	inputJSON := `{
 		"model": "claude-3-opus",
 		"messages": [
@@ -337,13 +334,15 @@ func TestConvertClaudeRequestToOpenAI_UnsignedThinkingOnlyMessageDropped(t *test
 
 	messages := resultJSON.Get("messages").Array()
 
-	if len(messages) != 2 {
-		t.Fatalf("Expected unsigned thinking-only assistant message to be dropped, got %d. Messages: %v", len(messages), resultJSON.Get("messages").Raw)
+	if len(messages) != 3 {
+		t.Fatalf("Expected assistant message to be preserved, got %d messages. Output: %s", len(messages), result)
 	}
-	for _, message := range messages {
-		if message.Get("reasoning_content").Exists() {
-			t.Fatalf("unsigned thinking should not produce reasoning_content. Messages: %v", resultJSON.Get("messages").Raw)
-		}
+	assistantMsg := messages[1]
+	if assistantMsg.Get("role").String() != "assistant" {
+		t.Fatalf("Expected messages[1] to be assistant, got role: %s", assistantMsg.Get("role").String())
+	}
+	if got := assistantMsg.Get("reasoning_content").String(); got != "Let me calculate: 2+2=4" {
+		t.Fatalf("Expected reasoning_content to be %q, got %q", "Let me calculate: 2+2=4", got)
 	}
 }
 
