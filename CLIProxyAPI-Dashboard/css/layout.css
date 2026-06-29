@@ -348,6 +348,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.sidebar.sidebar-collapsed .sidebar-grouped-nav {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.sidebar.sidebar-collapsed .sidebar-grouped-nav::-webkit-scrollbar {
+  display: none;
+}
 .sidebar.sidebar-collapsed .sidebar-controls .nav-btn {
   justify-content: center;
   padding-inline: 6px;

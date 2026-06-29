@@ -113,6 +113,12 @@ function applySidebarCollapsed() {
     toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     toggle.setAttribute('title', collapsed ? '展开侧栏' : '折叠侧栏');
   }
+
+  if (collapsed) {
+    document.querySelectorAll('.nav-group').forEach(el => el.classList.add('is-collapsed'));
+  } else {
+    applyNavGroupCollapsed();
+  }
 }
 
 function toggleSidebarCollapsed() {

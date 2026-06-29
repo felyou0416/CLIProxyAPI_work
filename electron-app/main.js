@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog, Tray, Menu, nativeImage } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -7,6 +7,8 @@ const net = require('net');
 let dashboardProcess = null;
 let proxyProcess = null;
 let mainWindow = null;
+let tray = null;
+let isQuitting = false;
 
 const DASHBOARD_PORT = parseInt(process.env.CLIPROXYAPI_DASHBOARD_PORT || '8765', 10);
 const PROXY_PORT = parseInt(process.env.CLIPROXYAPI_PROXY_PORT || '8317', 10);
@@ -201,10 +203,65 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    tray = null;
   });
 
-  mainWindow.on('close', () => {
-    killAllServices();
+  mainWindow.on('close', (e) => {
+    if (isQuitting) return;
+    e.preventDefault();
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'question',
+      buttons: ['最小化到托盘', '退出程序'],
+      defaultId: 0,
+      title: '关闭方式',
+      message: '请选择关闭方式',
+      detail: '最小化到托盘：程序继续在后台运行\n退出程序：完全关闭所有服务',
+    });
+    if (choice === 0) {
+      mainWindow.hide();
+      showTray();
+    } else {
+      isQuitting = true;
+      killAllServices();
+      app.quit();
+    }
+  });
+}
+
+function showTray() {
+  if (tray) return;
+  const iconPath = path.join(__dirname, 'assets', 'icon.png');
+  let icon;
+  if (fs.existsSync(iconPath)) {
+    icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+  } else {
+    icon = nativeImage.createEmpty();
+  }
+  tray = new Tray(icon);
+  tray.setToolTip('CLIProxyAPI Dashboard');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: '显示窗口', click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }
+    },
+    { type: 'separator' },
+    {
+      label: '退出', click: () => {
+        isQuitting = true;
+        killAllServices();
+        app.quit();
+      }
+    },
+  ]));
+  tray.on('double-click', () => {
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
   });
 }
 
@@ -225,12 +282,19 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  killAllServices();
-  app.quit();
+  if (process.platform !== 'darwin') {
+    killAllServices();
+    app.quit();
+  }
 });
 
 app.on('before-quit', () => {
+  isQuitting = true;
   killAllServices();
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
 });
 
 process.on('SIGINT', () => {
