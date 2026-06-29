@@ -109,6 +109,7 @@ function startDashboard() {
     env: {
       ...process.env,
       CLIPROXYAPI_ROOT: path.join(resPath),
+      RELAYX_CLI_BINARY: path.join(resPath, 'cli-proxy-api.exe'),
       CLIPROXYAPI_DASHBOARD_PORT: String(DASHBOARD_PORT),
       CLIPROXYAPI_DASHBOARD_HOST: '127.0.0.1',
     },
