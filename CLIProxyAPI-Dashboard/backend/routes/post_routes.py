@@ -1083,4 +1083,24 @@ def handle_post(handler, parsed, data):
         except Exception as e:
             send_json(handler, {'ok': False, 'message': f'Failed: {e}'}, status=500)
         return True
+    if parsed.path == '/api/data/import':
+        try:
+            from backend.data_transfer import import_all
+            mode = str((data or {}).get('mode') or 'merge').strip().lower()
+            payload_data = (data or {}).get('payload')
+            if not isinstance(payload_data, dict):
+                send_json(handler, {'ok': False, 'message': 'Missing or invalid payload.'}, status=400)
+                return True
+            result = import_all(payload_data, mode=mode)
+            if result.get('ok'):
+                try:
+                    from backend.state import load_state as _ls
+                    from backend.auth import rebuild_runtime_config_from_state
+                    rebuild_runtime_config_from_state(_ls())
+                except Exception:
+                    pass
+            send_json(handler, result)
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': f'Import failed: {e}'}, status=500)
+        return True
     return False

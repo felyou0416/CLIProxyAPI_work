@@ -73,7 +73,7 @@ function initStorageDir(resPath) {
 
   const configFile = path.join(storagePath, 'config', 'base-config.yaml');
   if (!fs.existsSync(configFile)) {
-    const defaultConfig = `host: "127.0.0.1"\nport: 8317\nauth-dir: "${storagePath.replace(/\\/g, '/')}/auth"\napi-keys:\n  - "change-me"\ndebug: false\n`;
+    const defaultConfig = `host: "127.0.0.1"\nport: 8317\nauth-dir: "${storagePath.replace(/\\/g, '/')}/auth"\napi-keys:\n  - "cliproxyapi"\ndebug: false\n`;
     fs.writeFileSync(configFile, defaultConfig, 'utf-8');
   }
 

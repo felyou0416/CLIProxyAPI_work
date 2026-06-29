@@ -1,0 +1,26 @@
+<section class="section-view" id="section-data-transfer">
+  <div class="section-card">
+    <h2>数据导入导出</h2>
+    <p class="section-desc">导出当前配置数据用于备份或迁移，或从导出文件恢复配置。</p>
+
+    <div class="card-row">
+      <div class="card" style="flex:1; min-width:280px;">
+        <h3>导出数据</h3>
+        <p>导出所有配置：认证文件、API Key、状态设置、模型映射等。</p>
+        <button class="btn primary" onclick="exportData()">导出 JSON</button>
+        <div id="export-status" class="status-line" style="margin-top:8px;"></div>
+      </div>
+      <div class="card" style="flex:1; min-width:280px;">
+        <h3>导入数据</h3>
+        <p>从 JSON 文件导入配置数据。支持合并或替换模式。</p>
+        <div style="margin-bottom:8px;">
+          <label><input type="radio" name="import-mode" value="merge" checked> 合并（保留已有数据）</label>
+          <label style="margin-left:12px;"><input type="radio" name="import-mode" value="replace"> 替换（清空后导入）</label>
+        </div>
+        <input type="file" id="import-file-input" accept=".json" style="display:none;" onchange="handleImportFile(event)">
+        <button class="btn" onclick="document.getElementById('import-file-input').click()">选择文件并导入</button>
+        <div id="import-status" class="status-line" style="margin-top:8px;"></div>
+      </div>
+    </div>
+  </div>
+</section>
