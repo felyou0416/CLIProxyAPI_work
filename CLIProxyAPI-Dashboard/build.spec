@@ -70,7 +70,6 @@ exe = EXE(
 coll = COLLECT(
     exe,
     a.binaries,
-    a.strip,
     a.datas,
     strip=False,
     upx=True,
