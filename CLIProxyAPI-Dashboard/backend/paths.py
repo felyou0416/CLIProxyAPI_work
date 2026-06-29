@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from backend.runtime_env import resolve_cli_binary, runtime_variant
 
-DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
+DASHBOARD_ROOT = Path(os.environ.get('RELAYX_DASHBOARD_ROOT', '')).resolve() if os.environ.get('RELAYX_DASHBOARD_ROOT') else Path(__file__).resolve().parent.parent
 ROOT = DASHBOARD_ROOT
 
 

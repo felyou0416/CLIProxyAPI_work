@@ -49,6 +49,47 @@ function waitForPort(port, timeout = 15000) {
   });
 }
 
+function initStorageDir(resPath) {
+  const storagePath = path.join(resPath, 'storage');
+  const dirs = [
+    storagePath,
+    path.join(storagePath, 'config'),
+    path.join(storagePath, 'auth'),
+    path.join(storagePath, 'auth', 'archive'),
+    path.join(storagePath, 'models'),
+    path.join(storagePath, 'runtime'),
+    path.join(storagePath, 'runtime', 'active-auth'),
+    path.join(storagePath, 'runtime', 'tmp'),
+    path.join(storagePath, 'cache'),
+    path.join(storagePath, 'logs'),
+    path.join(storagePath, 'logs', 'request_logs'),
+    path.join(storagePath, 'logs', 'request_archive'),
+    path.join(storagePath, 'logs', 'tool_logs'),
+    path.join(storagePath, 'backups'),
+  ];
+  dirs.forEach((dir) => {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  });
+
+  const configFile = path.join(storagePath, 'config', 'base-config.yaml');
+  if (!fs.existsSync(configFile)) {
+    const defaultConfig = `host: "127.0.0.1"\nport: 8317\nauth-dir: "${storagePath.replace(/\\/g, '/')}/auth"\napi-keys:\n  - "change-me"\ndebug: false\n`;
+    fs.writeFileSync(configFile, defaultConfig, 'utf-8');
+  }
+
+  const sourcesFile = path.join(storagePath, 'config', 'sources.json');
+  if (!fs.existsSync(sourcesFile)) {
+    fs.writeFileSync(sourcesFile, '{}', 'utf-8');
+  }
+
+  const stateFile = path.join(storagePath, 'runtime', 'state.json');
+  if (!fs.existsSync(stateFile)) {
+    fs.writeFileSync(stateFile, '{}', 'utf-8');
+  }
+
+  return storagePath;
+}
+
 function startProxyServer() {
   const resPath = getResourcesPath();
   const proxyExe = path.join(resPath, 'cli-proxy-api.exe');
@@ -58,14 +99,12 @@ function startProxyServer() {
     return null;
   }
 
-  const storagePath = path.join(resPath, 'storage');
-  if (!fs.existsSync(storagePath)) {
-    fs.mkdirSync(storagePath, { recursive: true });
-  }
+  const storagePath = initStorageDir(resPath);
 
   console.log('[Proxy] Starting:', proxyExe);
-  const proc = spawn(proxyExe, [], {
-    cwd: resPath,
+  const configFile = path.join(storagePath, 'config', 'base-config.yaml');
+  const proc = spawn(proxyExe, ['-config', configFile], {
+    cwd: storagePath,
     stdio: 'ignore',
     detached: false,
     env: {
@@ -96,10 +135,7 @@ function startDashboard() {
     return null;
   }
 
-  const storagePath = path.join(resPath, 'storage');
-  if (!fs.existsSync(storagePath)) {
-    fs.mkdirSync(storagePath, { recursive: true });
-  }
+  const storagePath = initStorageDir(resPath);
 
   console.log('[Dashboard] Starting:', dashboardExe);
   const proc = spawn(dashboardExe, [], {
@@ -108,10 +144,12 @@ function startDashboard() {
     detached: false,
     env: {
       ...process.env,
-      CLIPROXYAPI_ROOT: path.join(resPath),
+      CLIPROXYAPI_ROOT: resPath,
       RELAYX_CLI_BINARY: path.join(resPath, 'cli-proxy-api.exe'),
+      RELAYX_DASHBOARD_ROOT: dashboardDir,
       CLIPROXYAPI_DASHBOARD_PORT: String(DASHBOARD_PORT),
       CLIPROXYAPI_DASHBOARD_HOST: '127.0.0.1',
+      CLIPROXYAPI_AUTO_START: '0',
     },
   });
 
