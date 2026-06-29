@@ -1,0 +1,74 @@
+name: Build Electron App
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build Go proxy
+        run: |
+          cd CLIProxyAPI/CLIProxyAPI
+          go build -o ../../electron-app/resources/cli-proxy-api.exe ./cmd/server/
+
+      - name: Install Python dependencies
+        run: |
+          cd CLIProxyAPI-Dashboard
+          python -m pip install --upgrade pip
+          pip install pyinstaller psutil pywinpty
+
+      - name: Build Dashboard with PyInstaller
+        run: |
+          cd CLIProxyAPI-Dashboard
+          pyinstaller build.spec
+
+      - name: Copy Dashboard to resources
+        run: |
+          xcopy "CLIProxyAPI-Dashboard\dist\dashboard" "electron-app\resources\dashboard\" /E /I /Y
+
+      - name: Install Electron dependencies
+        run: |
+          cd electron-app
+          npm install
+
+      - name: Build Electron app
+        run: |
+          cd electron-app
+          npm run build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cliproxyapi-dashboard-windows
+          path: electron-app/dist/*.exe
+          retention-days: 30
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: electron-app/dist/*.exe
+          generate_release_notes: true

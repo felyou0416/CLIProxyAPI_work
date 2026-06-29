@@ -1,0 +1,27 @@
+appId: com.cliproxyapi.dashboard
+productName: CLIProxyAPI Dashboard
+directories:
+  output: dist
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: assets/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: CLIProxyAPI Dashboard
+
+files:
+  - "**/*"
+  - "!node_modules/.cache"
+  - "!dist"
+
+extraResources:
+  - from: resources/
+    to: resources/
