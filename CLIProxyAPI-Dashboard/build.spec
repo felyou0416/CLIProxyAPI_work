@@ -70,9 +70,11 @@ exe = EXE(
 coll = COLLECT(
     exe,
     a.binaries,
+    a.strip,
     a.datas,
     strip=False,
     upx=True,
     upx_exclude=[],
     name='dashboard',
+    contents_directory='.',
 )

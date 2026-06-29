@@ -6,6 +6,13 @@ from pathlib import Path
 from backend.runtime_env import resolve_cli_binary, runtime_variant
 
 DASHBOARD_ROOT = Path(os.environ.get('RELAYX_DASHBOARD_ROOT', '')).resolve() if os.environ.get('RELAYX_DASHBOARD_ROOT') else Path(__file__).resolve().parent.parent
+
+# PyInstaller 6+ may place bundled files inside _internal/ subdirectory
+if not (DASHBOARD_ROOT / 'index.html').exists():
+    _internal = DASHBOARD_ROOT / '_internal'
+    if _internal.is_dir() and (_internal / 'index.html').exists():
+        DASHBOARD_ROOT = _internal
+
 ROOT = DASHBOARD_ROOT
 
 
