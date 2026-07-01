@@ -38,10 +38,18 @@ function applyLanguage() {
 }
 
 function toggleLanguage() {
-  localStorage.setItem('dashboard_lang', getLanguage() === 'zh' ? 'en' : 'zh');
+  const nextLang = getLanguage() === 'zh' ? 'en' : 'zh';
+  localStorage.setItem('dashboard_lang', nextLang);
   applyLanguage();
   if (typeof refreshStatus === 'function') refreshStatus();
   if (typeof loadAuthFiles === 'function') loadAuthFiles();
+  
+  // Sync to server settings
+  api('/api/settings', 'POST', { key: 'language', value: nextLang }).catch(err => console.error(err));
+  
+  // Sync UI dropdown
+  const langSelect = document.getElementById('setting-language');
+  if (langSelect) langSelect.value = nextLang;
 }
 
 function getTheme() {
@@ -91,6 +99,13 @@ function toggleTheme() {
   const next = cycle[(index + 1 + cycle.length) % cycle.length];
   localStorage.setItem('dashboard_theme', next);
   applyTheme();
+  
+  // Sync to server settings
+  api('/api/settings', 'POST', { key: 'theme', value: next }).catch(err => console.error(err));
+  
+  // Sync UI dropdown
+  const themeSelect = document.getElementById('setting-theme');
+  if (themeSelect) themeSelect.value = next;
 }
 
 const DASHBOARD_SIDEBAR_COLLAPSED_KEY = 'dashboard_sidebar_collapsed_v1';
@@ -109,7 +124,6 @@ function applySidebarCollapsed() {
   shell?.classList.toggle('sidebar-is-collapsed', collapsed);
 
   if (toggle) {
-    toggle.innerHTML = `<span class="toggle-arrow"></span><span class="toggle-text">${collapsed ? '展开' : '收起'}</span>`;
     toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     toggle.setAttribute('title', collapsed ? '展开侧栏' : '折叠侧栏');
   }
@@ -129,7 +143,7 @@ function toggleSidebarCollapsed() {
 
 function getNavGroups() {
   return {
-    runtime: ['account', 'chat', 'requests', 'model-stats', 'clients', 'auth-health'],
+    runtime: ['account', 'chat', 'requests', 'model-stats', 'clients', 'auth-health', 'settings'],
     config: ['providers', 'media-models', 'aggregates', 'model-map', 'api-key-intake', 'auths'],
     access: ['firewall-access', 'terminals', 'external-access', 'tools', 'virtual-keys', 'doc'],
     system: ['network-access', 'cooldown', 'storage-config', 'home-config', 'docker-deploy', 'advanced-config', 'cloaking-config', 'amp-config', 'model-proxy'],
@@ -172,7 +186,7 @@ function persistActiveGroup(group) {
 }
 
 function getDefaultSidebarNavOrder() {
-  return ['account', 'chat', 'requests', 'model-stats', 'clients', 'auth-health', 'providers', 'media-models', 'aggregates', 'model-map', 'api-key-intake', 'auths', 'firewall-access', 'terminals', 'network-access', 'external-access', 'model-proxy', 'doc', 'tools'];
+  return ['account', 'chat', 'requests', 'model-stats', 'clients', 'auth-health', 'settings', 'providers', 'media-models', 'aggregates', 'model-map', 'api-key-intake', 'auths', 'firewall-access', 'terminals', 'network-access', 'external-access', 'model-proxy', 'doc', 'tools'];
 }
 
 function getSidebarNavOrder() {
@@ -631,6 +645,9 @@ async function showSection(name) {
   }
   if (name === 'docker-deploy' && typeof loadDockerDeploy === 'function') {
     loadDockerDeploy();
+  }
+  if (name === 'settings' && typeof loadSettings === 'function') {
+    loadSettings();
   }
   const msg = document.getElementById('message');
   if (msg) msg.className = 'message';

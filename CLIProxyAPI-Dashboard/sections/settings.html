@@ -1,0 +1,274 @@
+<section id="section-settings" class="panel panel-scroll section-view">
+  <div class="panel-head">
+    <div>
+      <div class="section-kicker" data-i18n="section.settingsKicker">System</div>
+      <h2 class="section-title" data-i18n="section.settingsTitle">Settings</h2>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="settings-tabs" id="settings-tabs">
+    <button class="settings-tab active" data-tab="general" onclick="switchSettingsTab('general')">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+      <span data-i18n="settings.tab.general">General</span>
+    </button>
+    <button class="settings-tab" data-tab="version" onclick="switchSettingsTab('version')">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+      </svg>
+      <span data-i18n="settings.tab.version">Version & Updates</span>
+    </button>
+    <button class="settings-tab" data-tab="about" onclick="switchSettingsTab('about')">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="16" x2="12" y2="12"></line>
+        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+      </svg>
+      <span data-i18n="settings.tab.about">About</span>
+    </button>
+  </div>
+
+  <!-- General Tab -->
+  <div class="settings-panel" id="settings-general">
+    <div class="settings-card">
+      <h3 data-i18n="settings.card.general">General Settings</h3>
+      
+      <!-- System Group -->
+      <div class="settings-group">
+        <div class="settings-group-header">
+          <span class="group-dot"></span>
+          <span data-i18n="settings.group.system">System Startup</span>
+        </div>
+        
+        <div class="setting-row">
+          <div class="setting-info">
+            <label data-i18n="settings.row.autostart">Auto-start Dashboard on boot</label>
+            <span class="setting-description" data-i18n="settings.desc.autostart">Starts the control panel automatically when Windows logs in</span>
+          </div>
+          <div class="setting-control">
+            <label class="toggle-switch">
+              <input type="checkbox" id="setting-autostart" onchange="saveSetting('autostart', this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label data-i18n="settings.row.minimizeTray">Minimize to tray on close</label>
+            <span class="setting-description" data-i18n="settings.desc.minimizeTray">Keep the app running in system tray when closed</span>
+          </div>
+          <div class="setting-control">
+            <label class="toggle-switch">
+              <input type="checkbox" id="setting-minimize-tray" onchange="saveSetting('minimize_tray', this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Appearance Group -->
+      <div class="settings-group">
+        <div class="settings-group-header">
+          <span class="group-dot"></span>
+          <span data-i18n="settings.group.appearance">Language & Appearance</span>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label data-i18n="settings.row.language">Default language</label>
+            <span class="setting-description" data-i18n="settings.desc.language">Select dashboard interface display language</span>
+          </div>
+          <div class="setting-control">
+            <select id="setting-language" onchange="saveSetting('language', this.value)">
+              <option value="zh">简体中文 (Chinese)</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label data-i18n="settings.row.theme">Default theme</label>
+            <span class="setting-description" data-i18n="settings.desc.theme">Select interface theme style</span>
+          </div>
+          <div class="setting-control">
+            <select id="setting-theme" onchange="saveSetting('theme', this.value)">
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+              <option value="bright">Bright</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Update Group -->
+      <div class="settings-group">
+        <div class="settings-group-header">
+          <span class="group-dot"></span>
+          <span data-i18n="settings.group.updates">Update Settings</span>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label data-i18n="settings.row.autoUpdateCheck">Check for updates on startup</label>
+            <span class="setting-description" data-i18n="settings.desc.autoUpdateCheck">Automatically check for new versions on launch</span>
+          </div>
+          <div class="setting-control">
+            <label class="toggle-switch">
+              <input type="checkbox" id="setting-auto-update-check" onchange="saveSetting('auto_update_check', this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label data-i18n="settings.row.updateChannel">Update channel</label>
+            <span class="setting-description" data-i18n="settings.desc.updateChannel">Select release channel for updates</span>
+          </div>
+          <div class="setting-control">
+            <select id="setting-update-channel" onchange="saveSetting('update_channel', this.value)">
+              <option value="stable">Stable</option>
+              <option value="beta">Beta</option>
+              <option value="dev">Dev</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Developer Group -->
+      <div class="settings-group">
+        <div class="settings-group-header">
+          <span class="group-dot"></span>
+          <span data-i18n="settings.group.developer">Developer Options</span>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label data-i18n="settings.row.clearCache">Clear Local Storage Cache</label>
+            <span class="setting-description" data-i18n="settings.desc.clearCache">Clears all cached interface layouts, collapsed menus, and resets UI configurations</span>
+          </div>
+          <div class="setting-control">
+            <button class="action-btn" onclick="clearLocalStorage()" style="margin: 0; padding: 6px 14px; font-size: 13px;">
+              <span data-i18n="settings.btn.clearReload">Clear & Reload</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Version & Updates Tab -->
+  <div class="settings-panel" id="settings-version" hidden>
+    <div class="settings-card version-hero-card">
+      <div class="version-hero-bg"></div>
+      <h3 data-i18n="settings.card.version">Current Version</h3>
+      <div class="version-display-wrapper">
+        <div class="version-display">
+          <span class="version-badge" id="current-version">v1.0.0</span>
+          <span class="version-date" id="build-date">Building...</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="settings-card">
+      <div class="version-matrix-grid">
+        <div class="version-matrix-row">
+          <span class="matrix-label" data-i18n="settings.row.cliVersion">CLIProxyAPI Version</span>
+          <span class="matrix-value badge-style" id="cli-version">-</span>
+        </div>
+        <div class="version-matrix-row">
+          <span class="matrix-label" data-i18n="settings.row.dashboardVersion">Dashboard Version</span>
+          <span class="matrix-value badge-style" id="dashboard-version">-</span>
+        </div>
+        <div class="version-matrix-row">
+          <span class="matrix-label" data-i18n="settings.row.electronVersion">Electron App Version</span>
+          <span class="matrix-value badge-style" id="electron-version">-</span>
+        </div>
+        <div class="version-matrix-row">
+          <span class="matrix-label" data-i18n="settings.row.lastUpdated">Last Updated</span>
+          <span class="matrix-value" id="last-updated">-</span>
+        </div>
+      </div>
+      
+      <div class="update-actions">
+        <button class="primary action-btn" onclick="checkUpdates()">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+          </svg>
+          <span data-i18n="settings.btn.checkUpdates">Check for Updates</span>
+        </button>
+        <button class="action-btn" onclick="downloadLatest()">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+          </svg>
+          <span data-i18n="settings.btn.downloadLatest">Download Latest</span>
+        </button>
+        <button class="action-btn" onclick="openReleasePage()">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>
+          </svg>
+          <span data-i18n="settings.btn.openRelease">Open Release Page</span>
+        </button>
+      </div>
+      
+      <div id="update-status" class="update-status"></div>
+    </div>
+  </div>
+
+  <!-- About Tab -->
+  <div class="settings-panel" id="settings-about" hidden>
+    <div class="settings-card about-card-wrapper">
+      <div class="about-hero">
+        <div class="logo-area">
+          <div class="app-logo">CLI</div>
+        </div>
+        <h3 data-i18n="settings.card.about">About CLIProxyAPI</h3>
+        <p class="app-description" data-i18n="settings.desc.about">CLIProxyAPI is a powerful proxy server for managing multiple AI model providers through a unified API interface.</p>
+      </div>
+
+      <div class="about-links-grid">
+        <div class="about-link-row" onclick="openReleasePage()">
+          <div class="link-label-group">
+            <svg class="link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
+            </svg>
+            <span data-i18n="settings.row.repo">Repository</span>
+          </div>
+          <span class="link-url">github.com/youqu117/CLIProxyAPI_work</span>
+        </div>
+
+        <div class="about-link-row">
+          <div class="link-label-group">
+            <svg class="link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+            <span data-i18n="settings.row.license">License</span>
+          </div>
+          <span class="link-val">MIT License</span>
+        </div>
+
+        <div class="about-link-row">
+          <div class="link-label-group">
+            <svg class="link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg>
+            <span data-i18n="settings.row.authors">Authors</span>
+          </div>
+          <span class="link-val">CLIProxyAPI Team</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

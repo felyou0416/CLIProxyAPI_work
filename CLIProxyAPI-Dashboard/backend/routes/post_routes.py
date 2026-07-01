@@ -1103,4 +1103,14 @@ def handle_post(handler, parsed, data):
         except Exception as e:
             send_json(handler, {'ok': False, 'message': f'Import failed: {e}'}, status=500)
         return True
+    if parsed.path == '/api/settings':
+        from backend.settings import save_setting
+        key = (data or {}).get('key') if isinstance(data, dict) else None
+        value = (data or {}).get('value') if isinstance(data, dict) else None
+        if not key:
+            send_json(handler, {'ok': False, 'message': 'Missing key.'}, status=400)
+            return True
+        result = save_setting(key, value)
+        send_json(handler, result, status=200 if result.get('ok') else 500)
+        return True
     return False

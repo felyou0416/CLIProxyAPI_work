@@ -621,4 +621,20 @@ def handle_get(handler, parsed):
         except Exception as e:
             send_json(handler, {'ok': False, 'message': f'Export failed: {e}'}, status=500)
         return True
+    if parsed.path == '/api/settings':
+        from backend.settings import get_settings
+        send_json(handler, get_settings())
+        return True
+    if parsed.path == '/api/version':
+        from backend.settings import get_version_info
+        send_json(handler, get_version_info())
+        return True
+    if parsed.path == '/api/check-updates':
+        from backend.settings import check_for_updates
+        send_json(handler, check_for_updates())
+        return True
+    if parsed.path == '/api/download-update':
+        from backend.settings import download_update
+        send_json(handler, download_update())
+        return True
     return False

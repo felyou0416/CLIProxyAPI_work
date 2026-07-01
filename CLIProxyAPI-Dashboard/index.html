@@ -12,11 +12,18 @@
 <div class="app-shell">
   <aside class="sidebar" id="app-sidebar">
     <div class="sidebar-block brand-block">
-      <div>
+      <button class="sidebar-collapse-toggle" id="sidebar-collapse-toggle" type="button" onclick="toggleSidebarCollapsed()" aria-expanded="true" title="折叠侧栏">
+        <div class="app-icon-squircle">
+          <svg class="app-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="4 17 10 11 4 5" />
+            <line x1="12" y1="19" x2="20" y2="19" />
+          </svg>
+        </div>
+      </button>
+      <div class="brand-text">
         <div class="brand-title">CLIProxyAPI</div>
         <div class="brand-sub" data-i18n="hero.title">CLIProxyAPI Codex Dashboard</div>
       </div>
-      <button class="sidebar-collapse-toggle" id="sidebar-collapse-toggle" type="button" onclick="toggleSidebarCollapsed()" aria-expanded="true" title="折叠侧栏">‹</button>
     </div>
 
     <div class="sidebar-block nav-block" id="sidebar-nav-list">
@@ -35,6 +42,7 @@
             <button class="nav-pill top-nav-btn" id="tab-model-stats" data-group="runtime" onclick="showSection('model-stats')"><span data-i18n="nav.modelStats">模型统计</span></button>
             <button class="nav-pill top-nav-btn" id="tab-clients" data-group="runtime" onclick="showSection('clients')"><span data-i18n="nav.clients">客户端</span></button>
             <button class="nav-pill top-nav-btn" id="tab-auth-health" data-group="runtime" onclick="showSection('auth-health')"><span data-i18n="nav.authHealth">认证健康</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-settings" data-group="runtime" onclick="showSection('settings')"><span data-i18n="nav.settings">设置</span></button>
           </div></div>
         </div>
 
@@ -94,7 +102,6 @@
     </div>
 
     <div class="sidebar-block sidebar-controls">
-      <button class="nav-btn secondary lang-btn" id="lang-toggle" onclick="toggleLanguage()">中文</button>
       <button class="nav-btn secondary theme-btn" id="theme-toggle" onclick="toggleTheme()">主题：浅色</button>
     </div>
   </aside>
@@ -138,6 +145,7 @@
 <script src="/js/home-config.js?v=20260522-1"></script>
 <script src="/js/docker-deploy.js?v=20260522-1"></script>
 <script src="/js/data-transfer.js?v=20260629-1"></script>
+<script src="/js/settings.js"></script>
 <script src="/js/boot.js?v=20260610-grouped-sidebar"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
