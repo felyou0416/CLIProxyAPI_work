@@ -39,6 +39,7 @@ a = Analysis(
         'backend.request_metrics.summary',
         'backend.request_metrics.observability',
         'backend.data_transfer',
+        'backend.settings',
         'pywinpty',
     ],
     hookspath=[],
