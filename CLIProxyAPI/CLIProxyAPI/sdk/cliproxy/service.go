@@ -2463,8 +2463,10 @@ func buildOpenAICompatibilityConfigModels(compat *config.OpenAICompatibility) []
 			continue
 		}
 		modelType := "openai-compatibility"
-		if model.Image {
+		if model.Image || isImageModelName(modelID) {
 			modelType = registry.OpenAIImageModelType
+		} else if isVideoModelName(modelID) {
+			modelType = "openai-video"
 		}
 		thinking := model.Thinking
 		if thinking == nil && !model.Image {

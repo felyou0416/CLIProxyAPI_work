@@ -1,0 +1,32 @@
+<section id="section-media-models" class="panel panel-scroll section-view" hidden>
+  <div class="provider-layout">
+    <!-- Left Column: Media Category Tabs -->
+    <div class="aggregate-panel-card provider-sidebar-card">
+      <div class="aggregate-panel-head" style="margin-bottom: 12px;">
+        <div>
+          <div class="aggregate-step-label">Category</div>
+          <h3 style="margin: 0; font-size: 15px; font-weight: 800;">可调用多媒体</h3>
+        </div>
+      </div>
+      <div id="media-model-groups" class="provider-model-map-tabs-vertical">
+        <button type="button" class="provider-map-tab is-active" data-media-group="all" onclick="selectMediaGroup('all', this)">全部模型</button>
+        <button type="button" class="provider-map-tab" data-media-group="image" onclick="selectMediaGroup('image', this)">图像生成</button>
+        <button type="button" class="provider-map-tab" data-media-group="video" onclick="selectMediaGroup('video', this)">视频生成</button>
+      </div>
+    </div>
+
+    <!-- Right Column: Actions + Model List -->
+    <div class="provider-right-pane">
+      <div class="provider-page-head" style="margin-bottom: 12px;">
+        <div class="provider-action-dock">
+          <button class="secondary" type="button" onclick="clearMediaModelSelection()">清空选择</button>
+          <button class="secondary" type="button" onclick="clearMediaModelTestResults()">清除检测结果</button>
+          <button class="secondary" id="media-test-selected-btn" type="button" onclick="testSelectedMediaModels()">检测选中</button>
+          <button class="secondary" id="media-stop-test-btn" type="button" onclick="stopMediaModelTests()">停止检测</button>
+          <button id="media-test-all-btn" type="button" onclick="testAllMediaModels()">检测全部</button>
+        </div>
+      </div>
+      <div id="media-model-list" class="provider-model-list"></div>
+    </div>
+  </div>
+</section>

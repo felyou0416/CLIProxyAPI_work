@@ -23,6 +23,7 @@
   grid-template-columns: var(--sidebar-width, 280px) minmax(0, 1fr);
   height: 100vh;
   min-height: 0;
+  transition: grid-template-columns 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .app-shell.sidebar-is-collapsed {
   --sidebar-width: 112px;
@@ -41,7 +42,7 @@
   display: flex;
   flex-direction: column;
   gap: 18px;
-  transition: padding 0.2s ease;
+  transition: padding 0.28s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.2s ease;
   scrollbar-width: none;
 }
 .sidebar::-webkit-scrollbar {
@@ -63,6 +64,13 @@
   justify-content: space-between;
   gap: 10px;
 }
+.brand-block > div {
+  transition: opacity 0.28s cubic-bezier(0.2, 0.8, 0.2, 1), max-width 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+  opacity: 1;
+  max-width: 180px;
+  overflow: hidden;
+  white-space: nowrap;
+}
 .brand-title {
   font-size: 23px;
   font-weight: 900;
@@ -76,30 +84,31 @@
 .sidebar-collapse-toggle {
   position: relative;
   flex: 0 0 auto;
-  width: 32px;
   height: 32px;
+  padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--panel);
   color: var(--text-soft);
-  font-size: 0; /* Hide raw character arrow */
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.sidebar-collapse-toggle::after {
-  content: '';
+.toggle-arrow {
+  display: inline-block;
   width: 6px;
   height: 6px;
   border-top: 2px solid currentColor;
   border-left: 2px solid currentColor;
   transform: rotate(-45deg) translate(1px, 1px);
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  display: inline-block;
 }
-.sidebar.sidebar-collapsed .sidebar-collapse-toggle::after {
+.sidebar.sidebar-collapsed .toggle-arrow {
   transform: rotate(135deg) translate(1px, 1px);
 }
 .sidebar-collapse-toggle:hover {
@@ -113,14 +122,9 @@
   justify-content: center;
 }
 .sidebar.sidebar-collapsed .brand-block > div {
-  display: none;
-}
-.sidebar.sidebar-collapsed .brand-sub {
-  display: none;
-}
-.sidebar.sidebar-collapsed .brand-title {
-  font-size: 14px;
-  letter-spacing: -0.02em;
+  opacity: 0;
+  max-width: 0;
+  pointer-events: none;
 }
 .nav-block {
   display: flex;
@@ -303,39 +307,64 @@
 }
 .sidebar-grouped-nav .nav-pill {
   width: 100%;
-  justify-content: flex-start;
-  min-height: 38px;
-  padding: 0 12px;
-  border-radius: 10px;
+  min-height: 36px;
+  border-radius: var(--radius-sm);
+  padding: 0 10px;
   background: transparent;
   border-color: transparent;
   color: var(--text-soft);
   font-size: 13px;
   font-weight: 600;
   box-shadow: none;
+  position: relative;
+  transition: all 0.18s ease;
+}
+.sidebar:not(.sidebar-collapsed) .sidebar-grouped-nav .nav-pill {
+  padding-left: 29px;
 }
 .sidebar-grouped-nav .nav-pill:hover {
   transform: none;
   background: color-mix(in srgb, var(--accent) 7%, var(--panel));
-  border-color: color-mix(in srgb, var(--accent) 25%, var(--border));
+  border-color: color-mix(in srgb, var(--accent) 15%, var(--border));
   color: var(--text);
 }
 .sidebar-grouped-nav .nav-pill.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 22%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+  font-weight: 700;
+  box-shadow: none;
 }
-/* Collapsed sidebar: hide group labels, show icon-only */
-.sidebar.sidebar-collapsed .sidebar-grouped-nav .nav-group-label {
+.sidebar-grouped-nav .nav-pill.active:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+.sidebar:not(.sidebar-collapsed) .sidebar-grouped-nav .nav-pill.active::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 99px;
+  background-color: var(--accent);
+}
+/* Collapsed sidebar: hide group labels and icons, show flat list of pills with dividers */
+.sidebar.sidebar-collapsed .sidebar-grouped-nav .nav-group-label,
+.sidebar.sidebar-collapsed .sidebar-grouped-nav .nav-group-icon {
   display: none;
 }
-.sidebar.sidebar-collapsed .sidebar-grouped-nav .nav-group-icon {
-  display: inline-block;
-}
 .sidebar.sidebar-collapsed .nav-group-header {
-  justify-content: center;
-  padding: 5px 4px;
+  display: none;
+}
+.sidebar.sidebar-collapsed .nav-group-items-wrap {
+  grid-template-rows: 1fr !important;
+}
+.sidebar.sidebar-collapsed .nav-group + .nav-group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed color-mix(in srgb, var(--border) 50%, transparent);
 }
 .sidebar.sidebar-collapsed .sidebar-grouped-nav .nav-pill {
   justify-content: center;

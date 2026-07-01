@@ -20,97 +20,299 @@
     </div>
   </div>
 
-  <div class="doc-grid">
-    <article class="doc-card doc-card-feature">
-      <div class="doc-top">
-        <div class="doc-method">DOC</div>
-        <h3>路由预览</h3>
-      </div>
-      <p class="doc-text">输入本机调用时填写的 model ID，例如 <code>openrouter-free</code>，查看 storage/auth 当前会命中哪些认证，以及是否按 round-robin 轮询。</p>
-      <div class="manual-add-grid" style="margin: 0;">
-        <label class="full-row" style="margin: 0;">
-          <span style="font-size: 11px;">Model ID</span>
-          <input id="route-preview-model" type="text" placeholder="openrouter-free" style="min-height: 28px; padding: 4px 8px; font-size: 12px;" />
-        </label>
-      </div>
-      <div class="action-row" style="margin: 0;">
-        <button type="button" onclick="loadRoutePreview()" style="min-height: 28px; font-size: 12px; padding: 0 12px;">查看路由</button>
-      </div>
-      <pre id="log-route-preview" class="log-output compact is-hidden" style="margin-top: 4px; padding: 6px 10px; font-size: 11px;"></pre>
-    </article>
+<style>
+  .doc-unified-panel {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--panel);
+    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.03);
+    margin-top: 16px;
+    overflow: hidden;
+  }
+  .doc-api-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    border-bottom: 1px solid var(--border);
+    padding: 14px 20px;
+    align-items: start;
+    gap: 20px;
+  }
+  .doc-api-row:last-child {
+    border-bottom: none;
+  }
+  .doc-api-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding-right: 20px; /* Leave space for the absolute copy button if needed */
+  }
+  .doc-api-path {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    font-family: var(--font-mono, monospace);
+    word-break: break-all;
+  }
+  .doc-copy-btn-inline {
+    position: absolute;
+    top: 14px;
+    right: 20px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-soft);
+    font-size: 11px;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .doc-copy-btn-inline:hover {
+    background: var(--panel-2);
+    color: var(--text);
+    border-color: var(--text-soft);
+  }
+  .doc-api-desc {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .doc-api-desc p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-soft);
+    line-height: 1.5;
+  }
+  .route-preview-input-wrap {
+    display: flex;
+    gap: 8px;
+    max-width: 450px;
+    margin-top: 4px;
+  }
+  .route-preview-input-wrap input {
+    flex: 1;
+    min-height: 32px;
+    padding: 6px 12px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-2);
+    color: var(--text);
+  }
+  .route-preview-input-wrap button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 0 16px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .route-preview-input-wrap button:hover {
+    filter: brightness(0.9);
+  }
+  
+  /* Badges */
+  .doc-method-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    line-height: 1.4;
+  }
+  .doc-method-doc {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  }
+  .doc-method-get {
+    background: rgba(16, 185, 129, 0.12);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.24);
+  }
+  .doc-method-post {
+    background: rgba(59, 130, 246, 0.12);
+    color: #3b82f6;
+    border: 1px solid rgba(59, 130, 246, 0.24);
+  }
 
-    <article class="doc-card doc-card-feature">
-      <div class="doc-top">
-        <div class="doc-method">GET</div>
-        <h3>/v1/models</h3>
-      </div>
-      <div class="doc-url-wrap">
-        <code>http://127.0.0.1:8317/v1/models</code>
-        <button class="doc-copy-btn" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/models')" title="复制链接">复制</button>
-      </div>
-      <p class="doc-text">查看当前代理实际可调用的模型 ID。先查这个，再决定外部程序里 `model` 填什么。</p>
-      <div class="doc-sub">适用</div>
-      <p class="doc-text">所有 provider 通用。最适合排查“面板显示”和“真实可调用”是否一致。</p>
-    </article>
+  /* Collapsible Payload Details */
+  .doc-api-desc details {
+    margin-top: 4px;
+  }
+  .doc-api-desc details summary {
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 600;
+    outline: none;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .doc-api-desc details summary::-webkit-details-marker {
+    display: none;
+  }
+  .doc-api-desc details summary::before {
+    content: "▸";
+    font-size: 10px;
+    display: inline-block;
+    transition: transform 0.15s ease;
+  }
+  .doc-api-desc details[open] summary::before {
+    transform: rotate(90deg);
+  }
+</style>
 
-    <article class="doc-card">
-      <div class="doc-top">
-        <div class="doc-method">POST</div>
-        <h3>/v1/messages?beta=true</h3>
+  <div class="doc-unified-panel">
+    <!-- Row 1: Route Preview -->
+    <div class="doc-api-row">
+      <div class="doc-api-meta">
+        <span class="doc-method-badge doc-method-doc">DOC</span>
+        <span class="doc-api-path">路由预览</span>
       </div>
-      <div class="doc-url-wrap">
-        <code>http://127.0.0.1:8317/v1/messages?beta=true</code>
-        <button class="doc-copy-btn" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/messages?beta=true')" title="复制链接">复制</button>
+      <div class="doc-api-desc">
+        <p>输入 Model ID，查看当前请求将命中哪些认证与轮询规则。</p>
+        <div class="route-preview-input-wrap">
+          <input id="route-preview-model" type="text" placeholder="例如: openrouter-free" />
+          <button type="button" onclick="loadRoutePreview()">查看路由</button>
+        </div>
+        <pre id="log-route-preview" class="log-output compact is-hidden" style="margin-top: 8px; padding: 8px 12px; font-size: 11px; border-radius: 6px;"></pre>
       </div>
-      <p class="doc-text">Claude / Anthropic 风格接口。适合 Claude 类客户端，`minimax-portal` 也建议优先走这条。</p>
-      <div class="doc-sub">最小请求体</div>
-      <pre class="doc-code">{
-  "model": "openrouter-free",
-  "max_tokens": 256,
+    </div>
+
+    <!-- Row 2: GET /v1/models -->
+    <div class="doc-api-row">
+      <div class="doc-api-meta">
+        <span class="doc-method-badge doc-method-get">GET</span>
+        <span class="doc-api-path">/v1/models</span>
+        <button class="doc-copy-btn-inline" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/models')">复制 URL</button>
+      </div>
+      <div class="doc-api-desc">
+        <p>获取当前代理所有可用和已注册的模型 ID 列表。</p>
+      </div>
+    </div>
+
+    <!-- Row 3: POST /v1/chat/completions -->
+    <div class="doc-api-row">
+      <div class="doc-api-meta">
+        <span class="doc-method-badge doc-method-post">POST</span>
+        <span class="doc-api-path">/v1/chat/completions</span>
+        <button class="doc-copy-btn-inline" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/chat/completions')">复制 URL</button>
+      </div>
+      <div class="doc-api-desc">
+        <p>OpenAI 聊天会话接口，兼容绝大多数标准客户端。</p>
+        <details>
+          <summary>展开示例 Payload</summary>
+          <pre class="doc-code">{
+  "model": "agnes-agnes-2.0-flash",
   "messages": [
-    { "role": "user", "content": "Say OK only." }
+    { "role": "user", "content": "Hello" }
   ]
 }</pre>
-    </article>
+        </details>
+      </div>
+    </div>
 
-    <article class="doc-card">
-      <div class="doc-top">
-        <div class="doc-method">POST</div>
-        <h3>/v1/responses</h3>
+    <!-- Row 4: POST /v1/images/generations -->
+    <div class="doc-api-row">
+      <div class="doc-api-meta">
+        <span class="doc-method-badge doc-method-post">POST</span>
+        <span class="doc-api-path">/v1/images/generations</span>
+        <button class="doc-copy-btn-inline" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/images/generations')">复制 URL</button>
       </div>
-      <div class="doc-url-wrap">
-        <code>http://127.0.0.1:8317/v1/responses</code>
-        <button class="doc-copy-btn" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/responses')" title="复制链接">复制</button>
-      </div>
-      <p class="doc-text">OpenAI Responses 风格接口。适合新式 OpenAI SDK 或支持 `responses` 的外部程序。</p>
-      <div class="doc-sub">最小请求体</div>
-      <pre class="doc-code">{
-  "model": "codex-gpt-5.4",
-  "input": "Say OK only."
+      <div class="doc-api-desc">
+        <p>OpenAI 图像生成接口（系统根据模型名称如 <code>image/dall-e/flux/cogview</code> 自动归类为生图模型）。</p>
+        <details>
+          <summary>展开示例 Payload</summary>
+          <pre class="doc-code">{
+  "model": "agnes-image-2.0-flash",
+  "prompt": "a beautiful forest",
+  "size": "1024x1024"
 }</pre>
-      <div class="doc-sub">注意</div>
-      <p class="doc-text">`minimax-portal` 走这条时，`input` 最稳的是数组结构，不建议只传纯字符串。</p>
-    </article>
+        </details>
+      </div>
+    </div>
 
-    <article class="doc-card">
-      <div class="doc-top">
-        <div class="doc-method">POST</div>
-        <h3>/v1/chat/completions</h3>
+    <!-- Row 5: POST /v1/messages -->
+    <div class="doc-api-row">
+      <div class="doc-api-meta">
+        <span class="doc-method-badge doc-method-post">POST</span>
+        <span class="doc-api-path">/v1/messages?beta=true</span>
+        <button class="doc-copy-btn-inline" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/messages?beta=true')">复制 URL</button>
       </div>
-      <div class="doc-url-wrap">
-        <code>http://127.0.0.1:8317/v1/chat/completions</code>
-        <button class="doc-copy-btn" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/chat/completions')" title="复制链接">复制</button>
-      </div>
-      <p class="doc-text">OpenAI Chat Completions 风格接口。兼容面最广，很多现成工具默认都走这条。</p>
-      <div class="doc-sub">最小请求体</div>
-      <pre class="doc-code">{
-  "model": "aihubmix-gpt-4.1-free",
+      <div class="doc-api-desc">
+        <p>Claude / Anthropic 消息接口，供 Anthropic 系列客户端使用。</p>
+        <details>
+          <summary>展开示例 Payload</summary>
+          <pre class="doc-code">{
+  "model": "claude-sonnet-4-5",
+  "max_tokens": 256,
   "messages": [
-    { "role": "user", "content": "Say OK only." }
-  ],
-  "max_tokens": 256
+    { "role": "user", "content": "Hello" }
+  ]
 }</pre>
-    </article>
+        </details>
+      </div>
+    </div>
+
+    <!-- Row 6: POST /v1/responses -->
+    <div class="doc-api-row">
+      <div class="doc-api-meta">
+        <span class="doc-method-badge doc-method-post">POST</span>
+        <span class="doc-api-path">/v1/responses</span>
+        <button class="doc-copy-btn-inline" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/responses')">复制 URL</button>
+      </div>
+      <div class="doc-api-desc">
+        <p>OpenAI Responses 助理流式响应接口。</p>
+        <details>
+          <summary>展开示例 Payload</summary>
+          <pre class="doc-code">{
+  "model": "codex-gpt-5.4",
+  "input": "Hello"
+}</pre>
+        </details>
+      </div>
+    </div>
+
+    <!-- Row 7: POST /v1/videos/generations -->
+    <div class="doc-api-row">
+      <div class="doc-api-meta">
+        <span class="doc-method-badge doc-method-post">POST</span>
+        <span class="doc-api-path">/v1/videos/generations</span>
+        <button class="doc-copy-btn-inline" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/videos/generations')">复制 URL</button>
+      </div>
+      <div class="doc-api-desc">
+        <p>视频生成接口（系统根据模型名称包含 <code>video</code> 自动归类为视频模型，支持原生的 <code>/v1/videos</code> 或 <code>/v1/videos/generations</code>）。</p>
+        <details>
+          <summary>展开示例 Payload</summary>
+          <pre class="doc-code">{
+  "model": "agnes-agnes-video-v2.0",
+  "prompt": "a beautiful forest",
+  "size": "1280x704"
+}</pre>
+        </details>
+      </div>
+    </div>
+
+    <!-- Row 8: GET /v1/videos/:request_id -->
+    <div class="doc-api-row">
+      <div class="doc-api-meta">
+        <span class="doc-method-badge doc-method-get">GET</span>
+        <span class="doc-api-path">/v1/videos/:request_id</span>
+        <button class="doc-copy-btn-inline" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/videos/task_ID')">复制 URL</button>
+      </div>
+      <div class="doc-api-desc">
+        <p>视频生成任务状态与结果查询接口（将 <code>:request_id</code> 替换为生成请求返回的 <code>id</code> 或 <code>task_id</code>）。</p>
+      </div>
+    </div>
 
   </div>
 </section>

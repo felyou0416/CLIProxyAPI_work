@@ -62,6 +62,25 @@ func extractModelsFromMetadata(metadata map[string]any) []string {
 	return nil
 }
 
+func isImageModelName(modelName string) bool {
+	lower := strings.ToLower(modelName)
+	keywords := []string{
+		"image", "dall-e", "dalle", "stable-diffusion", "flux", "imagine", "midjourney", "sdxl",
+		"sd-", "mj-", "dream", "kolors", "cogview", "seedream", "recraft", "playground", "pixelart",
+	}
+	for _, kw := range keywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func isVideoModelName(modelName string) bool {
+	lower := strings.ToLower(modelName)
+	return strings.Contains(lower, "video")
+}
+
 func buildFileCompatModels(providerName string, modelNames []string) []*ModelInfo {
 	if len(modelNames) == 0 {
 		return nil
@@ -74,6 +93,11 @@ func buildFileCompatModels(providerName string, modelNames []string) []*ModelInf
 			continue
 		}
 		modelType := "openai-compatibility"
+		if isImageModelName(modelID) {
+			modelType = registry.OpenAIImageModelType
+		} else if isVideoModelName(modelID) {
+			modelType = "openai-video"
+		}
 		thinking := &registry.ThinkingSupport{Levels: []string{"low", "medium", "high"}}
 		models = append(models, &ModelInfo{
 			ID:          modelID,

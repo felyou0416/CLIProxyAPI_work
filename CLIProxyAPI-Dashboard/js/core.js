@@ -109,7 +109,7 @@ function applySidebarCollapsed() {
   shell?.classList.toggle('sidebar-is-collapsed', collapsed);
 
   if (toggle) {
-    toggle.textContent = collapsed ? '›' : '‹';
+    toggle.innerHTML = `<span class="toggle-arrow"></span><span class="toggle-text">${collapsed ? '展开' : '收起'}</span>`;
     toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     toggle.setAttribute('title', collapsed ? '展开侧栏' : '折叠侧栏');
   }
@@ -130,7 +130,7 @@ function toggleSidebarCollapsed() {
 function getNavGroups() {
   return {
     runtime: ['account', 'chat', 'requests', 'model-stats', 'clients', 'auth-health'],
-    config: ['providers', 'aggregates', 'model-map', 'api-key-intake', 'auths'],
+    config: ['providers', 'media-models', 'aggregates', 'model-map', 'api-key-intake', 'auths'],
     access: ['firewall-access', 'terminals', 'external-access', 'tools', 'virtual-keys', 'doc'],
     system: ['network-access', 'cooldown', 'storage-config', 'home-config', 'docker-deploy', 'advanced-config', 'cloaking-config', 'amp-config', 'model-proxy'],
   };
@@ -172,7 +172,7 @@ function persistActiveGroup(group) {
 }
 
 function getDefaultSidebarNavOrder() {
-  return ['account', 'chat', 'requests', 'model-stats', 'clients', 'auth-health', 'providers', 'aggregates', 'model-map', 'api-key-intake', 'auths', 'firewall-access', 'terminals', 'network-access', 'external-access', 'model-proxy', 'doc', 'tools'];
+  return ['account', 'chat', 'requests', 'model-stats', 'clients', 'auth-health', 'providers', 'media-models', 'aggregates', 'model-map', 'api-key-intake', 'auths', 'firewall-access', 'terminals', 'network-access', 'external-access', 'model-proxy', 'doc', 'tools'];
 }
 
 function getSidebarNavOrder() {
@@ -554,6 +554,9 @@ async function showSection(name) {
   }
   if (name === 'providers' && typeof loadProviderModels === 'function') {
     loadProviderModels(false);
+  }
+  if (name === 'media-models' && typeof loadMediaModels === 'function') {
+    loadMediaModels(false);
   }
   if (name === 'model-map' && typeof loadProviderModelMappings === 'function') {
     loadProviderModelMappings();

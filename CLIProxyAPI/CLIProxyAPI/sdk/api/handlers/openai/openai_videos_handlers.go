@@ -147,12 +147,11 @@ func videosModelBase(model string) string {
 func isXAIVideosModel(model string) bool {
 	prefix, baseModel := imagesModelParts(model)
 	baseModel = strings.ToLower(strings.TrimSpace(baseModel))
-	if baseModel != defaultXAIVideosModel && baseModel != xaiVideos15PreviewModel {
-		return false
+	if baseModel == defaultXAIVideosModel || baseModel == xaiVideos15PreviewModel {
+		prefix = strings.ToLower(strings.TrimSpace(prefix))
+		return prefix == "" || prefix == "xai" || prefix == "x-ai" || prefix == "grok"
 	}
-
-	prefix = strings.ToLower(strings.TrimSpace(prefix))
-	return prefix == "" || prefix == "xai" || prefix == "x-ai" || prefix == "grok"
+	return strings.Contains(baseModel, "video")
 }
 
 func isSoraVideosModel(model string) bool {
@@ -196,13 +195,11 @@ func canonicalXAIVideosModel(model string) string {
 	if isSoraVideosModel(model) {
 		return defaultXAIVideosModel
 	}
-	switch videosModelBase(model) {
-	case defaultXAIVideosModel:
-		return defaultXAIVideosModel
-	case xaiVideos15PreviewModel:
-		return xaiVideos15PreviewModel
+	base := videosModelBase(model)
+	if base == defaultXAIVideosModel || base == xaiVideos15PreviewModel {
+		return base
 	}
-	return defaultXAIVideosModel
+	return model
 }
 
 func responseVideosModel(model string) string {

@@ -3151,52 +3151,7 @@ def normalize_runtime_model_id(provider: str, model_id: str):
 
 
 def derive_global_aggregate_aliases(source_provider: str, source_model_id: str, runtime_upstream_id: str):
-    provider_value = str(source_provider or '').strip().lower()
-    source_value = str(source_model_id or '').strip().lower()
-    runtime_value = str(runtime_upstream_id or '').strip().lower()
-    haystack = ' '.join([provider_value, source_value, runtime_value])
-    aliases = []
-
-    def add(alias_name: str):
-        alias_token = str(alias_name or '').strip().lower()
-        if alias_token and alias_token not in aliases:
-            aliases.append(alias_token)
-
-    if '/auto' in haystack or haystack.endswith(' auto') or haystack.endswith('/auto') or source_value == 'zenmux/auto':
-        add('auto')
-
-    image_markers = (
-        'image', 'veo', 'kling', 'seedream', 'seedance', 'hunyuan-image',
-        'glm-image', '4.6v', 'gemma-3', 'riverflow'
-    )
-    if any(marker in haystack for marker in image_markers):
-        add('image')
-
-    agent_markers = (
-        'minimax-m2.5', 'minimax-m2.1', 'qwen3-coder', 'trinity-large-preview',
-        'nemotron-3-super', 'agent'
-    )
-    if any(marker in haystack for marker in agent_markers):
-        add('agent')
-
-    coder_markers = ('coding-', 'coder', 'kat-coder', 'kimi-for-coding')
-    if any(marker in haystack for marker in coder_markers):
-        add('coder')
-
-    reasoning_markers = ('thinking', 'step-3.5-flash', 'reasoning')
-    if any(marker in haystack for marker in reasoning_markers):
-        add('reasoning')
-
-    specialized_markers = (
-        'embedding', 'robotics', 'tts', 'transcribe', 'transcription',
-        'whisper', 'prompt-guard', 'safeguard', 'cogvideox'
-    )
-    is_specialized = any(marker in haystack for marker in specialized_markers)
-
-    if not aliases and not is_specialized:
-        add('chat')
-
-    return aliases
+    return []
 
 
 def merge_provider_preset_models(provider: str, models: list[str] | None):

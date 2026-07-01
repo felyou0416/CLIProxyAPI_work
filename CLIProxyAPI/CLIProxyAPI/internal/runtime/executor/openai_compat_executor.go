@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
 	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -85,6 +87,9 @@ func (e *OpenAICompatExecutor) HttpRequest(ctx context.Context, auth *cliproxyau
 func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (resp cliproxyexecutor.Response, err error) {
 	if endpointPath := openAICompatImageEndpointPath(opts); endpointPath != "" {
 		return e.executeImages(ctx, auth, req, opts, endpointPath)
+	}
+	if opts.SourceFormat.String() == "openai-video" {
+		return e.executeVideos(ctx, auth, req, opts)
 	}
 
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
@@ -795,3 +800,93 @@ func (e statusErr) Error() string {
 }
 func (e statusErr) StatusCode() int            { return e.code }
 func (e statusErr) RetryAfter() *time.Duration { return e.retryAfter }
+
+func (e *OpenAICompatExecutor) executeVideos(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (resp cliproxyexecutor.Response, err error) {
+	baseURL, apiKey := e.resolveCredentials(auth)
+	if baseURL == "" {
+		err = statusErr{code: http.StatusUnauthorized, msg: "missing provider baseURL"}
+		return resp, err
+	}
+
+	method := http.MethodPost
+	endpointPath := "/videos/generations"
+	path := openAICompatVideoEndpointPath(opts)
+	if path != "" {
+		endpointPath = path
+	} else {
+		if requestID := strings.TrimSpace(gjson.GetBytes(req.Payload, "request_id").String()); requestID != "" {
+			method = http.MethodGet
+			endpointPath = "/videos/" + url.PathEscape(requestID)
+		}
+	}
+
+	urlStr := strings.TrimSuffix(baseURL, "/") + endpointPath
+	var body io.Reader
+	if method == http.MethodPost {
+		payload := req.Payload
+		if req.Model != "" {
+			payload = e.overrideModel(payload, req.Model)
+		}
+		body = bytes.NewReader(payload)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, method, urlStr, body)
+	if err != nil {
+		return resp, err
+	}
+	if method == http.MethodPost {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+	if apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	httpReq.Header.Set("User-Agent", "cli-proxy-openai-compat")
+
+	var attrs map[string]string
+	if auth != nil {
+		attrs = auth.Attributes
+	}
+	util.ApplyCustomHeadersFromAttrs(httpReq, attrs)
+
+	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
+	httpResp, err := httpClient.Do(httpReq)
+	if err != nil {
+		helps.RecordAPIResponseError(ctx, e.cfg, err)
+		return resp, err
+	}
+	defer httpResp.Body.Close()
+
+	helps.RecordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
+	data, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		helps.RecordAPIResponseError(ctx, e.cfg, err)
+		return resp, err
+	}
+	helps.AppendAPIResponseChunk(ctx, e.cfg, data)
+
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
+		return resp, statusErr{code: httpResp.StatusCode, msg: string(data)}
+	}
+
+	return cliproxyexecutor.Response{Payload: data, Headers: httpResp.Header.Clone()}, nil
+}
+
+func openAICompatVideoEndpointPath(opts cliproxyexecutor.Options) string {
+	path, _ := opts.Metadata[cliproxyexecutor.RequestPathMetadataKey].(string)
+	path = strings.TrimSpace(path)
+	if strings.HasSuffix(path, "/videos/edits") {
+		return "/videos/edits"
+	}
+	if strings.HasSuffix(path, "/videos/extensions") {
+		return "/videos/extensions"
+	}
+	if strings.HasSuffix(path, "/videos/generations") {
+		return "/videos/generations"
+	}
+	if strings.HasSuffix(path, "/videos") {
+		return "/videos"
+	}
+	return ""
+}
+

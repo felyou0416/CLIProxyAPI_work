@@ -1857,6 +1857,10 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			result.RetryAfter = retryAfterFromError(errStream)
 			m.MarkResult(ctx, result)
 			if isRequestInvalidError(errStream) {
+				if len(m.resolveAggregateMembers(routeModel)) > 1 {
+					lastErr = errStream
+					continue
+				}
 				return nil, errStream
 			}
 			lastErr = errStream
@@ -1878,6 +1882,10 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 				result.RetryAfter = retryAfterFromError(bootstrapErr)
 				m.MarkResult(ctx, result)
 				discardStreamChunks(streamResult.Chunks)
+				if len(m.resolveAggregateMembers(routeModel)) > 1 {
+					lastErr = bootstrapErr
+					continue
+				}
 				return nil, bootstrapErr
 			}
 			if idx < len(execModels)-1 {
@@ -1900,6 +1908,10 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			result.RetryAfter = retryAfterFromError(bootstrapErr)
 			m.MarkResult(ctx, result)
 			discardStreamChunks(streamResult.Chunks)
+			if len(m.resolveAggregateMembers(routeModel)) > 1 {
+				lastErr = bootstrapErr
+				continue
+			}
 			return nil, newStreamBootstrapError(bootstrapErr, streamResult.Headers)
 		}
 
@@ -1908,6 +1920,10 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: false, Error: emptyErr}
 			m.MarkResult(ctx, result)
 			if idx < len(execModels)-1 {
+				lastErr = emptyErr
+				continue
+			}
+			if len(m.resolveAggregateMembers(routeModel)) > 1 {
 				lastErr = emptyErr
 				continue
 			}
@@ -2570,6 +2586,10 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 				}
 				m.MarkResult(execCtx, result)
 				if isRequestInvalidError(errExec) {
+					if len(aggMembers) > 1 {
+						authErr = errExec
+						continue
+					}
 					return cliproxyexecutor.Response{}, errExec
 				}
 				authErr = errExec
@@ -2581,6 +2601,10 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 		}
 		if authErr != nil {
 			if isRequestInvalidError(authErr) {
+				if len(aggMembers) > 1 {
+					lastErr = authErr
+					continue
+				}
 				return cliproxyexecutor.Response{}, authErr
 			}
 			lastErr = authErr
@@ -2681,6 +2705,10 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 				}
 				m.MarkResult(execCtx, result)
 				if isRequestInvalidError(errExec) {
+					if len(aggMembers) > 1 {
+						authErr = errExec
+						continue
+					}
 					return cliproxyexecutor.Response{}, errExec
 				}
 				authErr = errExec
@@ -2692,6 +2720,10 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 		}
 		if authErr != nil {
 			if isRequestInvalidError(authErr) {
+				if len(aggMembers) > 1 {
+					lastErr = authErr
+					continue
+				}
 				return cliproxyexecutor.Response{}, authErr
 			}
 			lastErr = authErr
@@ -2777,6 +2809,10 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 				return nil, errCtx
 			}
 			if isRequestInvalidError(errStream) {
+				if len(aggMembers) > 1 {
+					lastErr = errStream
+					continue
+				}
 				return nil, errStream
 			}
 			lastErr = errStream

@@ -306,8 +306,12 @@ function renderChatHistoryList() {
         <div class="chat-session-meta">${s.model ? escapeHtml(s.model).split('-').slice(0,3).join('-') : 'No model'} · ${msgCount} msg · ${timeStr}</div>
       </div>
       <div class="chat-session-actions">
-        <button class="msg-action-btn" onclick="event.stopPropagation();renameSession('${s.id}')" title="Rename">✏️</button>
-        <button class="msg-action-btn" onclick="event.stopPropagation();deleteSession('${s.id}')" title="Delete">🗑️</button>
+        <button class="msg-action-btn" onclick="event.stopPropagation();renameSession('${s.id}')" title="Rename">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+        </button>
+        <button class="msg-action-btn" onclick="event.stopPropagation();deleteSession('${s.id}')" title="Delete">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+        </button>
       </div>
     </div>`;
   }).join('');
@@ -451,9 +455,30 @@ function appendMessage(role, content, quiet) {
   contentDiv.className = 'chat-message-content markdown-body';
 
   if (role !== 'user' && typeof marked !== 'undefined') {
-    contentDiv.innerHTML = marked.parse(content);
+    try {
+      if (typeof marked.parse === 'function') {
+        contentDiv.innerHTML = marked.parse(content);
+      } else if (typeof marked === 'function') {
+        contentDiv.innerHTML = marked(content);
+      } else {
+        contentDiv.innerHTML = escapeHtml(content).replace(/\n/g, '<br>');
+      }
+    } catch (e) {
+      console.error('Failed to parse markdown:', e);
+      contentDiv.innerHTML = escapeHtml(content).replace(/\n/g, '<br>');
+    }
     if (typeof hljs !== 'undefined') {
-      contentDiv.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+      contentDiv.querySelectorAll('pre code').forEach(block => {
+        try {
+          if (typeof hljs.highlightElement === 'function') {
+            hljs.highlightElement(block);
+          } else if (typeof hljs.highlightBlock === 'function') {
+            hljs.highlightBlock(block);
+          }
+        } catch (e) {
+          console.error('Failed to highlight block:', e);
+        }
+      });
     }
   } else {
     contentDiv.innerHTML = escapeHtml(content).replace(/\n/g, '<br>');
