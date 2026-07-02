@@ -5,16 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.2] - 2026-07-01
-### Added
-- Created a premium squircle program logo icon (`.app-icon-squircle`) that functions as the sidebar collapse toggle button, displaying centered when the sidebar is collapsed.
-
-### Removed
-- Removed the redundant language toggle button from the sidebar control strip.
-
+## [1.0.2] - 2026-07-02
 ### Fixed
-- Fixed the general settings panel visibility bug where tab content displayed blank on first render/refresh by removing default `hidden` attributes in [settings.html](file:///e:/U_App/CLIProxyAPI_work/CLIProxyAPI-Dashboard/sections/settings.html).
-- Fixed the toggle switch clickability bug by overlaying `<input>` using absolute positioning and z-indexing in [settings.css](file:///e:/U_App/CLIProxyAPI_work/CLIProxyAPI-Dashboard/css/panels/settings.css) so clicks are 100% responsive.
+- Fixed data loss on application update by migrating storage directory from installation directory (`resources/storage`) to system user data directory (`%APPDATA%/cliproxyapi-dashboard/storage`) in [main.js](file:///e:/U_App/CLIProxyAPI_work/electron-app/main.js).
+- Added `CLIPROXYAPI_STORAGE_DIR` environment variable support in [paths.py](file:///e:/U_App/CLIProxyAPI_work/CLIProxyAPI-Dashboard/backend/paths.py) for flexible storage path configuration.
+
+### Changed
+- Optimized agent configuration files (`AGENTS.md`, `.claude/CLAUDE.md`) to reduce token consumption during conversation initialization.
+- Added runtime state directories (`.omx/`, `.claude/worktrees/`) to `.gitignore` to prevent tracking temporary files.
 
 ## [1.0.1] - 2026-07-01
 ### Added

@@ -52,7 +52,15 @@ LEGACY_DEV_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI_dev'
 LEGACY_APP_DIR = LEGACY_DEV_ROOT / 'app'
 LEGACY_INTERFACES_DIR = LEGACY_APP_DIR / 'interfaces'
 
-STORAGE_DIR = PROXY_ROOT / 'storage'
+def _resolve_storage_dir() -> Path:
+    for key in ('CLIPROXYAPI_STORAGE_DIR', 'RELAYX_STORAGE_DIR'):
+        raw = os.environ.get(key, '').strip()
+        if raw:
+            return Path(raw).expanduser()
+    return PROXY_ROOT / 'storage'
+
+
+STORAGE_DIR = _resolve_storage_dir()
 
 CONFIG_DIR = STORAGE_DIR / 'config'
 AUTH_DIR = STORAGE_DIR / 'auth'

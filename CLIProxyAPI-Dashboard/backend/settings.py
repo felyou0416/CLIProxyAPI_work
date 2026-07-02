@@ -61,7 +61,7 @@ def get_version_info():
     version_file = ROOT / 'VERSION'
     cli_version_file = PROXY_ROOT / 'VERSION' if PROXY_ROOT else None
 
-    current_version = '1.0.0'
+    current_version = '0.0.0'
     build_date = datetime.now().strftime('%Y-%m-%d')
 
     if version_file.exists():
@@ -69,6 +69,9 @@ def get_version_info():
             current_version = version_file.read_text(encoding='utf-8').strip()
         except Exception:
             pass
+
+    if not current_version or current_version == '0.0.0':
+        current_version = '1.0.0'
 
     cli_version = current_version
     if cli_version_file and cli_version_file.exists():
@@ -83,7 +86,7 @@ def get_version_info():
             'version': current_version,
             'cli_version': cli_version,
             'dashboard_version': current_version,
-            'electron_version': '1.0.0',
+            'electron_version': current_version,
             'build_date': build_date,
             'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }

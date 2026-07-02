@@ -50,6 +50,12 @@ coverage.html
 .DS_Store
 Thumbs.db
 
+# --- Agent runtime / 运行时状态 ---
+.omx/
+.claude/worktrees/
+.claude/settings.local.json
+.claude/*.local/
+
 # --- 临时文件 ---
 *.tmp
 *.bak

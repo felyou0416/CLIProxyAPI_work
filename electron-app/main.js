@@ -51,8 +51,9 @@ function waitForPort(port, timeout = 15000) {
   });
 }
 
-function initStorageDir(resPath) {
-  const storagePath = path.join(resPath, 'storage');
+function initStorageDir() {
+  const userDataPath = getUserDataPath();
+  const storagePath = path.join(userDataPath, 'storage');
   const dirs = [
     storagePath,
     path.join(storagePath, 'config'),
@@ -101,7 +102,7 @@ function startProxyServer() {
     return null;
   }
 
-  const storagePath = initStorageDir(resPath);
+  const storagePath = initStorageDir();
 
   console.log('[Proxy] Starting:', proxyExe);
   const configFile = path.join(storagePath, 'config', 'base-config.yaml');
@@ -137,7 +138,7 @@ function startDashboard() {
     return null;
   }
 
-  const storagePath = initStorageDir(resPath);
+  const storagePath = initStorageDir();
 
   console.log('[Dashboard] Starting:', dashboardExe);
   const proc = spawn(dashboardExe, [], {
@@ -147,6 +148,7 @@ function startDashboard() {
     env: {
       ...process.env,
       CLIPROXYAPI_ROOT: resPath,
+      CLIPROXYAPI_STORAGE_DIR: storagePath,
       RELAYX_CLI_BINARY: path.join(resPath, 'cli-proxy-api.exe'),
       RELAYX_DASHBOARD_ROOT: dashboardDir,
       CLIPROXYAPI_DASHBOARD_PORT: String(DASHBOARD_PORT),
