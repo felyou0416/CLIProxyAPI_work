@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-07-02
+### Added
+- Added geometric minimalist app icon (`icon.png`, `icon.ico`) for Windows installer and desktop shortcut.
+
 ## [1.0.2] - 2026-07-02
 ### Fixed
 - Fixed data loss on application update by migrating storage directory from installation directory (`resources/storage`) to system user data directory (`%APPDATA%/cliproxyapi-dashboard/storage`) in [main.js](file:///e:/U_App/CLIProxyAPI_work/electron-app/main.js).
