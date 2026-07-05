@@ -1,0 +1,35 @@
+{
+  "listen": "127.0.0.1:8320",
+  "auth_dir": "E:/U_App/CLIProxyAPI_work/CLIProxyAPI/storage/auth",
+  "auth_providers": [
+    {
+      "provider": "agnes",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "model_rules": [
+        {
+          "match_contains": "image",
+          "type": "image",
+          "endpoint": "/images/generations",
+          "method": "POST",
+          "request_format": "agnes-image",
+          "response_format": "url",
+          "default_size": "1024x768"
+        },
+        {
+          "match_contains": "video",
+          "type": "video",
+          "endpoint": "/videos",
+          "retrieve_endpoint": "{origin}/agnesapi?video_id={video_id}&model_name={model}",
+          "method": "POST",
+          "request_format": "agnes-video",
+          "response_format": "auto",
+          "poll_interval_ms": 3000,
+          "poll_timeout_seconds": 180
+        }
+      ]
+    }
+  ],
+  "providers": []
+}

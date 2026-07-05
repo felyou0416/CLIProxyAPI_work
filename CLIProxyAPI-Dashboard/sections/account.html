@@ -90,6 +90,20 @@
           <button class="danger runtime-action-btn" id="tunnel-stop-btn" onclick="stopTunnel(this)" data-i18n="btn.stopTunnel">停止</button>
         </div>
       </div>
+
+      <!-- Group 7: Media Proxy Control -->
+      <div class="control-group">
+        <div class="control-group-heading">
+          <span class="control-group-icon">🎬</span>
+          <a href="http://127.0.0.1:8320/" target="_blank" class="control-group-title-link">媒体代理控制</a>
+          <span id="media-proxy-status-indicator" class="status-indicator-dot red"></span>
+        </div>
+        <div class="control-pair">
+          <button class="runtime-action-btn" id="media-proxy-start-btn" onclick="startMediaProxy(this)">启动</button>
+          <button class="secondary runtime-action-btn" id="media-proxy-restart-btn" onclick="restartMediaProxy(this)">重启</button>
+          <button class="danger runtime-action-btn" id="media-proxy-stop-btn" onclick="stopMediaProxy(this)">停止</button>
+        </div>
+      </div>
     </div>
 
     <!-- Status Grid -->
@@ -101,6 +115,14 @@
       <div class="status-item">
         <div class="label" data-i18n="hero.localUrl">Local URL</div>
         <div class="status-value"><code id="proxy-local-url">http://127.0.0.1:8317</code></div>
+      </div>
+      <div class="status-item">
+        <div class="label">Media Proxy</div>
+        <div class="status-value" id="media-proxy-running"><span class="pill off">Not running</span></div>
+      </div>
+      <div class="status-item">
+        <div class="label">Media URL</div>
+        <div class="status-value"><code id="media-proxy-url">http://127.0.0.1:8320</code></div>
       </div>
       <div class="status-item">
         <div class="label" data-i18n="label.exposureMode">Exposure Mode</div>

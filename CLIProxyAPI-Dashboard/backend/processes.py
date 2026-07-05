@@ -20,9 +20,12 @@ from backend.paths import (
     PROXY_STDERR,
     RUNTIME_CONFIG,
     PROXY_ROOT,
+    MEDIA_PROXY_ROOT,
     DASHBOARD_ROOT,
     STORAGE_DIR,
     LOGS_DIR,
+    MEDIA_PROXY_STDOUT,
+    MEDIA_PROXY_STDERR,
     RUNTIME_VARIANT,
     POOL_AUTH_DIR,
 )
@@ -38,7 +41,7 @@ def get_process_name(pid):
         return psutil.Process(pid).name()
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
         return None
-processes = {'device_login': None, 'proxy': None, 'oauth_manager': None, 'openclaw': None}
+processes = {'device_login': None, 'proxy': None, 'media_proxy': None, 'oauth_manager': None, 'openclaw': None}
 tool_processes: dict = {}
 tool_states: dict = {}
 DEFAULT_TRUSTED_REMOTE_ADDRESSES = ['fd7a:115c:a1e0::9e39:c580', '100.89.197.128']
@@ -81,6 +84,10 @@ def _cli_unavailable_message():
 
 def _managed_proxy_process_names():
     return {'cli-proxy-api.exe', 'cliproxyapi.exe', 'cli-proxy-api', 'cliproxyapi'}
+
+
+def media_proxy_port():
+    return 8320
 
 
 def _tool_log_path(tool_logs_dir, tool_id: str, suffix='stdout'):
@@ -1761,6 +1768,74 @@ def restart_proxy():
     return start_proxy()
 
 
+def media_proxy_config_path():
+    return MEDIA_PROXY_ROOT / 'config.example.json'
+
+
+def wait_for_media_proxy_ready(timeout_seconds: float = 60.0):
+    deadline = time.monotonic() + timeout_seconds
+    port = media_proxy_port()
+    while time.monotonic() < deadline:
+        if find_proxy_listener_pid(port):
+            return True
+        try:
+            with socket.create_connection(('127.0.0.1', port), timeout=0.4):
+                return True
+        except OSError:
+            time.sleep(0.25)
+    return False
+
+
+def start_media_proxy():
+    if not MEDIA_PROXY_ROOT.exists():
+        return {'ok': False, 'message': f'Media proxy directory was not found: {MEDIA_PROXY_ROOT}'}
+    if not media_proxy_config_path().exists():
+        return {'ok': False, 'message': f'Media proxy config was not found: {media_proxy_config_path()}'}
+    if not command_exists('go'):
+        return {'ok': False, 'message': 'Go runtime was not found in PATH. Install Go or build CLIProxyAPI-MediaProxy first.'}
+    auth_files = list_auth_files()
+    if not auth_files:
+        return {'ok': False, 'message': 'storage/auth is empty. Add Agnes auth files before starting media proxy.'}
+    with process_lock:
+        if process_alive(processes.get('media_proxy')) or find_proxy_listener_pid(media_proxy_port()):
+            return {'ok': True, 'message': 'Media proxy is already running.'}
+        MEDIA_PROXY_STDOUT.parent.mkdir(parents=True, exist_ok=True)
+        stdout = open(MEDIA_PROXY_STDOUT, 'a', encoding='utf-8', errors='ignore')
+        stderr = open(MEDIA_PROXY_STDERR, 'a', encoding='utf-8', errors='ignore')
+        proc = subprocess.Popen(
+            ['go', 'run', '.', '-config', str(media_proxy_config_path())],
+            cwd=str(MEDIA_PROXY_ROOT),
+            stdout=stdout,
+            stderr=stderr,
+            stdin=subprocess.DEVNULL,
+            creationflags=_creationflags(),
+        )
+        processes['media_proxy'] = proc
+    if wait_for_media_proxy_ready():
+        return {'ok': True, 'message': 'Started media proxy on http://127.0.0.1:8320.', 'pid': proc.pid}
+    if proc.poll() is not None:
+        return {'ok': False, 'message': f'Media proxy exited during startup. Check {MEDIA_PROXY_STDERR}.'}
+    return {'ok': False, 'message': 'Media proxy start command was sent, but port 8320 did not become ready in time.'}
+
+
+def stop_media_proxy():
+    with process_lock:
+        proc = processes.get('media_proxy')
+        stopped = kill_process(proc)
+        processes['media_proxy'] = None
+    if not stopped:
+        listener_pid = find_proxy_listener_pid(media_proxy_port())
+        if listener_pid:
+            stopped = stop_pid(listener_pid)
+    return {'ok': True, 'message': 'Stopped media proxy.' if stopped else 'Media proxy was not running.'}
+
+
+def restart_media_proxy():
+    stop_media_proxy()
+    time.sleep(0.4)
+    return start_media_proxy()
+
+
 def current_status(include_logs: bool = True):
     state = load_state()
     auth_files = list_auth_files()
@@ -1774,6 +1849,7 @@ def current_status(include_logs: bool = True):
     applied_display = f'{len(applied_items)} active file(s)' if applied_items else None
 
     tracked_proxy_running = process_alive(processes.get('proxy'))
+    tracked_media_proxy_running = process_alive(processes.get('media_proxy'))
     tracked_oauth_manager_running = process_alive(processes.get('oauth_manager'))
     tracked_openclaw_proc = processes.get('openclaw')
     tracked_openclaw_running = process_alive(tracked_openclaw_proc)
@@ -1782,6 +1858,7 @@ def current_status(include_logs: bool = True):
     openclaw_pid = tracked_openclaw_proc.pid if tracked_openclaw_running else find_openclaw_gateway_pid()
     openclaw_running = bool(tracked_openclaw_running or openclaw_pid)
     listener_pid = find_proxy_listener_pid()
+    media_proxy_pid = processes.get('media_proxy').pid if tracked_media_proxy_running else find_proxy_listener_pid(media_proxy_port())
     listener_process_name = get_process_name(listener_pid) if listener_pid else None
     listener_is_proxy = bool(listener_pid and listener_process_name and listener_process_name.lower() == 'cli-proxy-api.exe')
     proxy_running = bool(tracked_proxy_running or listener_is_proxy)
@@ -1828,6 +1905,9 @@ def current_status(include_logs: bool = True):
         'proxy_running': proxy_running,
         'proxy_pid': listener_pid,
         'proxy_managed_by_dashboard': tracked_proxy_running,
+        'media_proxy_running': bool(tracked_media_proxy_running or media_proxy_pid),
+        'media_proxy_pid': media_proxy_pid,
+        'media_proxy_url': f'http://127.0.0.1:{media_proxy_port()}',
         'proxy_url': local_proxy_url,
         'local_proxy_url': local_proxy_url,
         'exposure_url': exposure_url,
@@ -1871,6 +1951,8 @@ def current_status(include_logs: bool = True):
             'device_login_stderr': read_tail(DEVICE_LOGIN_STDERR),
             'proxy_stdout': read_tail(PROXY_STDOUT),
             'proxy_stderr': read_tail(PROXY_STDERR),
+            'media_proxy_stdout': read_tail(MEDIA_PROXY_STDOUT),
+            'media_proxy_stderr': read_tail(MEDIA_PROXY_STDERR),
         })
     return status
 

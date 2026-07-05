@@ -10,9 +10,14 @@ import time
 import tempfile
 import shutil
 import socket
+import hashlib
+import mimetypes
+import re
+from urllib.parse import urlparse
 from pathlib import Path
-from backend.paths import ROOT, PROJECT_ROOT, CLI_EXE, BASE_CONFIG, TOOL_LOGS_DIR, PROVIDER_MODEL_TEST_STATE_FILE, TEMP_DIR
+from backend.paths import ROOT, PROJECT_ROOT, CLI_EXE, BASE_CONFIG, TOOL_LOGS_DIR, PROVIDER_MODEL_TEST_STATE_FILE, TEMP_DIR, GENERATED_IMAGES_DIR
 from backend.processes import process_lock, tool_processes, tool_states, process_alive, kill_process, read_tail, _set_tool_state, _tool_log_path
+from backend.processes import find_proxy_listener_pid, media_proxy_port, start_media_proxy, wait_for_media_proxy_ready
 from backend.processes import probe_socket_stack
 from backend.state import load_state, save_state, get_proxy_api_key, normalize_route_strategy
 from backend.auth import (
@@ -40,6 +45,7 @@ from backend.auth import (
     _with_standard_auth_metadata,
     _provider_route_kind,
     derive_global_aggregate_aliases,
+    get_configured_aggregate_models,
 )
 
 OPENCLAW_CMD = Path.home() / 'AppData' / 'Roaming' / 'npm' / 'openclaw.cmd'
@@ -464,14 +470,26 @@ def get_tool_outputs():
     return {'outputs': outputs, 'running': running, 'states': states}
 
 
+_cached_query_models_result = None
+_cached_query_models_time = 0.0
+
+
 def query_models():
+    global _cached_query_models_result, _cached_query_models_time
+    now = time.monotonic()
+    if _cached_query_models_result is not None and (now - _cached_query_models_time) < 5.0:
+        return _cached_query_models_result
+
     last_failure = None
     for api_key in _candidate_proxy_api_keys():
         try:
             req = urllib.request.Request('http://127.0.0.1:8317/v1/models', headers={'Authorization': f'Bearer {api_key}'}, method='GET')
-            with _LOCAL_URL_OPENER.open(req, timeout=10) as resp:
+            with _LOCAL_URL_OPENER.open(req, timeout=2) as resp:
                 body = resp.read().decode('utf-8', errors='ignore')
-                return {'ok': True, 'status_code': 200, 'body': json.loads(body)}
+                res = {'ok': True, 'status_code': 200, 'body': json.loads(body)}
+                _cached_query_models_result = res
+                _cached_query_models_time = now
+                return res
         except urllib.error.HTTPError as e:
             body = e.read().decode('utf-8', errors='ignore')[:500]
             last_failure = {'ok': False, 'status_code': e.code, 'body': body}
@@ -480,7 +498,10 @@ def query_models():
         except Exception as e:
             last_failure = {'ok': False, 'error': str(e)}
             break
-    return last_failure or {'ok': False, 'error': 'No proxy API key candidates available.'}
+    res = last_failure or {'ok': False, 'error': 'No proxy API key candidates available.'}
+    _cached_query_models_result = res
+    _cached_query_models_time = now
+    return res
 
 
 def test_proxy():
@@ -503,11 +524,222 @@ def test_proxy():
     return last_failure or {'ok': False, 'error': 'No proxy API key candidates available.'}
 
 
+def _raw_media_model_kind(*model_ids):
+    token = ' '.join(str(model_id or '').strip().lower() for model_id in model_ids if str(model_id or '').strip())
+    if not token:
+        return ''
+    if 'image' in token or 'gpt-image' in token:
+        return 'image'
+    if 'video' in token or token.startswith('sora'):
+        return 'video'
+    return ''
+
+
+def _media_request_path_kind(path: str):
+    request_path = str(path or '').strip().lower()
+    if request_path.startswith('/v1/images/'):
+        return 'image'
+    if request_path == '/v1/videos' or request_path.startswith('/v1/videos/'):
+        return 'video'
+    return ''
+
+
+def _resolve_provider_media_model(model_id: str, desired_kind: str = ''):
+    model_value = str(model_id or '').strip()
+    if not model_value:
+        return None
+    for item in get_configured_provider_models():
+        for row in item.get('rows') or []:
+            call_id = str(row.get('call_id') or row.get('alias') or row.get('name') or '').strip()
+            upstream_id = str(row.get('upstream_id') or '').strip()
+            lookup_upstream_id = str(row.get('lookup_upstream_id') or '').strip()
+            runtime_upstream_id = str(row.get('runtime_upstream_id') or upstream_id or '').strip()
+            candidates = {item for item in [call_id, upstream_id, lookup_upstream_id, runtime_upstream_id] if item}
+            if model_value not in candidates:
+                continue
+            kind = _raw_media_model_kind(upstream_id, runtime_upstream_id, lookup_upstream_id, call_id)
+            if not kind or (desired_kind and kind != desired_kind):
+                continue
+            return {
+                'kind': kind,
+                'model': upstream_id or runtime_upstream_id or lookup_upstream_id or call_id,
+                'source': 'provider-model',
+            }
+    return None
+
+
+def _resolve_aggregate_media_model(model_id: str, desired_kind: str = ''):
+    model_value = str(model_id or '').strip()
+    if not model_value:
+        return None
+    for aggregate in get_configured_aggregate_models():
+        alias_id = str(aggregate.get('alias_id') or '').strip()
+        if alias_id != model_value or aggregate.get('enabled') is False:
+            continue
+        for member in aggregate.get('members') or []:
+            call_id = str(member.get('call_id') or '').strip()
+            upstream_id = str(member.get('upstream_id') or '').strip()
+            runtime_upstream_id = str(member.get('runtime_upstream_id') or upstream_id or '').strip()
+            kind = _raw_media_model_kind(runtime_upstream_id, upstream_id, call_id)
+            if not kind or (desired_kind and kind != desired_kind):
+                continue
+            return {
+                'kind': kind,
+                'model': runtime_upstream_id or upstream_id or call_id,
+                'source': 'aggregate-model',
+            }
+    return None
+
+
+def _resolve_media_proxy_payload(path: str, payload: dict):
+    request_path = str(path or '').strip().lower()
+    desired_kind = _media_request_path_kind(request_path)
+    model_value = str((payload or {}).get('model') or '').strip()
+    resolution = (
+        _resolve_aggregate_media_model(model_value, desired_kind)
+        or _resolve_provider_media_model(model_value, desired_kind)
+    )
+    if not resolution:
+        raw_kind = _raw_media_model_kind(model_value)
+        aggregate_only_names = {'auto', 'image', 'agent', 'coder', 'reasoning', 'chat'}
+        if model_value.lower() not in aggregate_only_names and raw_kind and (not desired_kind or raw_kind == desired_kind):
+            resolution = {'kind': raw_kind, 'model': model_value, 'source': 'raw-name'}
+    if not resolution:
+        if desired_kind:
+            return True, dict(payload or {})
+        return False, dict(payload or {})
+    if request_path == '/v1/chat/completions' and not resolution.get('kind'):
+        return False, dict(payload or {})
+    next_payload = dict(payload or {})
+    if resolution.get('model'):
+        next_payload['model'] = resolution['model']
+    return True, next_payload
+
+
+def _is_media_proxy_request(path: str, payload: dict):
+    return _resolve_media_proxy_payload(path, payload)[0]
+
+
+def _ensure_media_proxy_running():
+    if find_proxy_listener_pid(media_proxy_port()):
+        return {'ok': True, 'already_running': True}
+    result = start_media_proxy()
+    if not result.get('ok'):
+        return result
+    if not wait_for_media_proxy_ready():
+        return {'ok': False, 'message': 'Media proxy start command was sent, but port 8320 did not become ready in time.'}
+    return {**result, 'already_running': False}
+
+
+IMAGE_URL_RE = re.compile(r'https?://[^\s)"\']+\.(?:png|jpe?g|webp)(?:\?[^\s)"\']*)?', re.IGNORECASE)
+MAX_GENERATED_IMAGES = 50
+
+
+def _generated_image_ext(url: str, content_type: str = ''):
+    parsed = urlparse(url)
+    ext = Path(parsed.path).suffix.lower()
+    if ext in ('.png', '.jpg', '.jpeg', '.webp'):
+        return ext
+    guessed = mimetypes.guess_extension((content_type or '').split(';', 1)[0].strip())
+    return guessed if guessed in ('.png', '.jpg', '.jpeg', '.webp') else '.png'
+
+
+def _cleanup_generated_images(limit: int = MAX_GENERATED_IMAGES):
+    try:
+        files = [
+            path for path in GENERATED_IMAGES_DIR.iterdir()
+            if path.is_file() and path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp')
+        ]
+    except FileNotFoundError:
+        return
+    overflow = len(files) - max(0, int(limit))
+    if overflow <= 0:
+        return
+    files.sort(key=lambda path: path.stat().st_mtime)
+    for path in files[:overflow]:
+        try:
+            path.unlink()
+        except Exception:
+            pass
+
+
+def _download_generated_image(url: str):
+    url_value = str(url or '').strip()
+    if not url_value:
+        return ''
+    GENERATED_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(url_value.encode('utf-8')).hexdigest()[:16]
+    stamp = time.strftime('%Y%m%d-%H%M%S')
+    try:
+        req = urllib.request.Request(url_value, headers={'User-Agent': 'CLIProxyAPI-Dashboard/1.0'}, method='GET')
+        with _LOCAL_URL_OPENER.open(req, timeout=45) as resp:
+            content_type = resp.headers.get('Content-Type', '')
+            data = resp.read()
+    except Exception:
+        return ''
+    if not data:
+        return ''
+    ext = _generated_image_ext(url_value, content_type)
+    target = GENERATED_IMAGES_DIR / f'{stamp}-{digest}{ext}'
+    try:
+        target.write_bytes(data)
+        _cleanup_generated_images()
+    except Exception:
+        return ''
+    return f'/generated/images/{target.name}'
+
+
+def _localize_generated_images(body: str):
+    try:
+        payload = json.loads(body or '{}')
+    except Exception:
+        return body
+    replacements = {}
+
+    def local_url(remote_url: str):
+        remote = str(remote_url or '').strip()
+        if not remote:
+            return ''
+        if remote not in replacements:
+            replacements[remote] = _download_generated_image(remote)
+        return replacements.get(remote) or ''
+
+    def walk(value):
+        if isinstance(value, dict):
+            for key, item in list(value.items()):
+                if key in ('url', 'image_url') and isinstance(item, str) and IMAGE_URL_RE.match(item):
+                    saved = local_url(item)
+                    if saved:
+                        value.setdefault('remote_url', item)
+                        value[key] = saved
+                    continue
+                if key == 'content' and isinstance(item, str):
+                    def replace_match(match):
+                        saved = local_url(match.group(0))
+                        return saved or match.group(0)
+                    value[key] = IMAGE_URL_RE.sub(replace_match, item)
+                    continue
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(payload)
+    return json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+
+
 def _proxy_request(path: str, payload: dict, timeout: int = 60):
     api_key = get_proxy_api_key(load_state())
+    base_url = 'http://127.0.0.1:8317'
+    is_media_request, request_payload = _resolve_media_proxy_payload(path, payload)
+    if is_media_request:
+        ensure_result = _ensure_media_proxy_running()
+        if not ensure_result.get('ok'):
+            return {'ok': False, 'error': ensure_result.get('message') or 'Media proxy is not available.', 'elapsed_ms': 0}
+        base_url = f'http://127.0.0.1:{media_proxy_port()}'
     req = urllib.request.Request(
-        f'http://127.0.0.1:8317{path}',
-        data=json.dumps(payload).encode('utf-8'),
+        f'{base_url}{path}',
+        data=json.dumps(request_payload).encode('utf-8'),
         headers={
             'Authorization': f'Bearer {api_key}',
             'Content-Type': 'application/json',
@@ -518,6 +750,8 @@ def _proxy_request(path: str, payload: dict, timeout: int = 60):
     try:
         with _LOCAL_URL_OPENER.open(req, timeout=timeout) as resp:
             body = resp.read().decode('utf-8', errors='ignore')
+            if is_media_request:
+                body = _localize_generated_images(body)
             elapsed_ms = int((time.monotonic() - started_at) * 1000)
             return {'ok': True, 'status_code': resp.status, 'body': body, 'elapsed_ms': elapsed_ms}
     except urllib.error.HTTPError as e:

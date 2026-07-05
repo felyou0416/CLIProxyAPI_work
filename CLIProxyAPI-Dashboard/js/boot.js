@@ -5,11 +5,18 @@ async function boot() {
   applySidebarNavOrder();
   applyNavGroupCollapsed();
   setLanguageToggleLabel();
+  const authOk = await checkAuthStatus();
+  if (!authOk) {
+    return;
+  }
   const hashSection = String(window.location.hash || '').replace(/^#/, '').trim();
   if (hashSection && document.getElementById('tab-' + hashSection)) {
-    showSection(hashSection);
+    await showSection(hashSection);
   } else {
-    showSection(getActiveSection());
+    await showSection(getActiveSection());
+  }
+  if (typeof loadIndicatorStates === 'function') {
+    loadIndicatorStates();
   }
   await refreshStatus();
   if (getActiveSection() === 'auths') {
@@ -36,6 +43,84 @@ async function boot() {
       loadAuthFiles();
     }
   }, 15000);
+}
+
+async function checkAuthStatus() {
+  try {
+    const res = await api('/api/auth/check');
+    if (res && res.password_set) {
+      if (res.authenticated) {
+        hideLoginScreen();
+        return true;
+      }
+      showLoginScreen();
+      return false;
+    }
+    hideLoginScreen();
+    return true;
+  } catch (err) {
+    console.error("Auth check failed:", err);
+    hideLoginScreen();
+    return true;
+  }
+}
+
+function showLoginScreen() {
+  const overlay = document.getElementById('login-overlay');
+  if (overlay) {
+    overlay.hidden = false;
+    setTimeout(() => {
+      const input = document.getElementById('login-password');
+      if (input) input.focus();
+    }, 100);
+  }
+}
+
+function hideLoginScreen() {
+  const overlay = document.getElementById('login-overlay');
+  if (overlay) {
+    overlay.hidden = true;
+  }
+  const errorEl = document.getElementById('login-error');
+  if (errorEl) {
+    errorEl.style.display = 'none';
+  }
+  const input = document.getElementById('login-password');
+  if (input) {
+    input.value = '';
+  }
+}
+
+async function submitLogin() {
+  const passwordEl = document.getElementById('login-password');
+  const errorEl = document.getElementById('login-error');
+  const password = passwordEl ? passwordEl.value : '';
+  if (!password) {
+    if (errorEl) {
+      errorEl.textContent = '请输入访问口令';
+      errorEl.style.display = 'block';
+    }
+    return;
+  }
+  try {
+    const res = await api('/api/auth/login', 'POST', { password });
+    if (res && res.token) {
+      setAuthToken(res.token);
+      hideLoginScreen();
+      if (typeof boot === 'function') {
+        boot();
+      }
+    }
+  } catch (err) {
+    if (errorEl) {
+      errorEl.textContent = err.message || '口令错误，请重试';
+      errorEl.style.display = 'block';
+    }
+    if (passwordEl) {
+      passwordEl.value = '';
+      passwordEl.focus();
+    }
+  }
 }
 
 window.addEventListener('hashchange', () => {

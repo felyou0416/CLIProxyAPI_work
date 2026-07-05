@@ -24,6 +24,7 @@
       <div class="chat-mode-switch">
         <button class="active" type="button" data-chat-mode="chat" onclick="setChatMode('chat')">Cowork</button>
         <button type="button" data-chat-mode="image" onclick="setChatMode('image')">Image</button>
+        <button type="button" data-chat-mode="video" onclick="setChatMode('video')">Video</button>
       </div>
       <button class="chat-new-task" type="button" onclick="createNewSession()">
         <span>+</span>
@@ -94,6 +95,24 @@
             <button type="button" data-image-preset="app icon style, centered subject, crisp edges" onclick="setImagePreset(this)">Icon</button>
             <button type="button" data-image-preset="editorial poster composition, strong focal point" onclick="setImagePreset(this)">Poster</button>
             <button type="button" data-image-preset="minimal flat illustration, balanced negative space" onclick="setImagePreset(this)">Illustration</button>
+          </div>
+        </div>
+        <div id="chat-video-options" class="chat-image-options" hidden>
+          <div class="image-option-grid">
+            <label class="image-option-field">
+              <span>Frames</span>
+              <select id="video-frames-select">
+                <option value="81">Short 81</option>
+                <option value="121">Medium 121</option>
+              </select>
+            </label>
+            <label class="image-option-field">
+              <span>Frame rate</span>
+              <select id="video-frame-rate-select">
+                <option value="24">24 FPS</option>
+                <option value="16">16 FPS</option>
+              </select>
+            </label>
           </div>
         </div>
         <div id="chat-history" class="chat-history">

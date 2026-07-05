@@ -1,0 +1,49 @@
+<section id="section-model-thinking" class="panel panel-scroll section-view" hidden>
+  <div class="panel-head">
+    <div>
+      <div class="section-kicker">Thinking / Reasoning</div>
+      <h2 class="section-title">模型思考/推理配置</h2>
+    </div>
+    <div class="action-row">
+      <button class="secondary" type="button" onclick="loadModelThinkingPanel(true)">刷新</button>
+      <button type="button" onclick="saveModelThinkingPanel()">保存配置</button>
+    </div>
+  </div>
+
+  <div class="tool-desc-zh">
+    对检测到可能支持 thinking / reasoning 的模型显示，也可手动添加任意模型 ID。默认保持“使用默认”，不对请求做强制修改；只有显式选择“强制启用/禁用”或填写 effort / budget 时才会写入配置。
+  </div>
+
+  <div class="model-thinking-toolbar">
+    <input id="model-thinking-search" class="model-proxy-search-input" type="search" placeholder="搜索已配置模型 ID" oninput="setModelThinkingSearch(this.value)" />
+  </div>
+
+  <div class="model-thinking-add-row">
+    <select id="model-thinking-select-id" class="model-thinking-select-dropdown" onchange="onModelThinkingSelectModel(this.value)">
+      <option value="">-- 选择已有模型 --</option>
+    </select>
+    <span class="model-thinking-add-or">或</span>
+    <input id="model-thinking-add-id" class="model-proxy-search-input" type="text" placeholder="输入模型 ID" />
+    <button type="button" class="secondary" onclick="addManualModelThinkingRow()">添加</button>
+  </div>
+
+  <div id="model-thinking-summary" class="auth-chip">-</div>
+
+  <div class="model-thinking-table-wrap">
+    <table class="model-thinking-table">
+      <thead>
+        <tr>
+          <th>模型 ID</th>
+          <th>Provider</th>
+          <th>上游模型</th>
+          <th>来源</th>
+          <th>模式</th>
+          <th>Reasoning Effort</th>
+          <th>Thinking Budget</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="model-thinking-body"></tbody>
+    </table>
+  </div>
+</section>

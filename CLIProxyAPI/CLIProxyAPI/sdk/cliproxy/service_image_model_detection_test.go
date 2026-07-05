@@ -9,8 +9,7 @@ import (
 
 func TestIsImageModelName(t *testing.T) {
 	imageModels := []string{
-		"agnes-image-2.0-flash",
-		"agnes-image-2.1-flash",
+		"other-image-2.0-flash",
 		"dall-e-3",
 		"dalle-2",
 		"stable-diffusion-3.5",
@@ -31,6 +30,8 @@ func TestIsImageModelName(t *testing.T) {
 	}
 
 	textModels := []string{
+		"agnes-image-2.0-flash",
+		"agnes-image-2.1-flash",
 		"agnes-2.0-flash",
 		"gpt-4o",
 		"claude-3-5-sonnet",
@@ -49,7 +50,7 @@ func TestIsImageModelName(t *testing.T) {
 func TestBuildFileCompatModels(t *testing.T) {
 	inputModels := []string{
 		"agnes-2.0-flash",
-		"agnes-image-2.0-flash",
+		"other-image-2.0-flash",
 		"agnes-video-v2.0",
 	}
 
@@ -67,8 +68,8 @@ func TestBuildFileCompatModels(t *testing.T) {
 	}
 
 	// 2. Image model (should be auto-detected)
-	if models[1].ID != "agnes-image-2.0-flash" {
-		t.Errorf("expected model[1] ID to be agnes-image-2.0-flash, got %s", models[1].ID)
+	if models[1].ID != "other-image-2.0-flash" {
+		t.Errorf("expected model[1] ID to be other-image-2.0-flash, got %s", models[1].ID)
 	}
 	if models[1].Type != registry.OpenAIImageModelType {
 		t.Errorf("expected model[1] Type to be %s, got %s", registry.OpenAIImageModelType, models[1].Type)
@@ -78,8 +79,8 @@ func TestBuildFileCompatModels(t *testing.T) {
 	if models[2].ID != "agnes-video-v2.0" {
 		t.Errorf("expected model[2] ID to be agnes-video-v2.0, got %s", models[2].ID)
 	}
-	if models[2].Type != "openai-compatibility" {
-		t.Errorf("expected model[2] Type to be openai-compatibility, got %s", models[2].Type)
+	if models[2].Type != "openai-video" {
+		t.Errorf("expected model[2] Type to be openai-video, got %s", models[2].Type)
 	}
 }
 
@@ -88,7 +89,7 @@ func TestBuildOpenAICompatibilityConfigModels(t *testing.T) {
 		Name: "agnes",
 		Models: []config.OpenAICompatibilityModel{
 			{Name: "agnes-2.0-flash"},
-			{Name: "agnes-image-2.0-flash"}, // image: true is not set, should auto-detect
+			{Name: "other-image-2.0-flash"}, // image: true is not set, should auto-detect
 			{Name: "custom-paint-model", Image: true}, // image: true is set explicitly
 		},
 	}
@@ -107,8 +108,8 @@ func TestBuildOpenAICompatibilityConfigModels(t *testing.T) {
 	}
 
 	// 2. Image model (auto-detected)
-	if models[1].ID != "agnes-image-2.0-flash" {
-		t.Errorf("expected model[1] ID to be agnes-image-2.0-flash, got %s", models[1].ID)
+	if models[1].ID != "other-image-2.0-flash" {
+		t.Errorf("expected model[1] ID to be other-image-2.0-flash, got %s", models[1].ID)
 	}
 	if models[1].Type != registry.OpenAIImageModelType {
 		t.Errorf("expected model[1] Type to be %s, got %s", registry.OpenAIImageModelType, models[1].Type)

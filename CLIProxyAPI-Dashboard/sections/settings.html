@@ -159,6 +159,68 @@
           </div>
         </div>
       </div>
+
+      <!-- Access Password Group -->
+      <div class="settings-group">
+        <div class="settings-group-header">
+          <span class="group-dot"></span>
+          <span data-i18n="settings.group.accessPassword">Access Password</span>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label data-i18n="settings.row.accessPasswordStatus">Dashboard access password</label>
+            <span class="setting-description" data-i18n="settings.desc.accessPassword">Protect the dashboard with a password. Only users who know the password can access the panel.</span>
+          </div>
+          <div class="setting-control">
+            <span id="access-password-status" class="badge-style" style="margin-right: 8px; display: inline-block;">-</span>
+            <button class="action-btn" onclick="togglePasswordSetup()" style="margin: 0; padding: 6px 14px; font-size: 13px;">
+              <span id="access-password-btn" data-i18n="settings.btn.setPassword">Set Password</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="access-password-form" style="display:none; padding-top: 12px; border-top: 1px solid var(--border-color, #eee);">
+          <div class="setting-row" id="current-password-row" style="display:none;">
+            <div class="setting-info">
+              <label data-i18n="settings.row.currentPassword">Current password</label>
+            </div>
+            <div class="setting-control">
+              <input type="password" id="current-password-input" class="form-input" style="width: 200px;" placeholder="">
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label data-i18n="settings.row.newPassword">New password</label>
+            </div>
+            <div class="setting-control">
+              <input type="password" id="new-password-input" class="form-input" style="width: 200px;" placeholder="">
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label data-i18n="settings.row.confirmPassword">Confirm password</label>
+            </div>
+            <div class="setting-control">
+              <input type="password" id="confirm-password-input" class="form-input" style="width: 200px;" placeholder="" onkeydown="if(event.key==='Enter')saveAccessPassword()">
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"></div>
+            <div class="setting-control" style="display: flex; gap: 8px;">
+              <button class="primary action-btn" onclick="saveAccessPassword()" style="margin: 0; padding: 6px 14px; font-size: 13px;">
+                <span data-i18n="settings.btn.savePassword">Save</span>
+              </button>
+              <button class="action-btn" onclick="cancelPasswordSetup()" style="margin: 0; padding: 6px 14px; font-size: 13px;">
+                <span data-i18n="settings.btn.cancel">Cancel</span>
+              </button>
+              <button class="action-btn" id="remove-password-btn" onclick="removeAccessPassword()" style="margin: 0; padding: 6px 14px; font-size: 13px; display: none;">
+                <span data-i18n="settings.btn.removePassword">Remove</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 

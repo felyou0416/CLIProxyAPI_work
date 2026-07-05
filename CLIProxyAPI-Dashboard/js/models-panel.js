@@ -28,6 +28,20 @@ function modelStatsAvailability(item) {
   return '<span class="pill off">未检测</span>';
 }
 
+function modelStatsFormatTokens(num) {
+  const value = Number(num || 0);
+  if (!value) return '0';
+  if (value >= 1_000_000) return (value / 1_000_000).toFixed(1) + 'M';
+  if (value >= 1_000) return (value / 1_000).toFixed(1) + 'K';
+  return value.toLocaleString();
+}
+
+function modelStatsTokenTitle(item) {
+  const p = Number(item.prompt_tokens || 0).toLocaleString();
+  const c = Number(item.completion_tokens || 0).toLocaleString();
+  return `Prompt: ${p}\nCompletion: ${c}`;
+}
+
 function modelStatsRowHtml(item) {
   const rate = Number(item.success_rate_percent || 0);
   const provider = item.provider || '-';
@@ -35,6 +49,10 @@ function modelStatsRowHtml(item) {
   const deleteAttrs = canDelete
     ? `data-provider="${modelStatsEscape(item.delete_provider)}" data-upstream="${modelStatsEscape(item.delete_upstream_id)}" data-model="${modelStatsEscape(item.model || '')}"`
     : 'disabled';
+  const pt = modelStatsFormatTokens(item.prompt_tokens);
+  const ct = modelStatsFormatTokens(item.completion_tokens);
+  const tt = modelStatsFormatTokens(item.total_tokens);
+  const tokenTitle = modelStatsTokenTitle(item);
   return `
     <tr>
       <td class="model-stats-model">
@@ -42,6 +60,9 @@ function modelStatsRowHtml(item) {
         <div class="metric-note"><small>实际: ${modelStatsEscape(item.actual_model || item.delete_upstream_id || '-')}</small></div>
       </td>
       <td>${modelStatsEscape(provider)}</td>
+      <td class="metric-number" title="${tokenTitle}">${pt}</td>
+      <td class="metric-number" title="${tokenTitle}">${ct}</td>
+      <td class="metric-number" title="${tokenTitle}"><strong>${tt}</strong></td>
       <td class="metric-number"><strong>${rate.toFixed(2)}%</strong></td>
       <td class="metric-number">${Number(item.success_count || 0)}</td>
       <td class="metric-number">${Number(item.failure_count || 0)}</td>
@@ -102,6 +123,9 @@ function groupedModelStatsHtml(items) {
             <tr>
               <th>Model</th>
               <th>Provider</th>
+              <th>Prompt Tokens</th>
+              <th>Completion Tokens</th>
+              <th>Total Tokens</th>
               <th>成功率</th>
               <th>成功</th>
               <th>失败</th>
@@ -168,7 +192,7 @@ async function loadModelStatsPanel(force = false) {
     modelStatsItems = items;
     if (meta) {
       const refreshed = data.refreshed_at ? new Date(Number(data.refreshed_at) * 1000).toLocaleTimeString() : '-';
-      meta.textContent = `${items.length} 个模型 · 最近 ${data.limit || 500} 条 · ${refreshed}`;
+      meta.textContent = `${items.length} 个模型 · 累计 Token · 最近 ${data.limit || 500} 条可用性 · ${refreshed}`;
     }
     renderModelStatsPanel();
     modelStatsPanelLoaded = true;

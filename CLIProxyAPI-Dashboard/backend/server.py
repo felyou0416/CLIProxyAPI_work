@@ -9,9 +9,40 @@ from backend.routes.post_routes import handle_post
 from backend.routes.helpers import send_json
 from backend.request_metrics import start_observability_refresh_thread
 from backend.runtime_env import dashboard_auto_start_enabled
+from backend.access_auth import auth_required, validate_token, extract_token_from_handler
 
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
 DEFAULT_DASHBOARD_HOST = '127.0.0.1'
+
+_PUBLIC_PATHS = {
+    '/api/auth/login',
+    '/api/auth/check',
+    '/api/auth/set-password',
+}
+
+
+def _is_public_path(path: str) -> bool:
+    if path in _PUBLIC_PATHS:
+        return True
+    if path in ('/', '/index.html', '/dashboard.css'):
+        return True
+    if path.startswith('/js/') or path.startswith('/css/') or path.startswith('/sections/'):
+        return True
+    if path.startswith('/generated/images/'):
+        return True
+    return False
+
+
+def _check_auth(handler, parsed) -> bool:
+    if not auth_required():
+        return True
+    if _is_public_path(parsed.path):
+        return True
+    token = extract_token_from_handler(handler)
+    if token and validate_token(token):
+        return True
+    send_json(handler, {'ok': False, 'message': 'Authentication required', 'auth_required': True}, status=401)
+    return False
 
 
 def _flatten_form_data(raw: str):
@@ -51,12 +82,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if not _check_auth(self, parsed):
+            return
         if handle_get(self, parsed):
             return
         send_json(self, {'ok': False, 'message': 'Not found'}, status=404)
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if not _check_auth(self, parsed):
+            return
         try:
             data = _read_request_data(self)
         except OverflowError as exc:

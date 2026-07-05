@@ -22,6 +22,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers/mediaproxy"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 )
@@ -75,6 +76,12 @@ func (h *ClaudeCodeAPIHandler) ClaudeMessages(c *gin.Context) {
 				Type:    "invalid_request_error",
 			},
 		})
+		return
+	}
+
+	modelName := gjson.GetBytes(rawJSON, "model").String()
+	if mediaproxy.IsMediaModel(modelName) {
+		mediaproxy.ProxyOpenAIChat(c, mediaproxy.ClaudeMessagesToOpenAIChat(rawJSON))
 		return
 	}
 

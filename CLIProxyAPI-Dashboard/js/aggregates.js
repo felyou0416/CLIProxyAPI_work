@@ -528,7 +528,7 @@ async function fetchAggregateProviderItems(provider) {
       aggregateProviderItemsCache = cachedItems;
       return aggregateProviderItemsCache;
     }
-    const res = await api('/api/provider-models?runtime_state=1');
+    const res = await api('/api/provider-models');
     aggregateProviderItemsCache = Array.isArray(res.items) ? res.items : [];
     aggregateProviderItemsCache.forEach((item) => {
       const key = aggregateProviderKey(item);
@@ -540,7 +540,7 @@ async function fetchAggregateProviderItems(provider) {
     aggregateProviderItemsCache = [aggregateProviderItemCache.get(providerKey)];
     return aggregateProviderItemsCache;
   }
-  const res = await api(`/api/provider-models?runtime_state=1&provider=${encodeURIComponent(providerKey)}`);
+  const res = await api(`/api/provider-models?provider=${encodeURIComponent(providerKey)}`);
   const items = Array.isArray(res.items) ? res.items : [];
   items.forEach((item) => {
     const key = aggregateProviderKey(item);

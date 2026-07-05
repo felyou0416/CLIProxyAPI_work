@@ -11,6 +11,7 @@ from backend.request_metrics.parsing import (
 )
 from backend.request_metrics.merge import merge_request_events
 from backend.request_metrics.summary import summarize_auth_health, summarize_clients
+from backend.request_metrics.cumulative import update_cumulative_stats
 
 
 _OBSERVABILITY_CACHE_LOCK = threading.Lock()
@@ -38,10 +39,29 @@ def build_observability_snapshot(event_limit: int = _OBSERVABILITY_EVENT_LIMIT, 
     )
     auth_items = list_auth_files()
     runtime_test_state = get_provider_model_test_state()
+
+    # 增量更新累积 Token 统计
+    if events:
+        try:
+            update_cumulative_stats(events)
+        except Exception:
+            pass
+
+    # 各汇总步骤独立 try/except，避免一个失败级联阻断其他汇总
+    try:
+        clients = summarize_clients(events)[:summary_limit]
+    except Exception:
+        clients = []
+
+    try:
+        auth_health = summarize_auth_health(auth_items, events, provider_models, runtime_test_state)[:summary_limit]
+    except Exception:
+        auth_health = []
+
     return {
         'events': events,
-        'clients': summarize_clients(events)[:summary_limit],
-        'auth_health': summarize_auth_health(auth_items, events, provider_models, runtime_test_state)[:summary_limit],
+        'clients': clients,
+        'auth_health': auth_health,
         'refreshed_at': time.time(),
     }
 

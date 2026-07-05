@@ -2852,7 +2852,18 @@ def list_auth_files():
     return items
 
 
+_cached_provider_model_aliases = None
+_cached_provider_model_aliases_time = 0.0
+
+
 def collect_provider_model_aliases(auth_refs: list[str] | None = None):
+    global _cached_provider_model_aliases, _cached_provider_model_aliases_time
+    now = time.time()
+    if auth_refs is None:
+        if _cached_provider_model_aliases is not None and (now - _cached_provider_model_aliases_time) < 3.0:
+            import copy
+            return copy.deepcopy(_cached_provider_model_aliases)
+
     overrides = _load_model_mapping_overrides()
     alias_map = {}
     for provider, entries in PROVIDER_MODEL_ALIASES.items():
@@ -2916,10 +2927,25 @@ def collect_provider_model_aliases(auth_refs: list[str] | None = None):
                     continue
                 alias_map[provider_value].append((upstream_value, call_value))
 
+    if auth_refs is None:
+        _cached_provider_model_aliases = alias_map
+        _cached_provider_model_aliases_time = now
+
     return alias_map
 
 
+_cached_detected_providers = None
+_cached_detected_providers_time = 0.0
+
+
 def collect_detected_providers(auth_refs: list[str] | None = None):
+    global _cached_detected_providers, _cached_detected_providers_time
+    now = time.time()
+    if auth_refs is None:
+        if _cached_detected_providers is not None and (now - _cached_detected_providers_time) < 3.0:
+            import copy
+            return copy.deepcopy(_cached_detected_providers)
+
     providers = []
     resolved_paths = []
 
@@ -2938,6 +2964,10 @@ def collect_detected_providers(auth_refs: list[str] | None = None):
         provider = detect_provider(payload, path.name)
         if provider and provider not in providers:
             providers.append(provider)
+
+    if auth_refs is None:
+        _cached_detected_providers = providers
+        _cached_detected_providers_time = now
 
     return providers
 

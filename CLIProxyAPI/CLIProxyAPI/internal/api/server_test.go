@@ -20,6 +20,7 @@ import (
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
+	"github.com/tidwall/gjson"
 )
 
 func newTestServer(t *testing.T) *Server {
@@ -844,5 +845,173 @@ func TestHomeModelsErrorMessage(t *testing.T) {
 	}
 	if msg := homeModelsErrorMessage([]byte(`{"openai":[]}`)); msg != "home models request failed" {
 		t.Fatalf("default message = %q, want fallback", msg)
+	}
+}
+
+func TestServer_BillingAndUsage(t *testing.T) {
+	server := newTestServer(t)
+
+	t.Run("GET /v1/dashboard/billing/subscription", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/dashboard/billing/subscription", nil)
+		req.Header.Set("Authorization", "Bearer test-key")
+		rr := httptest.NewRecorder()
+		server.engine.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to parse JSON: %v", err)
+		}
+		if resp["object"] != "billing_subscription" {
+			t.Fatalf("expected object = billing_subscription, got %v", resp["object"])
+		}
+		if resp["hard_limit_usd"] != float64(120) {
+			t.Fatalf("expected hard_limit_usd = 120, got %v", resp["hard_limit_usd"])
+		}
+	})
+
+	t.Run("GET /v1/dashboard/billing/usage", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/dashboard/billing/usage", nil)
+		req.Header.Set("Authorization", "Bearer test-key")
+		rr := httptest.NewRecorder()
+		server.engine.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to parse JSON: %v", err)
+		}
+		if resp["object"] != "list" {
+			t.Fatalf("expected object = list, got %v", resp["object"])
+		}
+	})
+
+	t.Run("GET /v1/usage", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/usage", nil)
+		req.Header.Set("Authorization", "Bearer test-key")
+		rr := httptest.NewRecorder()
+		server.engine.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to parse JSON: %v", err)
+		}
+		if resp["object"] != "list" {
+			t.Fatalf("expected object = list, got %v", resp["object"])
+		}
+	})
+}
+
+func TestServer_ChatToMediaProxyForAgnesMappedModels(t *testing.T) {
+	server := newTestServer(t)
+
+	var seen []string
+	mediaProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected media proxy path: %s", r.URL.Path)
+		}
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode forwarded request: %v", err)
+		}
+		model, _ := req["model"].(string)
+		seen = append(seen, model)
+		content := "![image](https://apihub.agnes-ai.com/images/mapped.png)"
+		if strings.Contains(strings.ToLower(model), "video") {
+			content = "[video](https://platform-outputs.agnes-ai.space/videos/mapped.mp4)"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-media","object":"chat.completion","created":1782750000,"model":"` + model + `","choices":[{"index":0,"message":{"role":"assistant","content":"` + content + `"},"finish_reason":"stop"}]}`))
+	}))
+	defer mediaProxy.Close()
+	t.Setenv("CLIPROXYAPI_MEDIA_PROXY_URL", mediaProxy.URL)
+
+	tests := []struct {
+		name    string
+		model   string
+		content string
+	}{
+		{
+			name:    "image",
+			model:   "agnes-agnes-image-2.1-flash",
+			content: "![image](https://apihub.agnes-ai.com/images/mapped.png)",
+		},
+		{
+			name:    "video",
+			model:   "agnes-agnes-video-v2.0",
+			content: "[video](https://platform-outputs.agnes-ai.space/videos/mapped.mp4)",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.NewReader(`{"model":"` + tc.model + `","messages":[{"role":"user","content":"quick test"}],"stream":false}`)
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", body)
+			req.Header.Set("Authorization", "Bearer test-key")
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			server.engine.ServeHTTP(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d: %s", rr.Code, http.StatusOK, rr.Body.String())
+			}
+			content := gjson.GetBytes(rr.Body.Bytes(), "choices.0.message.content").String()
+			if content != tc.content {
+				t.Fatalf("content = %q, want %q", content, tc.content)
+			}
+		})
+	}
+
+	if len(seen) != 2 {
+		t.Fatalf("media proxy saw %d requests, want 2", len(seen))
+	}
+}
+
+func TestServer_ClaudeMessagesToMediaProxyForAgnesMappedModels(t *testing.T) {
+	server := newTestServer(t)
+
+	var forwardedModel string
+	var forwardedPrompt string
+	mediaProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected media proxy path: %s", r.URL.Path)
+		}
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode forwarded request: %v", err)
+		}
+		forwardedModel, _ = req["model"].(string)
+		messages, _ := req["messages"].([]any)
+		if len(messages) > 0 {
+			last, _ := messages[len(messages)-1].(map[string]any)
+			forwardedPrompt, _ = last["content"].(string)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-media","object":"chat.completion","created":1782750000,"model":"agnes-agnes-image-2.1-flash","choices":[{"index":0,"message":{"role":"assistant","content":"![image](https://apihub.agnes-ai.com/images/messages.png)"},"finish_reason":"stop"}]}`))
+	}))
+	defer mediaProxy.Close()
+	t.Setenv("CLIPROXYAPI_MEDIA_PROXY_URL", mediaProxy.URL)
+
+	body := strings.NewReader(`{"model":"agnes-agnes-image-2.1-flash","messages":[{"role":"user","content":"quick claude media test"}],"max_tokens":64}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages?beta=true", body)
+	req.Header.Set("Authorization", "Bearer test-key")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if forwardedModel != "agnes-agnes-image-2.1-flash" {
+		t.Fatalf("forwarded model = %q", forwardedModel)
+	}
+	if forwardedPrompt != "quick claude media test" {
+		t.Fatalf("forwarded prompt = %q", forwardedPrompt)
+	}
+	content := gjson.GetBytes(rr.Body.Bytes(), "choices.0.message.content").String()
+	if content != "![image](https://apihub.agnes-ai.com/images/messages.png)" {
+		t.Fatalf("content = %q", content)
 	}
 }

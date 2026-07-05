@@ -2,8 +2,8 @@
   <div class="panel-head clients-hero">
     <div>
       <div class="section-kicker" data-i18n="section.clientsKicker">Observability</div>
-      <h2 class="section-title" data-i18n="section.clientsTitle">客户端 / IP</h2>
-      <p class="clients-subtitle">按真实客户端 IP 汇总请求质量、模型使用、Token 与延迟；代理链会优先识别 X-Forwarded-For / X-Real-IP 等来源。</p>
+      <h2 class="section-title" data-i18n="section.clientsTitle">客户端 / API Key</h2>
+      <p class="clients-subtitle">按 API Key 汇总客户端请求质量、模型使用、Token 与延迟；同一 Key 的不同来源 IP 会合并统计，无 Key 时归入默认 Key。</p>
     </div>
     <div class="action-row">
       <button class="secondary" type="button" onclick="loadClientsPanel(true)" data-i18n="btn.refresh">刷新</button>
@@ -18,7 +18,7 @@
       <div class="clients-toolbar">
         <label class="clients-search-box">
           <span>搜索</span>
-          <input id="clients-search" type="search" placeholder="IP / 模型 / 路径" oninput="renderClientsPanel()">
+          <input id="clients-search" type="search" placeholder="Key / 模型 / 路径" oninput="renderClientsPanel()">
         </label>
         <label>
           <span>状态</span>
@@ -33,10 +33,8 @@
           <span>类型</span>
           <select id="client-type-filter" onchange="renderClientsPanel()">
             <option value="">全部</option>
-            <option value="public">公网</option>
-            <option value="private">内网</option>
-            <option value="loopback">本机</option>
-            <option value="unknown">未知</option>
+            <option value="apikey">API Key</option>
+            <option value="ip">IP 直连</option>
           </select>
         </label>
         <label>

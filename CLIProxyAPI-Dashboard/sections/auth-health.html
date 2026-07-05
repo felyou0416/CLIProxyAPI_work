@@ -1,28 +1,135 @@
 <section id="section-auth-health" class="panel panel-scroll section-view" hidden>
   <div class="panel-head">
     <div>
-      <div class="section-kicker" data-i18n="section.authHealthKicker">Observability</div>
-      <h2 class="section-title" data-i18n="section.authHealthTitle">Auth Health</h2>
+      <div class="section-kicker" data-i18n="section.authHealthKicker">可观测性</div>
+      <h2 class="section-title" data-i18n="section.authHealthTitle">认证健康</h2>
     </div>
     <div class="action-row">
-      <button class="secondary" type="button" onclick="loadAuthHealthPanel(true)" data-i18n="btn.refresh">刷新</button>
-      <span class="auth-chip" id="auth-health-meta">-</span>
+      <button id="auth-health-refresh" class="secondary" type="button" onclick="loadAuthHealthPanel(true)" data-i18n="btn.refresh">刷新</button>
+      <button id="auth-health-load-all" class="secondary" type="button" onclick="loadAllAuthHealth()" data-i18n="authHealth.loadAll">加载全部</button>
     </div>
   </div>
+
+  <div class="auth-health-summary" id="auth-health-summary" aria-label="认证健康概览">
+    <div class="summary-card total">
+      <div class="summary-icon" aria-hidden="true">📁</div>
+      <div class="summary-main">
+        <div class="summary-value" id="ah-summary-total">0</div>
+        <div class="summary-label" data-i18n="authHealth.totalItems">认证项</div>
+      </div>
+    </div>
+    <div class="summary-card ok">
+      <div class="summary-icon" aria-hidden="true">✓</div>
+      <div class="summary-main">
+        <div class="summary-value" id="ah-summary-healthy">0</div>
+        <div class="summary-label" data-i18n="authHealth.healthy">健康</div>
+      </div>
+    </div>
+    <div class="summary-card warn">
+      <div class="summary-icon" aria-hidden="true">!</div>
+      <div class="summary-main">
+        <div class="summary-value" id="ah-summary-degraded">0</div>
+        <div class="summary-label" data-i18n="authHealth.degraded">降级</div>
+      </div>
+    </div>
+    <div class="summary-card off">
+      <div class="summary-icon" aria-hidden="true">✕</div>
+      <div class="summary-main">
+        <div class="summary-value" id="ah-summary-failed">0</div>
+        <div class="summary-label" data-i18n="authHealth.failed">异常</div>
+      </div>
+    </div>
+    <div class="summary-card requests">
+      <div class="summary-icon" aria-hidden="true">↗</div>
+      <div class="summary-main">
+        <div class="summary-value" id="ah-summary-requests">0</div>
+        <div class="summary-label" data-i18n="authHealth.requests">请求数</div>
+      </div>
+    </div>
+    <div class="summary-card tokens">
+      <div class="summary-icon" aria-hidden="true">◇</div>
+      <div class="summary-main">
+        <div class="summary-value" id="ah-summary-tokens">0</div>
+        <div class="summary-label" data-i18n="authHealth.tokens">总 Token</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="auth-health-toolbar">
+    <div class="ah-search-wrap">
+      <svg class="ah-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"/>
+        <path d="m21 21-4.35-4.35"/>
+      </svg>
+      <input type="search" id="ah-search" class="ah-search" placeholder="搜索认证文件 / Provider / 邮箱" oninput="filterAuthHealth()" data-i18n-placeholder="authHealth.searchPlaceholder">
+    </div>
+    <div class="ah-state-pills" id="ah-state-pills">
+      <button class="pill active" data-state="all" onclick="setAuthHealthStateFilter('all')">
+        <span data-i18n="label.categoryAll">全部</span>
+        <span class="count" id="ah-count-all">0</span>
+      </button>
+      <button class="pill ok" data-state="healthy" onclick="setAuthHealthStateFilter('healthy')">
+        <span data-i18n="authHealth.healthy">健康</span>
+        <span class="count" id="ah-count-healthy">0</span>
+      </button>
+      <button class="pill warn" data-state="degraded" onclick="setAuthHealthStateFilter('degraded')">
+        <span data-i18n="authHealth.degraded">降级</span>
+        <span class="count" id="ah-count-degraded">0</span>
+      </button>
+      <button class="pill off" data-state="failed" onclick="setAuthHealthStateFilter('failed')">
+        <span data-i18n="authHealth.failed">异常</span>
+        <span class="count" id="ah-count-failed">0</span>
+      </button>
+    </div>
+    <select id="ah-provider-filter" class="ah-provider-filter" onchange="filterAuthHealth()">
+      <option value="" data-i18n="authHealth.allProviders">全部 Provider</option>
+    </select>
+  </div>
+
   <div class="metric-table-wrap">
     <table class="metric-table">
       <thead>
         <tr>
-          <th>认证文件</th>
-          <th>Provider</th>
-          <th>邮箱</th>
-          <th>状态</th>
-          <th>可用模型</th>
-          <th>失败模型</th>
-          <th>请求数</th>
-          <th>总 Token</th>
-          <th>最近失败</th>
-          <th>失败时间</th>
+          <th class="sortable" onclick="sortAuthHealth('name')">
+            <span>认证文件</span>
+            <span class="sort-indicator" data-col="name"></span>
+          </th>
+          <th class="sortable" onclick="sortAuthHealth('provider')">
+            <span>Provider</span>
+            <span class="sort-indicator" data-col="provider"></span>
+          </th>
+          <th class="sortable" onclick="sortAuthHealth('email')">
+            <span>邮箱</span>
+            <span class="sort-indicator" data-col="email"></span>
+          </th>
+          <th class="sortable" onclick="sortAuthHealth('state')">
+            <span>状态</span>
+            <span class="sort-indicator" data-col="state"></span>
+          </th>
+          <th class="sortable num" onclick="sortAuthHealth('available_models')">
+            <span>可用模型</span>
+            <span class="sort-indicator" data-col="available_models"></span>
+          </th>
+          <th class="sortable num" onclick="sortAuthHealth('failed_models')">
+            <span>失败模型</span>
+            <span class="sort-indicator" data-col="failed_models"></span>
+          </th>
+          <th class="sortable num" onclick="sortAuthHealth('request_count')">
+            <span>请求数</span>
+            <span class="sort-indicator" data-col="request_count"></span>
+          </th>
+          <th class="sortable num" onclick="sortAuthHealth('total_tokens')">
+            <span>总 Token</span>
+            <span class="sort-indicator" data-col="total_tokens"></span>
+          </th>
+          <th class="sortable" onclick="sortAuthHealth('recent_failure_reason')">
+            <span>最近失败</span>
+            <span class="sort-indicator" data-col="recent_failure_reason"></span>
+          </th>
+          <th class="sortable" onclick="sortAuthHealth('recent_failure_at')">
+            <span>失败时间</span>
+            <span class="sort-indicator" data-col="recent_failure_at"></span>
+          </th>
         </tr>
       </thead>
       <tbody id="auth-health-body"></tbody>

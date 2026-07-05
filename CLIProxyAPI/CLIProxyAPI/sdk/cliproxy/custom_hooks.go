@@ -64,6 +64,9 @@ func extractModelsFromMetadata(metadata map[string]any) []string {
 
 func isImageModelName(modelName string) bool {
 	lower := strings.ToLower(modelName)
+	if strings.Contains(lower, "agnes-") {
+		return false
+	}
 	keywords := []string{
 		"image", "dall-e", "dalle", "stable-diffusion", "flux", "imagine", "midjourney", "sdxl",
 		"sd-", "mj-", "dream", "kolors", "cogview", "seedream", "recraft", "playground", "pixelart",

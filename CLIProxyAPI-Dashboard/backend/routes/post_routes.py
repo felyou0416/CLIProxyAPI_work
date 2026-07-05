@@ -1,7 +1,8 @@
 from backend.auth import create_manual_auth_entry, create_manual_auth_bundle_entry, list_auth_files, build_auth_ref, set_provider_model_override, delete_provider_model_override, create_custom_aggregate_alias, add_custom_aggregate_alias_members, set_custom_aggregate_alias_members, delete_custom_aggregate_alias, move_custom_aggregate_alias, rename_custom_aggregate_alias, copy_custom_aggregate_alias, set_custom_aggregate_alias_enabled, delete_auth_entries, save_model_proxy_rules, rebuild_runtime_config_from_state, get_configured_provider_models, reorder_custom_aggregate_aliases, set_custom_aggregate_alias_version
+from backend.model_thinking import save_model_thinking_configs
 from backend.api_keys import create_api_key, update_api_key, delete_api_key, reset_api_key_usage, reveal_api_key
 from backend.state import load_state, save_state, normalize_route_strategy
-from backend.processes import start_device_login, stop_device_login, start_proxy, stop_proxy, restart_proxy, start_project, start_oauth_manager, stop_oauth_manager, start_openclaw_gateway, stop_openclaw_gateway, restart_openclaw_gateway, current_status, ensure_firewall_access, ensure_custom_firewall_ports, remove_custom_firewall_ports, ensure_external_firewall_ports, remove_external_firewall_ports, ensure_port_bindings, remove_port_bindings, set_ip_helper_service, stop_dashboard_panel, restart_dashboard_panel
+from backend.processes import start_device_login, stop_device_login, start_proxy, stop_proxy, restart_proxy, start_project, start_oauth_manager, stop_oauth_manager, start_openclaw_gateway, stop_openclaw_gateway, restart_openclaw_gateway, start_media_proxy, stop_media_proxy, restart_media_proxy, current_status, ensure_firewall_access, ensure_custom_firewall_ports, remove_custom_firewall_ports, ensure_external_firewall_ports, remove_external_firewall_ports, ensure_port_bindings, remove_port_bindings, set_ip_helper_service, stop_dashboard_panel, restart_dashboard_panel
 from backend.tools import run_tool, stop_tool, test_provider_models, test_image_models, test_auth_entry, queue_provider_model_tests, clear_provider_model_test_state, stop_provider_model_tests, run_storage_cleanup, _proxy_request
 from backend.terminals import open_terminal, open_desktop_terminal, close_terminal, list_terminals, write_terminal, resize_terminal
 from backend.routes.helpers import send_json
@@ -384,6 +385,25 @@ def handle_post(handler, parsed, data):
             'runtime_validation': rebuild.get('validation'),
         })
         return True
+    if parsed.path == '/api/model-thinking-configs':
+        if not isinstance(data, dict):
+            send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
+            return True
+        try:
+            result = save_model_thinking_configs(data)
+        except ValueError as e:
+            send_json(handler, {'ok': False, 'message': str(e)}, status=400)
+            return True
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': f'Failed to save thinking configs: {e}'}, status=500)
+            return True
+        send_json(handler, {
+            'ok': True,
+            'message': 'Saved model thinking/reasoning configurations.',
+            'configs': result.get('configs', {}),
+            'updated_at': result.get('updated_at', 0),
+        })
+        return True
     if parsed.path == '/api/aggregate-models/apply-runtime':
         try:
             rebuild = rebuild_runtime_config_from_state(load_state())
@@ -595,6 +615,17 @@ def handle_post(handler, parsed, data):
     if parsed.path == '/api/restart-proxy':
         result = restart_proxy()
         send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/media-proxy/start':
+        result = start_media_proxy()
+        send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/media-proxy/restart':
+        result = restart_media_proxy()
+        send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/media-proxy/stop':
+        send_json(handler, stop_media_proxy())
         return True
     if parsed.path == '/api/tunnel/start':
         from backend.processes import start_cloudflared_tunnel
@@ -1111,6 +1142,35 @@ def handle_post(handler, parsed, data):
             send_json(handler, {'ok': False, 'message': 'Missing key.'}, status=400)
             return True
         result = save_setting(key, value)
+        send_json(handler, result, status=200 if result.get('ok') else 500)
+        return True
+    if parsed.path == '/api/auth/login':
+        from backend.access_auth import verify_password, create_token, password_is_set
+        password = (data or {}).get('password') if isinstance(data, dict) else None
+        if not password_is_set():
+            send_json(handler, {'ok': True, 'token': '', 'password_set': False})
+            return True
+        if not password:
+            send_json(handler, {'ok': False, 'message': 'Password is required.'}, status=400)
+            return True
+        if verify_password(str(password)):
+            token = create_token()
+            send_json(handler, {'ok': True, 'token': token, 'password_set': True})
+        else:
+            send_json(handler, {'ok': False, 'message': 'Invalid password.'}, status=401)
+        return True
+    if parsed.path == '/api/auth/set-password':
+        from backend.access_auth import set_access_password, password_is_set, validate_token, extract_token_from_handler
+        new_password = (data or {}).get('new_password') if isinstance(data, dict) else None
+        current_password = (data or {}).get('current_password') if isinstance(data, dict) else None
+        if password_is_set():
+            token = extract_token_from_handler(handler)
+            has_valid_token = token and validate_token(token)
+            if not has_valid_token:
+                if not current_password or not verify_password(str(current_password)):
+                    send_json(handler, {'ok': False, 'message': 'Current password is incorrect.'}, status=401)
+                    return True
+        result = set_access_password(str(new_password or ''))
         send_json(handler, result, status=200 if result.get('ok') else 500)
         return True
     return False

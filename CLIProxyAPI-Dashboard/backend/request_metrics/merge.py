@@ -130,6 +130,8 @@ def merge_request_events(proxy_events: list[dict], precise_events: list[dict], e
                 copy['completion_tokens'] = matched.get('completion_tokens')
             if copy.get('total_tokens') is None and matched.get('total_tokens') is not None:
                 copy['total_tokens'] = matched.get('total_tokens')
+            if not str(copy.get('api_key_masked') or '').strip() and str(matched.get('api_key_masked') or '').strip():
+                copy['api_key_masked'] = str(matched.get('api_key_masked') or '').strip()
             _merge_route_fields(copy, matched)
             notes = list(copy.get('notes') or [])
             for note in matched.get('notes') or []:

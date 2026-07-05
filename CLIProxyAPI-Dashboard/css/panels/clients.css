@@ -156,6 +156,12 @@
   border-color: rgba(37, 99, 235, 0.16);
 }
 
+.client-type-pill.apikey {
+  color: #7c3aed;
+  background: rgba(124, 58, 237, 0.08);
+  border-color: rgba(124, 58, 237, 0.16);
+}
+
 .client-type-pill.private,
 .client-type-pill.loopback {
   color: #475569;

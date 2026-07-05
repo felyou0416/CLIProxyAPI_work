@@ -44,8 +44,16 @@ function isImageMode() {
   return chatMode === 'image';
 }
 
+function isVideoMode() {
+  return chatMode === 'video';
+}
+
+function isMediaMode() {
+  return isImageMode() || isVideoMode();
+}
+
 function setChatMode(mode) {
-  chatMode = mode === 'image' ? 'image' : 'chat';
+  chatMode = mode === 'image' ? 'image' : mode === 'video' ? 'video' : 'chat';
   localStorage.setItem(CHAT_MODE_KEY, chatMode);
   const session = getActiveSession();
   if (session) {
@@ -59,16 +67,44 @@ function setChatMode(mode) {
 
 function isImageModelId(model) {
   const m = String(model || '').toLowerCase();
-  return m === 'comage' || m === 'image' || m.includes('gpt-image');
+  return m === 'comage' || m === 'image' || m.includes('image');
+}
+
+function isVideoModelId(model) {
+  const m = String(model || '').toLowerCase();
+  return m === 'video' || m.includes('video') || m.startsWith('sora');
+}
+
+function imageModelRank(model) {
+  const m = String(model || '').toLowerCase();
+  if (!isImageModelId(m)) return 100;
+  if (m.includes('agnes') && m.includes('image-2.1')) return 0;
+  if (m.includes('agnes') && m.includes('image')) return 1;
+  if (m === 'gpt-image-2' || m.endsWith('-gpt-image-2')) return 5;
+  if (m.includes('gpt-image')) return 6;
+  if (m === 'comage' || m === 'image') return 8;
+  return 20;
+}
+
+function videoModelRank(model) {
+  const m = String(model || '').toLowerCase();
+  if (!isVideoModelId(m)) return 100;
+  if (m.includes('agnes') && m.includes('video-v2.0')) return 0;
+  if (m.includes('agnes') && m.includes('video')) return 1;
+  if (m.startsWith('sora')) return 5;
+  if (m === 'video') return 8;
+  return 20;
 }
 
 function selectPreferredImageModel() {
   const select = document.getElementById('chat-model-select');
-  if (!select || !select.options.length || isImageModelId(select.value)) return;
+  if (!select || !select.options.length) return;
   const options = Array.from(select.options).filter(option => option.value);
-  const exact = options.find(option => ['comage', 'gpt-image-2', 'image'].includes(option.value.toLowerCase()));
-  const fuzzy = options.find(option => isImageModelId(option.value));
-  const match = exact || fuzzy;
+  const imageOptions = options
+    .filter(option => isImageModelId(option.value))
+    .sort((left, right) => imageModelRank(left.value) - imageModelRank(right.value));
+  const match = imageOptions[0];
+  if (!match || imageModelRank(select.value) <= imageModelRank(match.value)) return;
   if (match) {
     select.value = match.value;
     const session = getActiveSession();
@@ -81,6 +117,25 @@ function selectPreferredImageModel() {
   }
 }
 
+function selectPreferredVideoModel() {
+  const select = document.getElementById('chat-model-select');
+  if (!select || !select.options.length) return;
+  const options = Array.from(select.options).filter(option => option.value);
+  const videoOptions = options
+    .filter(option => isVideoModelId(option.value))
+    .sort((left, right) => videoModelRank(left.value) - videoModelRank(right.value));
+  const match = videoOptions[0];
+  if (!match || videoModelRank(select.value) <= videoModelRank(match.value)) return;
+  select.value = match.value;
+  const session = getActiveSession();
+  if (session) {
+    session.model = match.value;
+    session.ts = Date.now();
+    saveChatSessions();
+    renderChatHistoryList();
+  }
+}
+
 function syncChatModeUI() {
   document.querySelectorAll('[data-chat-mode]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.chatMode === chatMode);
@@ -88,23 +143,28 @@ function syncChatModeUI() {
 
   const imageOptions = document.getElementById('chat-image-options');
   if (imageOptions) imageOptions.hidden = !isImageMode();
+  const videoOptions = document.getElementById('chat-video-options');
+  if (videoOptions) videoOptions.hidden = !isVideoMode();
 
   const settingsBar = document.querySelector('.chat-settings-bar');
-  if (settingsBar) settingsBar.hidden = isImageMode();
+  if (settingsBar) settingsBar.hidden = isMediaMode();
 
   const input = document.getElementById('chat-input');
   if (input) {
     input.placeholder = isImageMode()
       ? 'Describe an image to generate...'
+      : isVideoMode()
+        ? 'Describe a video to generate...'
       : 'Send a message...';
   }
 
   const sendBtn = document.querySelector('.chat-send-btn');
   if (sendBtn) {
-    sendBtn.title = isImageMode() ? 'Generate image (Enter)' : 'Send (Enter)';
+    sendBtn.title = isImageMode() ? 'Generate image (Enter)' : isVideoMode() ? 'Generate video (Enter)' : 'Send (Enter)';
   }
 
   if (isImageMode()) selectPreferredImageModel();
+  if (isVideoMode()) selectPreferredVideoModel();
 
   const history = document.getElementById('chat-history');
   if (history && history.querySelector('.chat-welcome')) renderChatWelcome();
@@ -134,17 +194,38 @@ function getImageOptions() {
   };
 }
 
+function getVideoOptions() {
+  const numFrames = Number(document.getElementById('video-frames-select')?.value || 81);
+  const frameRate = Number(document.getElementById('video-frame-rate-select')?.value || 24);
+  return {
+    extra_body: {
+      num_frames: numFrames,
+      frame_rate: frameRate
+    }
+  };
+}
+
 function buildImagePrompt(content) {
   const preset = getImagePreset();
   return preset ? `${content}\n\nStyle: ${preset}.` : content;
 }
 
 async function chatFetchJson(path, method = 'GET', body) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = getAuthToken();
+  if (token) {
+    headers['Authorization'] = 'Bearer ' + token;
+  }
   const res = await fetch(path, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401) {
+    clearAuthToken();
+    showLoginScreen();
+    throw new Error('Authentication required');
+  }
   const text = await res.text();
   let data = null;
   try {
@@ -224,7 +305,7 @@ function switchToSession(id) {
   if (!session) return;
   activeSessionId = id;
   if (session.mode) {
-    chatMode = session.mode === 'image' ? 'image' : 'chat';
+    chatMode = session.mode === 'image' ? 'image' : session.mode === 'video' ? 'video' : 'chat';
     localStorage.setItem(CHAT_MODE_KEY, chatMode);
   }
   saveChatSessions();
@@ -325,6 +406,7 @@ function escapeHtml(str) {
 
 // ─── Model Loading ───
 async function loadChatPanel() {
+  bindChatControls();
   loadChatSessions();
   renderChatHistoryList();
 
@@ -393,8 +475,8 @@ async function loadChatPanel() {
 function renderChatWelcome() {
   const hist = document.getElementById('chat-history');
   if (!hist) return;
-  const welcomeText = isImageMode() ? 'Describe the image you want to generate' : 'Select a model and start chatting';
-  const welcomeHint = isImageMode() ? 'Enter to generate · choose size and style above' : 'Enter to send · Shift+Enter for newline';
+  const welcomeText = isImageMode() ? 'Describe the image you want to generate' : isVideoMode() ? 'Describe the video you want to generate' : 'Select a model and start chatting';
+  const welcomeHint = isImageMode() ? 'Enter to generate · choose size and style above' : isVideoMode() ? 'Enter to generate · video may take a minute' : 'Enter to send · Shift+Enter for newline';
   hist.innerHTML = `<div class="chat-welcome">
     <div class="chat-welcome-icon">
       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
@@ -436,6 +518,128 @@ const ICON = {
   send: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>`,
 };
 
+function copyPreCode(btn) {
+  const pre = btn.closest('pre');
+  const code = pre.querySelector('code');
+  if (code) {
+    // Exclude header text if any
+    const codeText = Array.from(code.childNodes)
+      .filter(node => node.className !== 'code-header')
+      .map(node => node.textContent)
+      .join('');
+    navigator.clipboard.writeText(codeText || code.innerText);
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  }
+}
+
+function decorateMediaEmbeds(contentDiv) {
+  contentDiv.querySelectorAll('a[href]').forEach(link => {
+    const href = link.getAttribute('href') || '';
+    const normalized = href.split('?')[0].toLowerCase();
+    if (!normalized.endsWith('.mp4') && !normalized.endsWith('.webm') && !normalized.endsWith('.mov')) return;
+    const video = document.createElement('video');
+    video.controls = true;
+    video.preload = 'metadata';
+    video.src = href;
+    video.className = 'chat-generated-video';
+    link.replaceWith(video);
+  });
+}
+
+function updateBotMessageContent(contentDiv, content, isDone) {
+  let processedContent = content;
+  let thinkContent = '';
+  const thinkStartIdx = content.indexOf('<think>');
+  if (thinkStartIdx !== -1) {
+    const thinkEndIdx = content.indexOf('</think>');
+    if (thinkEndIdx !== -1) {
+      thinkContent = content.slice(thinkStartIdx + 7, thinkEndIdx).trim();
+      processedContent = (content.slice(0, thinkStartIdx) + content.slice(thinkEndIdx + 8)).trim();
+    } else {
+      thinkContent = content.slice(thinkStartIdx + 7).trim();
+      processedContent = content.slice(0, thinkStartIdx).trim();
+    }
+  }
+
+  let html = '';
+  if (thinkContent) {
+    const detailsAttr = isDone ? '' : 'open';
+    html += `
+      <div class="chat-thinking-block">
+        <details class="chat-thinking-details" ${detailsAttr}>
+          <summary class="chat-thinking-summary">
+            <span class="chat-thinking-icon">🧠</span>
+            <span class="chat-thinking-title">思考过程</span>
+          </summary>
+          <div class="chat-thinking-text">${escapeHtml(thinkContent)}</div>
+        </details>
+      </div>
+    `;
+  }
+
+  if (processedContent) {
+    if (typeof marked !== 'undefined') {
+      try {
+        if (typeof marked.parse === 'function') {
+          html += marked.parse(processedContent);
+        } else if (typeof marked === 'function') {
+          html += marked(processedContent);
+        } else {
+          html += escapeHtml(processedContent).replace(/\n/g, '<br>');
+        }
+      } catch (e) {
+        html += escapeHtml(processedContent).replace(/\n/g, '<br>');
+      }
+    } else {
+      html += escapeHtml(processedContent).replace(/\n/g, '<br>');
+    }
+  }
+
+  contentDiv.innerHTML = html;
+  decorateMediaEmbeds(contentDiv);
+
+  // Decorate code blocks
+  contentDiv.querySelectorAll('pre').forEach(pre => {
+    if (pre.querySelector('.code-header')) return;
+    const code = pre.querySelector('code');
+    const lang = code ? (code.className.match(/language-(\w+)/)?.[1] || 'code') : 'code';
+    
+    const header = document.createElement('div');
+    header.className = 'code-header';
+    header.style = 'display:flex;justify-content:space-between;align-items:center;background:color-mix(in srgb, var(--panel-2) 90%, black 10%);padding:6px 12px;font-size:11px;font-family:var(--font-sans);color:var(--text-muted);border-radius:6px 6px 0 0;border-bottom:1px solid var(--border);';
+    header.innerHTML = `
+      <span style="text-transform:uppercase;font-weight:700;">${lang}</span>
+      <button type="button" style="background:transparent;border:0;color:var(--text-muted);cursor:pointer;font-size:11px;" onclick="copyPreCode(this)">Copy</button>
+    `;
+    
+    pre.style.margin = '10px 0';
+    pre.style.borderRadius = '8px';
+    pre.style.overflow = 'hidden';
+    pre.style.border = '1px solid var(--border)';
+    if (code) {
+      code.style.display = 'block';
+      code.style.padding = '12px';
+      code.style.background = 'var(--panel-2)';
+      code.style.margin = '0';
+    }
+    pre.insertBefore(header, pre.firstChild);
+  });
+
+  // Highlight syntax
+  if (typeof hljs !== 'undefined') {
+    contentDiv.querySelectorAll('pre code').forEach(block => {
+      try {
+        if (typeof hljs.highlightElement === 'function') {
+          hljs.highlightElement(block);
+        } else if (typeof hljs.highlightBlock === 'function') {
+          hljs.highlightBlock(block);
+        }
+      } catch (e) {}
+    });
+  }
+}
+
 function appendMessage(role, content, quiet) {
   const history = document.getElementById('chat-history');
   if (!history) return;
@@ -454,32 +658,8 @@ function appendMessage(role, content, quiet) {
   const contentDiv = document.createElement('div');
   contentDiv.className = 'chat-message-content markdown-body';
 
-  if (role !== 'user' && typeof marked !== 'undefined') {
-    try {
-      if (typeof marked.parse === 'function') {
-        contentDiv.innerHTML = marked.parse(content);
-      } else if (typeof marked === 'function') {
-        contentDiv.innerHTML = marked(content);
-      } else {
-        contentDiv.innerHTML = escapeHtml(content).replace(/\n/g, '<br>');
-      }
-    } catch (e) {
-      console.error('Failed to parse markdown:', e);
-      contentDiv.innerHTML = escapeHtml(content).replace(/\n/g, '<br>');
-    }
-    if (typeof hljs !== 'undefined') {
-      contentDiv.querySelectorAll('pre code').forEach(block => {
-        try {
-          if (typeof hljs.highlightElement === 'function') {
-            hljs.highlightElement(block);
-          } else if (typeof hljs.highlightBlock === 'function') {
-            hljs.highlightBlock(block);
-          }
-        } catch (e) {
-          console.error('Failed to highlight block:', e);
-        }
-      });
-    }
+  if (role !== 'user') {
+    updateBotMessageContent(contentDiv, content, true);
   } else {
     contentDiv.innerHTML = escapeHtml(content).replace(/\n/g, '<br>');
   }
@@ -510,9 +690,10 @@ function appendMessage(role, content, quiet) {
 }
 
 // ─── Input handling ───
-document.addEventListener('DOMContentLoaded', () => {
+function bindChatControls() {
   const chatInput = document.getElementById('chat-input');
-  if (chatInput) {
+  if (chatInput && chatInput.dataset.chatBound !== '1') {
+    chatInput.dataset.chatBound = '1';
     chatInput.addEventListener('input', function () {
       this.style.height = 'auto';
       this.style.height = Math.min(this.scrollHeight, 200) + 'px';
@@ -522,7 +703,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   const modelSelect = document.getElementById('chat-model-select');
-  if (modelSelect) {
+  if (modelSelect && modelSelect.dataset.chatBound !== '1') {
+    modelSelect.dataset.chatBound = '1';
     modelSelect.addEventListener('change', () => {
       const session = getActiveSession();
       if (session) {
@@ -536,7 +718,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   const systemPrompt = document.getElementById('chat-system-prompt');
-  if (systemPrompt) {
+  if (systemPrompt && systemPrompt.dataset.chatBound !== '1') {
+    systemPrompt.dataset.chatBound = '1';
     systemPrompt.addEventListener('input', () => {
       const session = getActiveSession();
       if (session) {
@@ -548,7 +731,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   syncChatModeUI();
-});
+  updateChatSendState();
+}
+
+document.addEventListener('DOMContentLoaded', bindChatControls);
 
 function handleChatInputKeydown(e) {
   // Enter = send, Shift+Enter = newline
@@ -601,7 +787,7 @@ async function sendChatMessage() {
   // Append user message
   appendMessage('user', fullContentToSend);
 
-  if (isImageMode()) {
+  if (isMediaMode()) {
     chatContext = [];
   } else if (chatContext.length === 0) {
     const sysPrompt = document.getElementById('chat-system-prompt')?.value.trim();
@@ -610,7 +796,7 @@ async function sendChatMessage() {
       session.systemPrompt = sysPrompt;
     }
   }
-  if (!isImageMode()) {
+  if (!isMediaMode()) {
     chatContext.push({ role: 'user', content: fullContentToSend });
   }
 
@@ -629,17 +815,25 @@ async function sendChatMessage() {
   chatAttachedFiles = [];
   renderChatAttachedFiles();
 
-  // Loading indicator
+  // Create bot message container
   const history = document.getElementById('chat-history');
-  const loadingDiv = document.createElement('div');
-  loadingDiv.className = 'chat-message assistant loading';
-  loadingDiv.id = 'chat-loading-msg';
-  loadingDiv.innerHTML = `<div class="chat-message-meta">${ICON.assistant}<span>${isImageMode() ? 'Image' : 'Assistant'}</span></div><div class="chat-message-content"><div class="typing-indicator"><span></span><span></span><span></span></div></div>`;
-  history.appendChild(loadingDiv);
+  const botMsgDiv = document.createElement('div');
+  botMsgDiv.className = 'chat-message assistant';
+  botMsgDiv.id = 'chat-bot-reply-container';
+  const botMetaDiv = document.createElement('div');
+  botMetaDiv.className = 'chat-message-meta';
+  botMetaDiv.innerHTML = `${ICON.assistant}<span>${isImageMode() ? 'Image' : isVideoMode() ? 'Video' : 'Assistant'}</span>`;
+  const botContentDiv = document.createElement('div');
+  botContentDiv.className = 'chat-message-content markdown-body';
+  botMsgDiv.appendChild(botMetaDiv);
+  botMsgDiv.appendChild(botContentDiv);
+
+  // Put typing indicator initially
+  botContentDiv.innerHTML = `<div class="typing-indicator"><span></span><span></span><span></span></div>`;
+  history.appendChild(botMsgDiv);
   requestAnimationFrame(() => history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' }));
 
   isGenerating = true;
-  const sendBtn = document.querySelector('.chat-send-btn');
   updateChatSendState();
 
   try {
@@ -651,32 +845,135 @@ async function sendChatMessage() {
           stream: false,
           ...getImageOptions()
         }
-      : { model, messages: chatContext, max_tokens: 4096, stream: false };
+      : isVideoMode()
+        ? {
+            model,
+            messages: [{ role: 'user', content }],
+            max_tokens: 4096,
+            stream: false,
+            ...getVideoOptions()
+          }
+        : { model, messages: chatContext, max_tokens: 4096, stream: true };
 
-    const response = await chatFetchFirstJson(['/api/chat', '/v1/chat/completions'], 'POST', payload);
-
-    const loadEl = document.getElementById('chat-loading-msg');
-    if (loadEl) loadEl.remove();
-
-    if (response && response.choices && response.choices.length > 0) {
-      const reply = response.choices[0].message.content;
-      appendMessage('assistant', reply);
-      if (!isImageMode()) {
-        chatContext.push({ role: 'assistant', content: reply });
+    if (isMediaMode()) {
+      // Non-streaming for media generation.
+      const response = await chatFetchFirstJson(['/api/chat', '/v1/chat/completions'], 'POST', payload);
+      if (response && response.choices && response.choices.length > 0) {
+        const reply = response.choices[0].message.content;
+        updateBotMessageContent(botContentDiv, reply, true);
+        session.messages.push({ role: 'assistant', content: reply });
+        session.ts = Date.now();
+        saveChatSessions();
+      } else {
+        throw new Error(response.error?.message || response.message || 'Invalid response format');
       }
-      session.messages.push({ role: 'assistant', content: reply });
-      session.ts = Date.now();
-      saveChatSessions();
     } else {
-      console.error('Full response:', response);
-      throw new Error(response.error?.message || response.message || 'Invalid response format from API');
+      // Attempt SSE Streaming
+      let streamSucceeded = false;
+      try {
+        const proto = window.location.protocol;
+        const host = window.location.hostname;
+        const streamUrl = `${proto}//${host}:8317/v1/chat/completions`;
+
+        // Fetch virtual keys to authorize the direct request
+        const apiKeys = await fetch('/api/virtual-keys').then(r => r.json()).catch(() => ({}));
+        const api_key = Array.isArray(apiKeys.keys) && apiKeys.keys.length > 0 ? apiKeys.keys[0].key : '';
+
+        const response = await fetch(streamUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${api_key || 'dummy-key'}`
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          throw new Error(`Direct stream request returned status ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let replyText = '';
+        botContentDiv.innerHTML = ''; // Clear typing indicator
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            const cleaned = line.trim();
+            if (!cleaned) continue;
+            if (cleaned === 'data: [DONE]') continue;
+            if (cleaned.startsWith('data: ')) {
+              try {
+                const chunkJson = JSON.parse(cleaned.slice(6));
+                const delta = chunkJson.choices?.[0]?.delta?.content || '';
+                if (delta) {
+                  replyText += delta;
+                  updateBotMessageContent(botContentDiv, replyText, false);
+                  requestAnimationFrame(() => history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' }));
+                }
+              } catch (e) {
+                // Ignore partial JSON parse errors
+              }
+            }
+          }
+        }
+
+        // Finalize
+        updateBotMessageContent(botContentDiv, replyText, true);
+        session.messages.push({ role: 'assistant', content: replyText });
+        chatContext.push({ role: 'assistant', content: replyText });
+        session.ts = Date.now();
+        saveChatSessions();
+        streamSucceeded = true;
+      } catch (streamErr) {
+        console.warn('Streaming failed, falling back to standard API', streamErr);
+      }
+
+      // Fallback to non-streaming POST if streaming failed
+      if (!streamSucceeded) {
+        payload.stream = false;
+        const response = await chatFetchFirstJson(['/api/chat', '/v1/chat/completions'], 'POST', payload);
+        if (response && response.choices && response.choices.length > 0) {
+          const reply = response.choices[0].message.content;
+          updateBotMessageContent(botContentDiv, reply, true);
+          session.messages.push({ role: 'assistant', content: reply });
+          chatContext.push({ role: 'assistant', content: reply });
+          session.ts = Date.now();
+          saveChatSessions();
+        } else {
+          throw new Error(response.error?.message || response.message || 'Invalid response format');
+        }
+      }
     }
   } catch (err) {
     console.error('Chat error:', err);
-    const loadEl = document.getElementById('chat-loading-msg');
-    if (loadEl) loadEl.remove();
-    appendMessage('error', `Error: ${err.message}`);
+    botContentDiv.innerHTML = `<span style="color:var(--danger)">Error: ${err.message}</span>`;
+    botMsgDiv.classList.add('error');
   } finally {
+    // Add copy action
+    if (!botMsgDiv.classList.contains('error')) {
+      const actionsDiv = document.createElement('div');
+      actionsDiv.className = 'message-actions';
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'msg-action-btn';
+      copyBtn.innerHTML = `${ICON.copy} Copy`;
+      copyBtn.onclick = () => {
+        const lastMsg = session.messages[session.messages.length - 1];
+        navigator.clipboard.writeText(lastMsg?.content || '');
+        copyBtn.textContent = '✓ Copied';
+        setTimeout(() => { copyBtn.innerHTML = `${ICON.copy} Copy`; }, 1500);
+      };
+      actionsDiv.appendChild(copyBtn);
+      botMsgDiv.appendChild(actionsDiv);
+    }
+    botMsgDiv.removeAttribute('id');
     isGenerating = false;
     updateChatSendState();
     inputEl.focus();

@@ -18,6 +18,12 @@ from backend.request_metrics.observability import (
     refresh_observability_cache,
     start_observability_refresh_thread,
 )
+from backend.request_metrics.cumulative import (
+    get_cumulative_stats,
+    update_cumulative_stats,
+    reset_cumulative_stats,
+    rebuild_cumulative_stats,
+)
 
 __all__ = [
     'parse_error_logs',
@@ -34,4 +40,8 @@ __all__ = [
     'get_observability_cache',
     'refresh_observability_cache',
     'start_observability_refresh_thread',
+    'get_cumulative_stats',
+    'update_cumulative_stats',
+    'reset_cumulative_stats',
+    'rebuild_cumulative_stats',
 ]

@@ -32,6 +32,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/safemode"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/store"
 	_ "github.com/router-for-me/CLIProxyAPI/v7/internal/translator"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/tui"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
@@ -536,6 +537,7 @@ func main() {
 	} else {
 		cfg.AuthDir = resolvedAuthDir
 	}
+	thinking.SetStorageDir(filepath.Dir(cfg.AuthDir))
 	managementasset.SetCurrentConfig(cfg)
 
 	// Create login options to be used in authentication flows.

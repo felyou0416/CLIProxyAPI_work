@@ -2052,6 +2052,9 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 					isCompatAuth = true
 				}
 			}
+			if isCompatAuth {
+				providerKey = util.OpenAICompatibleProviderKey(providerKey)
+			}
 			if cached, ok := compatCache.lookup(compatName); ok {
 				isCompatAuth = true
 				if providerKey == "" {

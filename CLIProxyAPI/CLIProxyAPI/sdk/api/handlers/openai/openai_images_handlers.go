@@ -233,7 +233,11 @@ func isOpenAICompatImagesModel(model string) bool {
 		return false
 	}
 	info := registry.LookupModelInfo(model)
-	return info != nil && info.Type == registry.OpenAIImageModelType
+	if info == nil {
+		return false
+	}
+	return info.Type == registry.OpenAIImageModelType ||
+		(info.Type == "openai-compatibility" && strings.Contains(strings.ToLower(model), "image"))
 }
 
 func rejectUnsupportedImagesModel(c *gin.Context, model string) bool {

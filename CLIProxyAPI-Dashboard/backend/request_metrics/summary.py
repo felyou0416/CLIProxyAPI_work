@@ -1,8 +1,65 @@
 import ipaddress
+import json
 from collections import Counter, defaultdict
 
 from backend.auth import list_auth_files, get_configured_aggregate_models
 from backend.request_metrics.merge import _provider_lookup
+from backend.paths import STORAGE_DIR
+
+
+def _safe_int(value, default=0) -> int:
+    """安全地将值转为 int，失败时返回 default。防止非数字字符串导致 ValueError。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _proxy_style_mask(key: str) -> str:
+    """与代理日志中一致的掩码格式：前 4 位 + ... + 后 4 位。"""
+    key = str(key or '')
+    if len(key) <= 8:
+        return key
+    return key[:4] + '...' + key[-4:]
+
+
+def _get_default_api_key_masked() -> str:
+    """从 runtime/state.json 读取代理当前使用的默认 API Key，并转成日志掩码格式。"""
+    try:
+        state_path = STORAGE_DIR / 'runtime' / 'state.json'
+        if state_path.exists():
+            data = json.loads(state_path.read_text(encoding='utf-8', errors='ignore'))
+            key = str(data.get('last_proxy_api_key') or '').strip()
+            if key:
+                return _proxy_style_mask(key)
+    except Exception:
+        pass
+    return _proxy_style_mask('cliproxyapi')
+
+
+def _build_api_key_label_map() -> dict[str, dict[str, str]]:
+    """构建 proxy-style masked_key → {label, name} 的映射表，用于客户端命名。
+
+    日志里 Authorization 头的掩码格式是代理生成的（前4+...+后4），
+    与 backend.api_keys._mask_key 不同，所以要单独计算。
+    """
+    try:
+        from backend.api_keys import _load_keys
+        mapping: dict[str, dict[str, str]] = {}
+        data = _load_keys()
+        keys = data if isinstance(data, list) else data.get('keys', [])
+        for entry in keys:
+            full_key = str(entry.get('key') or '').strip()
+            name = str(entry.get('name') or '').strip()
+            note = str(entry.get('note') or '').strip()
+            if not full_key:
+                continue
+            masked = _proxy_style_mask(full_key)
+            label = name or note or masked
+            mapping[masked] = {'label': label, 'name': name, 'note': note}
+        return mapping
+    except Exception:
+        return {}
 
 def _client_ip_type(ip: str) -> str:
     value = str(ip or '').strip()
@@ -29,27 +86,72 @@ def _client_status(success_rate: float, count_5xx: int, count_4xx: int) -> str:
     return 'healthy'
 
 
-def summarize_clients(events: list[dict]) -> list[dict]:
+def summarize_clients(events: list[dict], cumulative_stats: dict | None = None) -> list[dict]:
+    """按 API Key 分组聚合客户端统计。无 Key 时归入默认 API Key。
+
+    可选传入 cumulative_stats，把历史累积中有但最近窗口里没有的 Key 也补进来，
+    并把请求数和 Token 消耗替换为全量累积值（状态/成功率/延迟仍基于最近窗口）。
+    """
+    default_key = _get_default_api_key_masked()
     groups = defaultdict(list)
     for event in events or []:
-        ip = str(event.get('client_ip') or '').strip() or 'unknown'
-        groups[ip].append(event)
+        key = str(event.get('api_key_masked') or '').strip()
+        if not key:
+            # 旧日志/归档事件没有 api_key_masked，统一归入默认 Key
+            key = default_key
+        groups[key].append(event)
+
+    label_map = _build_api_key_label_map()
+    cum_by_client = (cumulative_stats or {}).get('by_client') or {}
+
+    def _resolve_label(group_key: str) -> str:
+        # 优先用虚拟 API Key 系统的名称
+        info = label_map.get(group_key)
+        if info:
+            return info.get('label') or group_key
+        return group_key
 
     rows = []
-    for ip, items in groups.items():
+    seen_keys = set()
+    for group_key, items in groups.items():
+        seen_keys.add(group_key)
         total = len(items)
         success = sum(1 for item in items if item.get('success'))
         latencies = [int(item.get('latency_ms')) for item in items if isinstance(item.get('latency_ms'), int)]
         model_counter = Counter(str(item.get('requested_model') or '').strip() for item in items if str(item.get('requested_model') or '').strip())
         path_counter = Counter(str(item.get('path') or '').strip() for item in items if str(item.get('path') or '').strip())
         success_rate = round((success / total) if total else 0, 4)
-        count_4xx = sum(1 for item in items if 400 <= int(item.get('status_code') or 0) < 500)
-        count_5xx = sum(1 for item in items if int(item.get('status_code') or 0) >= 500)
+        count_4xx = sum(1 for item in items if 400 <= _safe_int(item.get('status_code')) < 500)
+        count_5xx = sum(1 for item in items if _safe_int(item.get('status_code')) >= 500)
+
+        # 收集所有涉及的 IP（保留作为辅助信息）
+        ips = list(dict.fromkeys(str(item.get('client_ip') or '').strip() for item in items if str(item.get('client_ip') or '').strip()))
+        ip_types = list(dict.fromkeys(_client_ip_type(ip) for ip in ips))
+
+        label = _resolve_label(group_key)
+
+        # 用累积统计覆盖请求数和 Token（全量），最近窗口只保留状态/成功率/延迟等
+        cum = cum_by_client.get(group_key)
+        if cum:
+            total_requests = int(cum.get('request_count') or 0)
+            prompt_tokens = int(cum.get('prompt_tokens') or 0)
+            completion_tokens = int(cum.get('completion_tokens') or 0)
+            total_tokens = int(cum.get('total_tokens') or 0)
+        else:
+            total_requests = total
+            prompt_tokens = sum(_safe_int(item.get('prompt_tokens')) for item in items)
+            completion_tokens = sum(_safe_int(item.get('completion_tokens')) for item in items)
+            total_tokens = sum(_safe_int(item.get('total_tokens')) for item in items)
+
         rows.append({
-            'ip': ip,
-            'ip_type': _client_ip_type(ip),
-            'total_requests': total,
-            'last_seen': max(int(item.get('timestamp') or 0) for item in items),
+            'key': group_key,
+            'label': label,
+            'is_api_key': bool(any(str(item.get('api_key_masked') or '').strip() for item in items)),
+            'ips': ips,
+            'ip_types': ip_types,
+            'ip_type': ip_types[0] if ip_types else 'unknown',
+            'total_requests': total_requests,
+            'last_seen': max(_safe_int(item.get('timestamp')) for item in items),
             'success_rate': success_rate,
             'failure_count': total - success,
             'error_rate': round(((total - success) / total) if total else 0, 4),
@@ -59,11 +161,70 @@ def summarize_clients(events: list[dict]) -> list[dict]:
             'top_model': model_counter.most_common(1)[0][0] if model_counter else '',
             'top_path': path_counter.most_common(1)[0][0] if path_counter else '',
             'avg_latency_ms': int(sum(latencies) / len(latencies)) if latencies else None,
-            'prompt_tokens': sum(int(item.get('prompt_tokens') or 0) for item in items),
-            'completion_tokens': sum(int(item.get('completion_tokens') or 0) for item in items),
-            'total_tokens': sum(int(item.get('total_tokens') or 0) for item in items),
-            'client_ip_source': next((str(item.get('client_ip_source') or '').strip() for item in items if str(item.get('client_ip_source') or '').strip()), ''),
+            'prompt_tokens': prompt_tokens,
+            'completion_tokens': completion_tokens,
+            'total_tokens': total_tokens,
         })
+
+    # 合并累积统计中的客户端（补全最近窗口里没有的 Key）
+    for client_key, cum in cum_by_client.items():
+        if client_key in seen_keys:
+            continue
+        if not cum.get('request_count'):
+            continue
+        seen_keys.add(client_key)
+        label = _resolve_label(client_key)
+        rows.append({
+            'key': client_key,
+            'label': label,
+            'is_api_key': client_key != default_key,
+            'ips': [],
+            'ip_types': [],
+            'ip_type': 'apikey',
+            'total_requests': int(cum.get('request_count') or 0),
+            'last_seen': 0,
+            'success_rate': 0,
+            'failure_count': 0,
+            'error_rate': 0,
+            'count_4xx': 0,
+            'count_5xx': 0,
+            'status': 'unknown',
+            'top_model': '',
+            'top_path': '',
+            'avg_latency_ms': None,
+            'prompt_tokens': int(cum.get('prompt_tokens') or 0),
+            'completion_tokens': int(cum.get('completion_tokens') or 0),
+            'total_tokens': int(cum.get('total_tokens') or 0),
+        })
+
+    # 把所有已配置的虚拟 API Key 都展示出来（没有请求显示为 0）
+    for client_key in label_map:
+        if client_key in seen_keys:
+            continue
+        seen_keys.add(client_key)
+        rows.append({
+            'key': client_key,
+            'label': _resolve_label(client_key),
+            'is_api_key': client_key != default_key,
+            'ips': [],
+            'ip_types': [],
+            'ip_type': 'apikey',
+            'total_requests': 0,
+            'last_seen': 0,
+            'success_rate': 0,
+            'failure_count': 0,
+            'error_rate': 0,
+            'count_4xx': 0,
+            'count_5xx': 0,
+            'status': 'unknown',
+            'top_model': '',
+            'top_path': '',
+            'avg_latency_ms': None,
+            'prompt_tokens': 0,
+            'completion_tokens': 0,
+            'total_tokens': 0,
+        })
+
     rows.sort(key=lambda item: (-int(item.get('total_requests') or 0), -int(item.get('last_seen') or 0)))
     return rows
 
@@ -161,7 +322,7 @@ def summarize_model_test_stats(events: list[dict], provider_models: list[dict], 
         total = len(items)
         success_count = sum(1 for item in items if item.get('success'))
         failure_count = total - success_count
-        last_event = max(items, key=lambda item: int(item.get('timestamp') or 0), default={})
+        last_event = max(items, key=lambda item: _safe_int(item.get('timestamp')), default={})
         test_state = test_results.get(model_id) if isinstance(test_results, dict) else {}
         lookup_row = by_upstream.get(model_id)
         provider = str(by_call_id.get(model_id) or '').strip().lower()
@@ -251,6 +412,9 @@ def summarize_model_test_stats(events: list[dict], provider_models: list[dict], 
             final_success_count = success_count + (1 if manual_test_success is True else 0)
             final_failure_count = final_total - final_success_count
 
+        prompt_tokens = sum(_safe_int(item.get('prompt_tokens')) for item in items)
+        completion_tokens = sum(_safe_int(item.get('completion_tokens')) for item in items)
+        total_tokens = sum(_safe_int(item.get('total_tokens')) for item in items)
         rows.append({
             'model': model_id,
             'provider': provider,
@@ -263,7 +427,10 @@ def summarize_model_test_stats(events: list[dict], provider_models: list[dict], 
             'failure_count': final_failure_count,
             'success_rate': round((final_success_count / final_total) if final_total else 0, 4),
             'success_rate_percent': round(((final_success_count / final_total) * 100) if final_total else 0, 2),
-            'last_log_at': int(last_event.get('timestamp') or 0),
+            'prompt_tokens': prompt_tokens,
+            'completion_tokens': completion_tokens,
+            'total_tokens': total_tokens,
+            'last_log_at': _safe_int(last_event.get('timestamp')),
             'last_log_success': bool(last_event.get('success')) if last_event else None,
             'last_log_status_code': last_event.get('status_code') if last_event else None,
             'last_error_summary': str(last_event.get('error_summary') or '').strip() if last_event else '',
@@ -295,11 +462,11 @@ def summarize_auth_health(auth_items: list[dict], events: list[dict], provider_m
         if not provider:
             continue
         provider_stats[provider]['requests'] += 1
-        provider_stats[provider]['prompt_tokens'] += int(event.get('prompt_tokens') or 0)
-        provider_stats[provider]['completion_tokens'] += int(event.get('completion_tokens') or 0)
-        provider_stats[provider]['total_tokens'] += int(event.get('total_tokens') or 0)
+        provider_stats[provider]['prompt_tokens'] += _safe_int(event.get('prompt_tokens'))
+        provider_stats[provider]['completion_tokens'] += _safe_int(event.get('completion_tokens'))
+        provider_stats[provider]['total_tokens'] += _safe_int(event.get('total_tokens'))
         if not event.get('success'):
-            ts = int(event.get('timestamp') or 0)
+            ts = _safe_int(event.get('timestamp'))
             if ts >= provider_stats[provider]['last_failure']:
                 provider_stats[provider]['last_failure'] = ts
                 provider_stats[provider]['reason'] = str(event.get('error_summary') or '').strip()

@@ -1,0 +1,90 @@
+<section id="section-token-usage" class="panel panel-scroll section-view" hidden>
+  <div class="panel-head">
+    <div>
+      <div class="section-kicker" data-i18n="section.tokenUsageKicker">可观测性</div>
+      <h2 class="section-title" data-i18n="section.tokenUsageTitle">Token 用量统计</h2>
+    </div>
+    <div class="action-row">
+      <button class="secondary" type="button" onclick="loadTokenUsagePanel(true)" data-i18n="btn.refresh">刷新</button>
+      <span class="auth-chip" id="token-usage-meta">-</span>
+    </div>
+  </div>
+  <div class="token-quick-note" data-i18n="section.tokenUsageDesc">以柱状图和排行图直观展示按日期、模型、客户端和提供方划分的 Token 累计用量。</div>
+
+  <!-- Metric Summary Cards -->
+  <div class="token-metrics-grid">
+    <div class="token-metric-card">
+      <div class="token-metric-title">总 Token 使用量</div>
+      <div class="token-metric-value" id="metric-total-tokens">-</div>
+      <div class="token-metric-sub">
+        <span>Prompt: <strong id="metric-prompt-tokens">-</strong></span>
+        <span style="margin-left: 8px;">Completion: <strong id="metric-completion-tokens">-</strong></span>
+      </div>
+    </div>
+    <div class="token-metric-card">
+      <div class="token-metric-title">总请求次数</div>
+      <div class="token-metric-value" id="metric-request-count">-</div>
+      <div class="token-metric-sub">
+        <span>单均 Token: <strong id="metric-avg-tokens">-</strong></span>
+      </div>
+    </div>
+    <div class="token-metric-card">
+      <div class="token-metric-title">活跃统计天数</div>
+      <div class="token-metric-value" id="metric-active-days">-</div>
+      <div class="token-metric-sub">
+        <span>峰值日用量: <strong id="metric-peak-tokens">-</strong></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="token-usage-card chart-container-card">
+    <div class="card-header-row">
+      <h3 class="chart-card-title" id="chart-card-title">Token 消耗趋势</h3>
+      <div class="range-selector">
+        <button class="range-btn" id="range-btn-hourly" onclick="setTokenRange('hourly')">小时</button>
+        <button class="range-btn" id="range-btn-7" onclick="setTokenRange(7)">7天</button>
+        <button class="range-btn active" id="range-btn-15" onclick="setTokenRange(15)">15天</button>
+        <button class="range-btn" id="range-btn-30" onclick="setTokenRange(30)">30天</button>
+      </div>
+    </div>
+    <div class="bar-chart-wrapper">
+      <div class="bar-chart-container" id="daily-bar-chart">
+        <!-- Render columns dynamically -->
+      </div>
+    </div>
+    <!-- Chart Legend -->
+    <div class="chart-legend">
+      <span class="legend-item"><span class="legend-dot prompt"></span>Prompt Tokens</span>
+      <span class="legend-item"><span class="legend-dot completion"></span>Completion Tokens</span>
+    </div>
+    <!-- Global Tooltip -->
+    <div id="chart-global-tooltip" class="chart-global-tooltip"></div>
+  </div>
+
+  <!-- Breakdown & Rankings Row -->
+  <div class="token-breakdown-row">
+    <!-- Model Ranking -->
+    <div class="token-usage-card ranking-card">
+      <h3 class="chart-card-title">模型用量排行 (Top Models)</h3>
+      <div class="ranking-list" id="model-ranking-list">
+        <div class="metric-empty">暂无数据</div>
+      </div>
+    </div>
+
+    <!-- Client Ranking -->
+    <div class="token-usage-card ranking-card">
+      <h3 class="chart-card-title">客户端用量排行 (Top Clients)</h3>
+      <div class="ranking-list" id="client-ranking-list">
+        <div class="metric-empty">暂无数据</div>
+      </div>
+    </div>
+
+    <!-- Provider Ranking -->
+    <div class="token-usage-card ranking-card">
+      <h3 class="chart-card-title">提供方用量排行 (Top Providers)</h3>
+      <div class="ranking-list" id="provider-ranking-list">
+        <div class="metric-empty">暂无数据</div>
+      </div>
+    </div>
+  </div>
+</section>

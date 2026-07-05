@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>认证健康 - 优化预览</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f6f8;
+      --panel: #ffffff;
+      --panel-2: #f0f3f6;
+      --border: #d8dee6;
+      --text: #161616;
+      --text-soft: #414141;
+      --text-muted: #858585;
+      --accent: #111827;
+      --accent-soft: #e8eef7;
+      --danger: #dc2626;
+      --ok: #2563eb;
+      --radius: 8px;
+      --radius-sm: 6px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .panel {
+      max-width: 1400px;
+      margin: 0 auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 24px;
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+    }
+    .panel-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .section-kicker {
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin-bottom: 4px;
+    }
+    .section-title {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+    .action-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    button.secondary {
+      height: 36px;
+      padding: 0 16px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    button.secondary:hover {
+      border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+      background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+    }
+
+    /* Summary cards */
+    .auth-health-summary {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .summary-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+      background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 98%, white), var(--panel));
+      border-radius: 18px;
+      box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+    }
+    .summary-icon {
+      width: 38px;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 12px;
+      font-size: 18px;
+      flex: 0 0 auto;
+      background: var(--panel-2);
+    }
+    .summary-card.ok .summary-icon { background: #d1fae5; }
+    .summary-card.warn .summary-icon { background: #fef3c7; }
+    .summary-card.off .summary-icon { background: #fee2e2; }
+    .summary-card.requests .summary-icon { background: #e0e7ff; }
+    .summary-card.tokens .summary-icon { background: #ede9fe; }
+    .summary-value {
+      color: var(--text);
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1;
+    }
+    .summary-card.ok .summary-value { color: #059669; }
+    .summary-card.warn .summary-value { color: #d97706; }
+    .summary-card.off .summary-value { color: var(--danger); }
+    .summary-label {
+      margin-top: 4px;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    /* Toolbar */
+    .auth-health-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .ah-search-wrap {
+      position: relative;
+      flex: 1 1 220px;
+      min-width: 180px;
+    }
+    .ah-search-icon {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 16px;
+      height: 16px;
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+    .ah-search {
+      width: 100%;
+      height: 38px;
+      padding: 0 12px 0 38px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+    }
+    .ah-state-pills {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .ah-state-pills .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text-soft);
+      font-size: 12px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .ah-state-pills .pill.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    .ah-state-pills .pill .count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+      color: var(--text-soft);
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .ah-state-pills .pill.active .count {
+      background: rgba(255, 255, 255, 0.25);
+      color: #fff;
+    }
+    .ah-provider-filter {
+      height: 38px;
+      padding: 0 28px 0 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 500;
+      appearance: none;
+    }
+
+    /* Table */
+    .metric-table-wrap {
+      overflow: auto;
+      width: 100%;
+      max-height: 520px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+    }
+    .metric-table {
+      border-collapse: separate;
+      border-spacing: 0 4px;
+      table-layout: fixed;
+      width: 100%;
+    }
+    .metric-table thead th {
+      position: sticky;
+      top: 0;
+      background: var(--panel);
+      z-index: 10;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-soft);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 10px;
+      white-space: nowrap;
+      text-align: left;
+    }
+    .metric-table th.sortable {
+      cursor: pointer;
+      user-select: none;
+    }
+    .metric-table th.num { text-align: right; }
+    .metric-table td {
+      white-space: nowrap;
+      vertical-align: middle;
+      padding: 8px 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 13px;
+    }
+    .metric-table td.num { text-align: right; }
+    .metric-table tbody tr {
+      transition: background-color 0.2s ease;
+    }
+    .metric-table tbody tr:hover {
+      background: var(--panel-2);
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text-soft);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .pill.ok { color: #1d4ed8; background: #dbeafe; border-color: #bfdbfe; }
+    .pill.warn { color: #92400e; background: #fef3c7; border-color: #fde68a; }
+    .pill.off { color: #991b1b; background: #fee2e2; border-color: #fecaca; }
+    .ellipsis-cell {
+      cursor: pointer;
+      display: inline-block;
+      max-width: 100%;
+    }
+    .sort-indicator {
+      display: inline-block;
+      width: 0;
+      height: 0;
+      margin-left: 5px;
+      vertical-align: middle;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      opacity: 0.25;
+    }
+    .sort-indicator.asc {
+      border-bottom: 5px solid var(--accent);
+      opacity: 1;
+    }
+
+    @media (max-width: 1200px) {
+      .auth-health-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (max-width: 768px) {
+      .auth-health-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="section-kicker">可观测性</div>
+        <h2 class="section-title">认证健康</h2>
+      </div>
+      <div class="action-row">
+        <button class="secondary">刷新</button>
+        <button class="secondary">加载全部</button>
+      </div>
+    </div>
+
+    <div class="auth-health-summary">
+      <div class="summary-card total">
+        <div class="summary-icon">📁</div>
+        <div>
+          <div class="summary-value">42</div>
+          <div class="summary-label">认证项</div>
+        </div>
+      </div>
+      <div class="summary-card ok">
+        <div class="summary-icon">✓</div>
+        <div>
+          <div class="summary-value">38</div>
+          <div class="summary-label">健康</div>
+        </div>
+      </div>
+      <div class="summary-card warn">
+        <div class="summary-icon">!</div>
+        <div>
+          <div class="summary-value">2</div>
+          <div class="summary-label">降级</div>
+        </div>
+      </div>
+      <div class="summary-card off">
+        <div class="summary-icon">✕</div>
+        <div>
+          <div class="summary-value">2</div>
+          <div class="summary-label">异常</div>
+        </div>
+      </div>
+      <div class="summary-card requests">
+        <div class="summary-icon">↗</div>
+        <div>
+          <div class="summary-value">1.2k</div>
+          <div class="summary-label">请求数</div>
+        </div>
+      </div>
+      <div class="summary-card tokens">
+        <div class="summary-icon">◇</div>
+        <div>
+          <div class="summary-value">3.8M</div>
+          <div class="summary-label">总 Token</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="auth-health-toolbar">
+      <div class="ah-search-wrap">
+        <svg class="ah-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/>
+          <path d="m21 21-4.35-4.35"/>
+        </svg>
+        <input type="search" class="ah-search" placeholder="搜索认证文件 / Provider / 邮箱">
+      </div>
+      <div class="ah-state-pills">
+        <button class="pill active">全部 <span class="count">42</span></button>
+        <button class="pill ok">健康 <span class="count">38</span></button>
+        <button class="pill warn">降级 <span class="count">2</span></button>
+        <button class="pill off">异常 <span class="count">2</span></button>
+      </div>
+      <select class="ah-provider-filter">
+        <option value="">全部 Provider</option>
+        <option>agnes</option>
+        <option>aihubmix</option>
+        <option>coc</option>
+      </select>
+    </div>
+
+    <div class="metric-table-wrap">
+      <table class="metric-table">
+        <thead>
+          <tr>
+            <th style="width:18%">认证文件</th>
+            <th style="width:10%">Provider</th>
+            <th style="width:15%">邮箱</th>
+            <th style="width:8%">状态</th>
+            <th class="num" style="width:9%">可用模型</th>
+            <th class="num" style="width:9%">失败模型</th>
+            <th class="num" style="width:8%">请求数</th>
+            <th class="num" style="width:9%">总 Token</th>
+            <th style="width:24%">最近失败</th>
+            <th style="width:16%">失败时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="ellipsis-cell">agnes-apihub.agnes-v1.json</span></td>
+            <td>agnes</td>
+            <td>-</td>
+            <td><span class="pill ok">healthy</span></td>
+            <td class="num">2</td>
+            <td class="num">0</td>
+            <td class="num">0</td>
+            <td class="num">0</td>
+            <td>-</td>
+            <td>-</td>
+          </tr>
+          <tr>
+            <td><span class="ellipsis-cell">aihubmix-aihubmix.v2.json</span></td>
+            <td>aihubmix</td>
+            <td>-</td>
+            <td><span class="pill ok">healthy</span></td>
+            <td class="num">15</td>
+            <td class="num">0</td>
+            <td class="num">128</td>
+            <td class="num">45.2k</td>
+            <td>-</td>
+            <td>-</td>
+          </tr>
+          <tr>
+            <td><span class="ellipsis-cell">coc-127.0.0.1:1779.json</span></td>
+            <td>coc</td>
+            <td>-</td>
+            <td><span class="pill warn">degraded</span></td>
+            <td class="num">2</td>
+            <td class="num">1</td>
+            <td class="num">42</td>
+            <td class="num">8.1k</td>
+            <td><span class="ellipsis-cell">connection timeout</span></td>
+            <td>2026-07-02 14:32</td>
+          </tr>
+          <tr>
+            <td><span class="ellipsis-cell">openrouter-free.json</span></td>
+            <td>openrouter</td>
+            <td>user@example.com</td>
+            <td><span class="pill off">failed</span></td>
+            <td class="num">0</td>
+            <td class="num">3</td>
+            <td class="num">0</td>
+            <td class="num">0</td>
+            <td><span class="ellipsis-cell">401 Unauthorized: invalid key</span></td>
+            <td>2026-07-01 09:15</td>
+          </tr>
+          <tr>
+            <td><span class="ellipsis-cell">codex-prod.json</span></td>
+            <td>codex</td>
+            <td>admin@corp.dev</td>
+            <td><span class="pill ok">healthy</span></td>
+            <td class="num">6</td>
+            <td class="num">0</td>
+            <td class="num">856</td>
+            <td class="num">1.1M</td>
+            <td>-</td>
+            <td>-</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

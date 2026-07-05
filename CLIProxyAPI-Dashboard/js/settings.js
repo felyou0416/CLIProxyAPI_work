@@ -1,5 +1,6 @@
 let settingsLoaded = false;
 let currentSettings = {};
+let passwordSet = false;
 
 function switchSettingsTab(tab) {
   document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
@@ -32,6 +33,9 @@ async function loadSettings() {
     if (autoUpdateCheckEl) autoUpdateCheckEl.checked = currentSettings.auto_update_check !== false;
     if (updateChannelEl) updateChannelEl.value = currentSettings.update_channel || 'stable';
 
+    // Load access password status
+    await loadAccessPasswordStatus();
+
     // Load version info
     const version = await api('/api/version');
     if (version.item) {
@@ -61,6 +65,130 @@ async function loadSettings() {
         </div>
       `;
     }
+  }
+}
+
+async function loadAccessPasswordStatus() {
+  try {
+    const res = await api('/api/auth/check');
+    passwordSet = !!res.password_set;
+    updatePasswordStatusUI();
+  } catch (err) {
+    console.error('Failed to load access password status:', err);
+  }
+}
+
+function updatePasswordStatusUI() {
+  const statusEl = document.getElementById('access-password-status');
+  const btnEl = document.getElementById('access-password-btn');
+  const removeBtn = document.getElementById('remove-password-btn');
+  const currentPwRow = document.getElementById('current-password-row');
+
+  if (statusEl) {
+    statusEl.textContent = passwordSet ? (t('settings.val.passwordEnabled', 'Enabled') || 'Enabled') : (t('settings.val.passwordDisabled', 'Disabled') || 'Disabled');
+    statusEl.style.background = passwordSet ? '#dcfce7' : '#f1f5f9';
+    statusEl.style.color = passwordSet ? '#166534' : '#64748b';
+  }
+  if (btnEl) {
+    btnEl.textContent = passwordSet ? (t('settings.btn.changePassword', 'Change') || 'Change') : (t('settings.btn.setPassword', 'Set Password') || 'Set Password');
+  }
+  if (removeBtn) {
+    removeBtn.style.display = passwordSet ? 'inline-block' : 'none';
+  }
+  if (currentPwRow) {
+    currentPwRow.style.display = passwordSet ? 'flex' : 'none';
+  }
+}
+
+function togglePasswordSetup() {
+  const formEl = document.getElementById('access-password-form');
+  if (!formEl) return;
+  if (formEl.style.display === 'none' || !formEl.style.display) {
+    formEl.style.display = 'block';
+    const input = passwordSet ? document.getElementById('current-password-input') : document.getElementById('new-password-input');
+    if (input) input.focus();
+  } else {
+    cancelPasswordSetup();
+  }
+}
+
+function cancelPasswordSetup() {
+  const formEl = document.getElementById('access-password-form');
+  if (formEl) formEl.style.display = 'none';
+  const curPw = document.getElementById('current-password-input');
+  const newPw = document.getElementById('new-password-input');
+  const confPw = document.getElementById('confirm-password-input');
+  if (curPw) curPw.value = '';
+  if (newPw) newPw.value = '';
+  if (confPw) confPw.value = '';
+}
+
+async function saveAccessPassword() {
+  const newPw = document.getElementById('new-password-input');
+  const confPw = document.getElementById('confirm-password-input');
+  const curPw = document.getElementById('current-password-input');
+  const newPassword = newPw ? newPw.value : '';
+  const confirmPassword = confPw ? confPw.value : '';
+  const currentPassword = curPw ? curPw.value : '';
+
+  if (!newPassword) {
+    showMessage(t('settings.msg.passwordRequired', 'Please enter a new password') || 'Please enter a new password', true);
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    showMessage(t('settings.msg.passwordMismatch', 'Passwords do not match') || 'Passwords do not match', true);
+    return;
+  }
+  if (passwordSet && !currentPassword) {
+    showMessage(t('settings.msg.currentPasswordRequired', 'Please enter the current password') || 'Please enter the current password', true);
+    return;
+  }
+
+  try {
+    const body = { new_password: newPassword };
+    if (passwordSet) {
+      body.current_password = currentPassword;
+    }
+    const res = await api('/api/auth/set-password', 'POST', body);
+    if (res && res.ok) {
+      passwordSet = !!res.password_set;
+      updatePasswordStatusUI();
+      cancelPasswordSetup();
+      showMessage(t('settings.msg.passwordSaved', 'Access password saved successfully') || 'Access password saved successfully');
+    }
+  } catch (err) {
+    showMessage(err.message || (t('settings.msg.passwordSaveFailed', 'Failed to save password') || 'Failed to save password'), true);
+  }
+}
+
+async function removeAccessPassword() {
+  const curPw = document.getElementById('current-password-input');
+  const currentPassword = curPw ? curPw.value : '';
+  if (passwordSet && !currentPassword) {
+    showMessage(t('settings.msg.currentPasswordRequired', 'Please enter the current password') || 'Please enter the current password', true);
+    const formEl = document.getElementById('access-password-form');
+    if (formEl && formEl.style.display === 'none') {
+      formEl.style.display = 'block';
+    }
+    if (curPw) curPw.focus();
+    return;
+  }
+
+  try {
+    const body = { new_password: '' };
+    if (passwordSet) {
+      body.current_password = currentPassword;
+    }
+    const res = await api('/api/auth/set-password', 'POST', body);
+    if (res && res.ok) {
+      passwordSet = false;
+      clearAuthToken();
+      updatePasswordStatusUI();
+      cancelPasswordSetup();
+      showMessage(t('settings.msg.passwordRemoved', 'Access password removed') || 'Access password removed');
+    }
+  } catch (err) {
+    showMessage(err.message || (t('settings.msg.passwordRemoveFailed', 'Failed to remove password') || 'Failed to remove password'), true);
   }
 }
 

@@ -143,8 +143,8 @@ function toggleSidebarCollapsed() {
 
 function getNavGroups() {
   return {
-    runtime: ['account', 'chat', 'requests', 'model-stats', 'clients', 'auth-health', 'settings'],
-    config: ['providers', 'media-models', 'aggregates', 'model-map', 'api-key-intake', 'auths'],
+    runtime: ['account', 'chat', 'requests', 'token-usage', 'model-stats', 'clients', 'auth-health', 'settings'],
+    config: ['providers', 'media-models', 'aggregates', 'model-thinking', 'model-map', 'api-key-intake', 'auths'],
     access: ['firewall-access', 'terminals', 'external-access', 'tools', 'virtual-keys', 'doc'],
     system: ['network-access', 'cooldown', 'storage-config', 'home-config', 'docker-deploy', 'advanced-config', 'cloaking-config', 'amp-config', 'model-proxy'],
   };
@@ -186,7 +186,7 @@ function persistActiveGroup(group) {
 }
 
 function getDefaultSidebarNavOrder() {
-  return ['account', 'chat', 'requests', 'model-stats', 'clients', 'auth-health', 'settings', 'providers', 'media-models', 'aggregates', 'model-map', 'api-key-intake', 'auths', 'firewall-access', 'terminals', 'network-access', 'external-access', 'model-proxy', 'doc', 'tools'];
+  return ['account', 'chat', 'requests', 'token-usage', 'model-stats', 'clients', 'auth-health', 'settings', 'providers', 'media-models', 'aggregates', 'model-map', 'api-key-intake', 'auths', 'firewall-access', 'terminals', 'network-access', 'external-access', 'model-proxy', 'model-thinking', 'doc', 'tools'];
 }
 
 function getSidebarNavOrder() {
@@ -566,6 +566,9 @@ async function showSection(name) {
   if (name === 'model-proxy' && typeof loadModelProxyPanel === 'function') {
     loadModelProxyPanel();
   }
+  if (name === 'model-thinking' && typeof loadModelThinkingPanel === 'function') {
+    loadModelThinkingPanel();
+  }
   if (name === 'providers' && typeof loadProviderModels === 'function') {
     loadProviderModels(false);
   }
@@ -588,6 +591,9 @@ async function showSection(name) {
   }
   if (name === 'requests' && typeof loadRequestEventsPanel === 'function') {
     loadRequestEventsPanel();
+  }
+  if (name === 'token-usage' && typeof loadTokenUsagePanel === 'function') {
+    loadTokenUsagePanel();
   }
   if (name === 'model-stats' && typeof loadModelStatsPanel === 'function') {
     loadModelStatsPanel();
@@ -657,12 +663,39 @@ function showPage(name) {
   showSection(name);
 }
 
+function getAuthToken() {
+  return localStorage.getItem('dashboard_auth_token') || '';
+}
+
+function setAuthToken(token) {
+  if (token) {
+    localStorage.setItem('dashboard_auth_token', token);
+  } else {
+    localStorage.removeItem('dashboard_auth_token');
+  }
+}
+
+function clearAuthToken() {
+  localStorage.removeItem('dashboard_auth_token');
+}
+
 async function api(path, method = 'GET', body) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = getAuthToken();
+  if (token) {
+    headers['Authorization'] = 'Bearer ' + token;
+  }
   const res = await fetch(path, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401) {
+    clearAuthToken();
+    if (path !== '/api/auth/login' && path !== '/api/auth/check') {
+      showLoginScreen();
+    }
+  }
   const text = await res.text();
   let data = null;
   try {

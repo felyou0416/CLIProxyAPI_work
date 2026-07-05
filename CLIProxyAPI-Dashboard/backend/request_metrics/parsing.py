@@ -17,7 +17,6 @@ _REQUEST_URL_RE = re.compile(r'^URL:\s*(.+)$', re.MULTILINE)
 _REQUEST_TIMESTAMP_RE = re.compile(r'^Timestamp:\s*(.+)$', re.MULTILINE)
 _RESPONSE_STATUS_RE = re.compile(r'^Status:\s*(\d{3})$', re.MULTILINE)
 _ERROR_MESSAGE_RE = re.compile(r'"message"\s*:\s*"([^"]+)"')
-_USAGE_RE = re.compile(r'"usage"\s*:\s*(\{.*?\})', re.S)
 _AUTHORIZATION_RE = re.compile(r'^Authorization:\s*Bearer\s+(.+)$', re.MULTILINE)
 _SECTION_HEADER_RE = re.compile(r'^=== .+ ===$', re.MULTILINE)
 _API_REQUEST_HEADER_RE = re.compile(r'^=== API REQUEST(?:\s+\d+)? ===$', re.MULTILINE)
@@ -55,6 +54,7 @@ _OBSERVABILITY_CACHE = {
 _REQUEST_LOG_PARSE_CACHE_LOCK = threading.Lock()
 _PRECISE_REQUEST_LOG_CACHE = {}
 _ERROR_REQUEST_LOG_CACHE = {}
+_REQUEST_LOG_PARSE_CACHE_VERSION = 3  # bumped when event format or extraction logic changes
 _OBSERVABILITY_REFRESH_INTERVAL_SECONDS = 15.0
 _OBSERVABILITY_EVENT_LIMIT = 300
 _OBSERVABILITY_SUMMARY_LIMIT = 200
@@ -310,41 +310,114 @@ def _normalize_path(path: str) -> str:
     return value
 
 
+def _extract_balanced_json(text: str, start: int) -> str | None:
+    """从 text[start] 的 '{' 开始，按花括号计数提取平衡的 JSON 字符串。
+
+    会跳过 JSON 字符串内部的花括号，避免字符串值中的 {/} 干扰计数。
+    """
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == '\\':
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
 def _extract_usage_tokens(content: str) -> tuple[int | None, int | None, int | None]:
+    """从 content 中提取 usage token 信息。
+
+    会遍历所有 "usage" JSON 对象并合并：对 prompt / completion 取最大值，
+    以兼容流式响应中 prompt 和 completion 分散在不同 usage 对象里的情况。
+    """
     raw = str(content or '')
     if not raw:
         return None, None, None
-    match = _USAGE_RE.search(raw)
-    if not match:
+
+    prompts = []
+    completions = []
+    totals = []
+    offset = 0
+    while True:
+        idx = raw.find('"usage"', offset)
+        if idx == -1:
+            break
+        # 跳过 "usage" 本身，找后面的 '{'
+        brace = raw.find('{', idx + 7)
+        if brace == -1:
+            offset = idx + 7
+            continue
+        # 检查中间是否只有空白和冒号（避免匹配到非 usage 值中的 '{'）
+        between = raw[idx + 7:brace]
+        if not re.fullmatch(r'\s*:\s*', between):
+            offset = idx + 7
+            continue
+        json_str = _extract_balanced_json(raw, brace)
+        if json_str is None:
+            offset = idx + 7
+            continue
+        try:
+            parsed = json.loads(json_str)
+            if not isinstance(parsed, dict):
+                offset = brace + 1
+                continue
+        except Exception:
+            offset = brace + 1
+            continue
+
+        prompt = parsed.get('prompt_tokens')
+        if prompt is None:
+            prompt = parsed.get('input_tokens')
+        completion = parsed.get('completion_tokens')
+        if completion is None:
+            completion = parsed.get('output_tokens')
+        total = parsed.get('total_tokens')
+        try:
+            prompt = int(prompt) if prompt is not None else None
+        except Exception:
+            prompt = None
+        try:
+            completion = int(completion) if completion is not None else None
+        except Exception:
+            completion = None
+        try:
+            total = int(total) if total is not None else None
+        except Exception:
+            total = None
+        if prompt is not None:
+            prompts.append(prompt)
+        if completion is not None:
+            completions.append(completion)
+        if total is not None:
+            totals.append(total)
+
+        offset = brace + 1
+
+    if not prompts and not completions and not totals:
         return None, None, None
-    try:
-        usage = json.loads(match.group(1))
-    except Exception:
-        return None, None, None
-    if not isinstance(usage, dict):
-        return None, None, None
-    prompt = usage.get('prompt_tokens')
-    if prompt is None:
-        prompt = usage.get('input_tokens')
-    completion = usage.get('completion_tokens')
-    if completion is None:
-        completion = usage.get('output_tokens')
-    total = usage.get('total_tokens')
-    try:
-        prompt = int(prompt) if prompt is not None else None
-    except Exception:
-        prompt = None
-    try:
-        completion = int(completion) if completion is not None else None
-    except Exception:
-        completion = None
-    try:
-        total = int(total) if total is not None else None
-    except Exception:
-        total = None
-    if total is None and (prompt is not None or completion is not None):
-        total = int(prompt or 0) + int(completion or 0)
-    return prompt, completion, total
+
+    final_prompt = max(prompts) if prompts else None
+    final_completion = max(completions) if completions else None
+    final_total = max(totals) if totals else None
+    if final_total is None and (final_prompt is not None or final_completion is not None):
+        final_total = (final_prompt or 0) + (final_completion or 0)
+    return final_prompt, final_completion, final_total
 
 
 def _archive_path_for_event(timestamp: int) -> Path:
@@ -460,13 +533,13 @@ def _parse_request_log_file(path: Path, content: str, stat, error_log: bool = Fa
     actual_provider, actual_model, route_source = _extract_actual_upstream(content)
     prompt_tokens, completion_tokens, total_tokens = _extract_usage_tokens(content)
 
-    if record_usage:
-        auth_match = _AUTHORIZATION_RE.search(content)
-        api_key_masked = str(auth_match.group(1) if auth_match else '').strip()
-        if api_key_masked:
-            full_key = find_key_by_masked_value(api_key_masked)
-            if full_key:
-                record_api_key_usage(full_key, tokens=total_tokens or 0)
+    auth_match = _AUTHORIZATION_RE.search(content)
+    api_key_masked = str(auth_match.group(1) if auth_match else '').strip()
+
+    if record_usage and api_key_masked:
+        full_key = find_key_by_masked_value(api_key_masked)
+        if full_key:
+            record_api_key_usage(full_key, tokens=total_tokens or 0)
 
     status_code = int(status_match.group(1)) if status_match else (500 if error_log else 200)
     error_message = ''
@@ -497,6 +570,7 @@ def _parse_request_log_file(path: Path, content: str, stat, error_log: bool = Fa
         'prompt_tokens': prompt_tokens,
         'completion_tokens': completion_tokens,
         'total_tokens': total_tokens,
+        'api_key_masked': api_key_masked,
         'notes': [path.name],
         'source': 'error-log' if error_log else 'precise-log',
         'method': 'POST',
@@ -591,7 +665,7 @@ def parse_precise_request_events(limit: int = 500) -> list[dict]:
             stat = path.stat()
         except Exception:
             continue
-        signature = (int(stat.st_mtime_ns), int(stat.st_size))
+        signature = (int(stat.st_mtime_ns), int(stat.st_size), _REQUEST_LOG_PARSE_CACHE_VERSION)
         cached = None
         with _REQUEST_LOG_PARSE_CACHE_LOCK:
             cached = _PRECISE_REQUEST_LOG_CACHE.get(str(path))
@@ -640,7 +714,7 @@ def parse_error_logs(limit: int = 500) -> list[dict]:
             stat = path.stat()
         except Exception:
             continue
-        signature = (int(stat.st_mtime_ns), int(stat.st_size))
+        signature = (int(stat.st_mtime_ns), int(stat.st_size), _REQUEST_LOG_PARSE_CACHE_VERSION)
         cached = None
         with _REQUEST_LOG_PARSE_CACHE_LOCK:
             cached = _ERROR_REQUEST_LOG_CACHE.get(str(path))

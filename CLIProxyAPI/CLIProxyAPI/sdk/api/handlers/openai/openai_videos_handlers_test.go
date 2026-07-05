@@ -578,7 +578,7 @@ func TestVideosContentUsesSelectedAuthProxyForDownload(t *testing.T) {
 
 func TestVideosCreateRejectsUnsupportedModel(t *testing.T) {
 	handler := &OpenAIAPIHandler{}
-	body := strings.NewReader(`{"model":"not-a-video-model","prompt":"make a video"}`)
+	body := strings.NewReader(`{"model":"not-a-v-model","prompt":"make a video"}`)
 
 	resp := performVideosEndpointRequest(t, http.MethodPost, openAIVideosPath, "application/json", body, handler.VideosCreate)
 
@@ -588,8 +588,8 @@ func TestVideosCreateRejectsUnsupportedModel(t *testing.T) {
 	if got := gjson.GetBytes(resp.Body.Bytes(), "object").String(); got != "video" {
 		t.Fatalf("object = %q, want video", got)
 	}
-	if got := gjson.GetBytes(resp.Body.Bytes(), "model").String(); got != "not-a-video-model" {
-		t.Fatalf("model = %q, want not-a-video-model", got)
+	if got := gjson.GetBytes(resp.Body.Bytes(), "model").String(); got != "not-a-v-model" {
+		t.Fatalf("model = %q, want not-a-v-model", got)
 	}
 	if got := gjson.GetBytes(resp.Body.Bytes(), "status").String(); got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
@@ -600,7 +600,7 @@ func TestVideosCreateRejectsUnsupportedModel(t *testing.T) {
 	if got := gjson.GetBytes(resp.Body.Bytes(), "error.code").String(); got != "invalid_request_error" {
 		t.Fatalf("error.code = %q, want invalid_request_error", got)
 	}
-	expectedMessage := "Model not-a-video-model is not supported on " + openAIVideosPath + ". Use " + defaultOpenAIVideosModel + "."
+	expectedMessage := "Model not-a-v-model is not supported on " + openAIVideosPath + ". Use " + defaultOpenAIVideosModel + "."
 	if got := gjson.GetBytes(resp.Body.Bytes(), "error.message").String(); got != expectedMessage {
 		t.Fatalf("error.message = %q, want %q", got, expectedMessage)
 	}

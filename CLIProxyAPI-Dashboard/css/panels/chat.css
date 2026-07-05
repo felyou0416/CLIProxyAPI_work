@@ -533,7 +533,7 @@
 }
 .chat-mode-switch {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   margin: 0 2px 12px;
   padding: 3px;
@@ -774,9 +774,29 @@
   display: block;
   max-width: min(100%, 520px);
   height: auto;
+  margin: 4px 0;
+  padding: 8px;
   border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 88%, var(--text) 12%);
+  background:
+    linear-gradient(45deg, color-mix(in srgb, var(--panel-2) 94%, #000 6%) 25%, transparent 25%),
+    linear-gradient(-45deg, color-mix(in srgb, var(--panel-2) 94%, #000 6%) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--panel-2) 94%, #000 6%) 75%),
+    linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--panel-2) 94%, #000 6%) 75%),
+    var(--panel);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
   box-shadow: 0 16px 42px rgba(15, 23, 42, 0.12);
+}
+.chat-panel .chat-generated-video {
+  display: block;
+  width: min(100%, 560px);
+  max-height: 420px;
+  margin: 4px 0;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, var(--text) 12%);
+  background: #05070d;
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.16);
 }
 .chat-panel .chat-message.user .chat-message-content {
   background: var(--accent);
@@ -1102,4 +1122,47 @@
 .skill-load-file-btn:hover {
   background: var(--panel-2);
   color: var(--text);
+}
+
+/* ─── Chat Thinking Block ─── */
+.chat-thinking-block {
+  margin: 10px 0;
+  background: color-mix(in srgb, var(--panel-2) 60%, var(--panel));
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-left-width: 4px;
+}
+.chat-thinking-details {
+  padding: 0;
+}
+.chat-thinking-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-soft);
+  cursor: pointer;
+  user-select: none;
+  padding: 10px 14px;
+}
+.chat-thinking-summary::-webkit-details-marker {
+  display: none;
+}
+.chat-thinking-icon {
+  font-size: 14px;
+}
+.chat-thinking-title {
+  flex: 1;
+}
+.chat-thinking-text {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  border-top: 1px dashed color-mix(in srgb, var(--border) 50%, transparent);
+  padding: 12px 14px;
+  white-space: pre-wrap;
+  background: color-mix(in srgb, var(--panel-2) 40%, transparent);
 }

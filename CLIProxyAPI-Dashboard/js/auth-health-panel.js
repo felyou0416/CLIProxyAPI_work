@@ -1,4 +1,11 @@
 let authHealthPanelLoaded = false;
+let authHealthItems = [];
+let authHealthFiltered = [];
+let authHealthState = 'all';
+let authHealthSort = { column: 'name', direction: 'asc' };
+let authHealthSearch = '';
+let authHealthProvider = '';
+let authHealthLimit = 20;
 
 function formatAuthHealthTs(ts) {
   const res = formatDashboardTs(ts);
@@ -67,7 +74,7 @@ function showTextPopover(element, event) {
   popover.style.transform = 'translateY(-4px)';
   popover.style.opacity = '0';
   popover.style.transition = 'all 0.12s cubic-bezier(0.4, 0, 0.2, 1)';
-  
+
   // Force reflow
   popover.offsetHeight;
 
@@ -81,7 +88,7 @@ function showTextPopover(element, event) {
     setTimeout(() => popover.remove(), 120);
     document.removeEventListener('click', dismiss);
   };
-  
+
   popover.addEventListener('click', e => e.stopPropagation());
 
   setTimeout(() => {
@@ -106,6 +113,210 @@ function authHealthRowHtml(item) {
       <td>${escapeHtml(formatAuthHealthTs(item.recent_failure_at))}</td>
     </tr>
   `;
+}
+
+function formatCompactNumber(n) {
+  if (n === 0) return '0';
+  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1).replace(/\.0$/, '') + 'B';
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'k';
+  return String(n);
+}
+
+function computeAuthHealthSummary(items) {
+  const total = items.length;
+  const healthy = items.filter(i => i.state === 'healthy').length;
+  const degraded = items.filter(i => i.state === 'degraded').length;
+  const failed = items.filter(i => i.state && i.state !== 'healthy' && i.state !== 'degraded').length;
+  const requests = items.reduce((sum, i) => sum + (parseInt(i.request_count, 10) || 0), 0);
+  const tokens = items.reduce((sum, i) => sum + (parseInt(i.total_tokens, 10) || 0), 0);
+  return { total, healthy, degraded, failed, requests, tokens };
+}
+
+function updateAuthHealthSummary() {
+  const summary = computeAuthHealthSummary(authHealthItems);
+  const totalEl = document.getElementById('ah-summary-total');
+  const healthyEl = document.getElementById('ah-summary-healthy');
+  const degradedEl = document.getElementById('ah-summary-degraded');
+  const failedEl = document.getElementById('ah-summary-failed');
+  const requestsEl = document.getElementById('ah-summary-requests');
+  const tokensEl = document.getElementById('ah-summary-tokens');
+
+  if (totalEl) totalEl.textContent = formatCompactNumber(summary.total);
+  if (healthyEl) healthyEl.textContent = formatCompactNumber(summary.healthy);
+  if (degradedEl) degradedEl.textContent = formatCompactNumber(summary.degraded);
+  if (failedEl) failedEl.textContent = formatCompactNumber(summary.failed);
+  if (requestsEl) requestsEl.textContent = formatCompactNumber(summary.requests);
+  if (tokensEl) tokensEl.textContent = formatCompactNumber(summary.tokens);
+
+  // Tooltips with exact numbers
+  if (totalEl) totalEl.title = `${t('authHealth.totalItems', '认证项')} ${summary.total.toLocaleString()}`;
+  if (healthyEl) healthyEl.title = `${t('authHealth.healthy', '健康')} ${summary.healthy.toLocaleString()}`;
+  if (degradedEl) degradedEl.title = `${t('authHealth.degraded', '降级')} ${summary.degraded.toLocaleString()}`;
+  if (failedEl) failedEl.title = `${t('authHealth.failed', '异常')} ${summary.failed.toLocaleString()}`;
+  if (requestsEl) requestsEl.title = `${t('authHealth.requests', '请求数')} ${summary.requests.toLocaleString()}`;
+  if (tokensEl) tokensEl.title = `${t('authHealth.tokens', '总 Token')} ${summary.tokens.toLocaleString()}`;
+}
+
+function updateAuthHealthStatePills() {
+  const all = authHealthItems.length;
+  const healthy = authHealthItems.filter(i => i.state === 'healthy').length;
+  const degraded = authHealthItems.filter(i => i.state === 'degraded').length;
+  const failed = authHealthItems.filter(i => i.state && i.state !== 'healthy' && i.state !== 'degraded').length;
+
+  const allCount = document.getElementById('ah-count-all');
+  const healthyCount = document.getElementById('ah-count-healthy');
+  const degradedCount = document.getElementById('ah-count-degraded');
+  const failedCount = document.getElementById('ah-count-failed');
+
+  if (allCount) allCount.textContent = all;
+  if (healthyCount) healthyCount.textContent = healthy;
+  if (degradedCount) degradedCount.textContent = degraded;
+  if (failedCount) failedCount.textContent = failed;
+
+  document.querySelectorAll('#ah-state-pills .pill').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.state === authHealthState);
+  });
+}
+
+function updateAuthHealthProviderFilter() {
+  const select = document.getElementById('ah-provider-filter');
+  if (!select) return;
+
+  const providers = [...new Set(authHealthItems.map(i => i.provider).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const current = select.value;
+
+  const allOption = select.querySelector('option[value=""]');
+  select.innerHTML = '';
+  if (allOption) select.appendChild(allOption);
+  else select.innerHTML = `<option value="" data-i18n="authHealth.allProviders">${t('authHealth.allProviders', '全部 Provider')}</option>`;
+
+  providers.forEach(p => {
+    const option = document.createElement('option');
+    option.value = p;
+    option.textContent = p;
+    select.appendChild(option);
+  });
+
+  if (providers.includes(current)) {
+    select.value = current;
+  } else if (current !== '') {
+    authHealthProvider = '';
+    select.value = '';
+  }
+}
+
+function sortAuthHealthItems(items) {
+  const { column, direction } = authHealthSort;
+  const dir = direction === 'asc' ? 1 : -1;
+
+  const numericCols = ['available_models', 'failed_models', 'request_count', 'total_tokens'];
+  const isNumeric = numericCols.includes(column);
+
+  return [...items].sort((a, b) => {
+    let va = a[column];
+    let vb = b[column];
+
+    if (isNumeric) {
+      va = parseInt(va, 10) || 0;
+      vb = parseInt(vb, 10) || 0;
+    } else {
+      if (va === undefined || va === null) va = '';
+      if (vb === undefined || vb === null) vb = '';
+      va = String(va);
+      vb = String(vb);
+    }
+
+    if (va === vb) return 0;
+    if (va === '' || va === '-') return 1;
+    if (vb === '' || vb === '-') return -1;
+
+    if (typeof va === 'string' && typeof vb === 'string') {
+      return va.localeCompare(vb) * dir;
+    }
+    return (va > vb ? 1 : -1) * dir;
+  });
+}
+
+function filterAuthHealthItems() {
+  let result = [...authHealthItems];
+
+  if (authHealthState !== 'all') {
+    result = result.filter(i => i.state === authHealthState);
+  }
+
+  if (authHealthProvider) {
+    result = result.filter(i => i.provider === authHealthProvider);
+  }
+
+  if (authHealthSearch) {
+    const q = authHealthSearch.toLowerCase();
+    result = result.filter(i => {
+      const name = (i.name || '').toLowerCase();
+      const provider = (i.provider || '').toLowerCase();
+      const email = (i.email || '').toLowerCase();
+      return name.includes(q) || provider.includes(q) || email.includes(q);
+    });
+  }
+
+  authHealthFiltered = sortAuthHealthItems(result);
+}
+
+function updateSortIndicators() {
+  document.querySelectorAll('#section-auth-health .sort-indicator').forEach(el => {
+    el.className = 'sort-indicator';
+    if (el.dataset.col === authHealthSort.column) {
+      el.classList.add(authHealthSort.direction);
+    }
+  });
+}
+
+function renderAuthHealthTable() {
+  const body = document.getElementById('auth-health-body');
+  if (!body) return;
+
+  if (!authHealthFiltered.length) {
+    body.innerHTML = `<tr><td colspan="10"><div class="auth-health-empty"><div class="auth-health-empty-icon">📭</div><div>${t('authHealth.noData', '暂无符合条件的认证健康数据')}</div></div></td></tr>`;
+    return;
+  }
+
+  body.innerHTML = authHealthFiltered.map(authHealthRowHtml).join('');
+}
+
+function filterAuthHealth() {
+  const searchInput = document.getElementById('ah-search');
+  const providerSelect = document.getElementById('ah-provider-filter');
+
+  authHealthSearch = searchInput ? searchInput.value.trim().toLowerCase() : '';
+  authHealthProvider = providerSelect ? providerSelect.value : '';
+
+  filterAuthHealthItems();
+  renderAuthHealthTable();
+}
+
+function setAuthHealthStateFilter(state) {
+  authHealthState = state;
+  updateAuthHealthStatePills();
+  filterAuthHealth();
+}
+
+function sortAuthHealth(column) {
+  if (authHealthSort.column === column) {
+    authHealthSort.direction = authHealthSort.direction === 'asc' ? 'desc' : 'asc';
+  } else {
+    authHealthSort.column = column;
+    authHealthSort.direction = 'asc';
+  }
+  updateSortIndicators();
+  filterAuthHealth();
+}
+
+function updateLoadMoreButton() {
+  const btn = document.getElementById('auth-health-load-all');
+  if (!btn) return;
+  const allLoaded = authHealthLimit >= 500;
+  btn.textContent = allLoaded ? t('authHealth.allLoaded', '已加载全部') : t('authHealth.loadAll', '加载全部');
+  btn.disabled = allLoaded;
 }
 
 let authHealthResizerInitialized = false;
@@ -202,22 +413,56 @@ function initAuthHealthResizer() {
 async function loadAuthHealthPanel(force = false) {
   initAuthHealthResizer();
   if (authHealthPanelLoaded && !force) return;
+
   const body = document.getElementById('auth-health-body');
-  const meta = document.getElementById('auth-health-meta');
-  const limit = force ? 100 : 20;
-  if (body) body.innerHTML = '<tr><td colspan="10">loading...</td></tr>';
+  authHealthLimit = force ? 100 : 20;
+
+  if (body) body.innerHTML = `<tr><td colspan="10"><div class="auth-health-loading">${t('common.loading', '加载中...')}</div></td></tr>`;
+
   try {
-    const data = await api(`/api/auth-health?limit=${limit}`);
-    const items = Array.isArray(data.items) ? data.items : [];
-    if (meta) meta.textContent = force ? `${items.length} 个认证项` : `先加载 ${items.length} 个认证项`;
-    if (body) {
-      body.innerHTML = items.length
-        ? items.map(authHealthRowHtml).join('')
-        : '<tr><td colspan="10">暂无认证健康数据</td></tr>';
-    }
+    const data = await api(`/api/auth-health?limit=${authHealthLimit}`);
+    authHealthItems = Array.isArray(data.items) ? data.items : [];
+    authHealthLimit = Math.min(data.limit || authHealthLimit, 500);
+
+    updateAuthHealthSummary();
+    updateAuthHealthStatePills();
+    updateAuthHealthProviderFilter();
+    filterAuthHealthItems();
+    updateSortIndicators();
+    renderAuthHealthTable();
+
     initAuthHealthResizer();
     authHealthPanelLoaded = true;
+    updateLoadMoreButton();
   } catch (error) {
-    if (body) body.innerHTML = `<tr><td colspan="10">${error.message || 'load failed'}</td></tr>`;
+    if (body) body.innerHTML = `<tr><td colspan="10"><div class="auth-health-empty"><div class="auth-health-empty-icon">⚠️</div><div>${error.message || t('common.requestFailed', '加载失败')}</div></div></td></tr>`;
+  }
+}
+
+async function loadAllAuthHealth() {
+  const btn = document.getElementById('auth-health-load-all');
+  if (btn) btn.disabled = true;
+
+  const body = document.getElementById('auth-health-body');
+  if (body) body.innerHTML = `<tr><td colspan="10"><div class="auth-health-loading">${t('authHealth.loadingAll', '加载全部认证项')}</div></td></tr>`;
+
+  try {
+    const data = await api('/api/auth-health?limit=500');
+    authHealthItems = Array.isArray(data.items) ? data.items : [];
+    authHealthLimit = 500;
+
+    updateAuthHealthSummary();
+    updateAuthHealthStatePills();
+    updateAuthHealthProviderFilter();
+    filterAuthHealthItems();
+    updateSortIndicators();
+    renderAuthHealthTable();
+
+    initAuthHealthResizer();
+    updateLoadMoreButton();
+  } catch (error) {
+    if (body) body.innerHTML = `<tr><td colspan="10"><div class="auth-health-empty"><div class="auth-health-empty-icon">⚠️</div><div>${error.message || t('common.requestFailed', '加载失败')}</div></div></td></tr>`;
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }

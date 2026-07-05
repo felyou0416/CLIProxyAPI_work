@@ -1,3 +1,20 @@
+<!-- 登录页面 -->
+<div id="login-overlay" class="login-overlay" hidden>
+  <div class="login-card">
+    <div class="login-logo">CLI</div>
+    <h2 data-i18n="login.title">访问口令</h2>
+    <p class="login-subtitle" data-i18n="login.subtitle">请输入访问口令以进入控制面板</p>
+    <form onsubmit="event.preventDefault(); submitLogin();">
+      <div class="login-input-wrap">
+        <label data-i18n="login.passwordLabel">访问口令</label>
+        <input type="password" id="login-password" placeholder="" autofocus>
+      </div>
+      <button type="submit" class="login-btn" id="login-submit-btn" data-i18n="login.submit">登录</button>
+      <div id="login-error" class="login-error" style="display:none;"></div>
+    </form>
+  </div>
+</div>
+
 <!-- 模态框: 添加自定义API Key -->
 <div id="manual-auth-modal" class="modal-overlay" hidden>
   <div class="modal">

@@ -4,6 +4,39 @@ window.proxyActionBusy = false;
 window.oauthActionBusy = false;
 window.dashboardActionBusy = false;
 window.openclawActionBusy = false;
+window.mediaProxyActionBusy = false;
+
+const INDICATOR_TYPES = ['proxy', 'media-proxy', 'openclaw', 'ip-helper', 'dashboard', 'oauth', 'tunnel'];
+const INDICATOR_CACHE_KEY = 'cli-indicator-states';
+
+function loadIndicatorStates() {
+  try {
+    const raw = localStorage.getItem(INDICATOR_CACHE_KEY);
+    if (!raw) return;
+    const states = JSON.parse(raw);
+    for (const [type, color] of Object.entries(states)) {
+      if (typeof window.updateIndicator === 'function') {
+        window.updateIndicator(type, color);
+      }
+    }
+  } catch (e) { /* ignore */ }
+}
+window.loadIndicatorStates = loadIndicatorStates;
+
+function saveIndicatorStates() {
+  const states = {};
+  for (const type of INDICATOR_TYPES) {
+    const el = document.getElementById(`${type}-status-indicator`);
+    if (!el) continue;
+    const match = el.className.match(/status-indicator-dot\s+(\w+)/);
+    if (match) states[type] = match[1];
+  }
+  try {
+    if (Object.keys(states).length) {
+      localStorage.setItem(INDICATOR_CACHE_KEY, JSON.stringify(states));
+    }
+  } catch (e) { /* ignore */ }
+}
 
 window.updateIndicator = function(type, state) {
   const el = document.getElementById(`${type}-status-indicator`);
@@ -93,6 +126,7 @@ async function refreshStatus() {
 
     setHtml('device-running', statusPill(s.device_login_running));
     setHtml('proxy-running', statusPill(s.proxy_running));
+    setHtml('media-proxy-running', statusPill(s.media_proxy_running));
     setText('selected-auth', selectedAuth, t('common.notSelected', 'Not selected'));
     setText('applied-auth', appliedAuth, t('common.notSelected', 'Not selected'));
     setText('selected-provider', selectedProvider, t('common.notSelected', 'Not selected'));
@@ -100,12 +134,16 @@ async function refreshStatus() {
     setText('active-auth-dir', s.active_auth_dir || '', '');
     setText('runtime-config', s.runtime_config || '', '');
     setText('proxy-local-url', s.local_proxy_url || 'http://127.0.0.1:8317', 'http://127.0.0.1:8317');
+    setText('media-proxy-url', s.media_proxy_url || 'http://127.0.0.1:8320', 'http://127.0.0.1:8320');
     setText('proxy-exposure-url', s.exposure_url || '-', '-');
     setText('proxy-api-key', s.api_key || 'cliproxyapi', 'cliproxyapi');
     setText('exposure-mode-status', s.exposure_enabled ? 'Enabled (LAN)' : 'Disabled', 'Disabled');
 
     if (!window.proxyActionBusy) {
       window.updateIndicator('proxy', s.proxy_running ? 'green' : 'red');
+    }
+    if (!window.mediaProxyActionBusy) {
+      window.updateIndicator('media-proxy', s.media_proxy_running ? 'green' : 'red');
     }
     if (!window.tunnelActionBusy) {
       window.updateIndicator('tunnel', s.tunnel_running ? 'green' : 'red');
@@ -119,6 +157,8 @@ async function refreshStatus() {
     if (!window.dashboardActionBusy) {
       window.updateIndicator('dashboard', 'green');
     }
+
+    saveIndicatorStates();
 
     const openClawStartBtn = document.getElementById('openclaw-start-btn');
     const openClawRestartBtn = document.getElementById('openclaw-restart-btn');
@@ -135,6 +175,24 @@ async function refreshStatus() {
         openClawStartBtn.disabled = true;
         openClawRestartBtn.disabled = true;
         openClawStopBtn.disabled = true;
+      }
+    }
+
+    const mediaProxyStartBtn = document.getElementById('media-proxy-start-btn');
+    const mediaProxyRestartBtn = document.getElementById('media-proxy-restart-btn');
+    const mediaProxyStopBtn = document.getElementById('media-proxy-stop-btn');
+    if (mediaProxyStartBtn && mediaProxyRestartBtn && mediaProxyStopBtn) {
+      const isRunning = !!s.media_proxy_running;
+      mediaProxyStartBtn.disabled = isRunning;
+      mediaProxyStartBtn.style.opacity = isRunning ? '0.5' : '1';
+      mediaProxyRestartBtn.disabled = !isRunning;
+      mediaProxyRestartBtn.style.opacity = isRunning ? '1' : '0.5';
+      mediaProxyStopBtn.disabled = !isRunning;
+      mediaProxyStopBtn.style.opacity = isRunning ? '1' : '0.5';
+      if (window.mediaProxyActionBusy) {
+        mediaProxyStartBtn.disabled = true;
+        mediaProxyRestartBtn.disabled = true;
+        mediaProxyStopBtn.disabled = true;
       }
     }
 
@@ -244,7 +302,7 @@ async function withRuntimeAction(button, label, task) {
 }
 
 async function handleActionWithIndicator(type, button, label, actionApiUrl, errorIndicatorState) {
-  const busyKey = `${type}ActionBusy`;
+  const busyKey = type === 'media-proxy' ? 'mediaProxyActionBusy' : `${type}ActionBusy`;
   window[busyKey] = true;
   if (typeof window.updateIndicator === 'function') {
     window.updateIndicator(type, 'yellow');
@@ -259,6 +317,7 @@ async function handleActionWithIndicator(type, button, label, actionApiUrl, erro
         showMessage(e.message, true);
         if (errorIndicatorState && typeof window.updateIndicator === 'function') {
           window.updateIndicator(type, errorIndicatorState);
+          saveIndicatorStates();
         }
       }
     });
@@ -297,6 +356,18 @@ async function restartOpenClaw(button) {
 
 async function stopOpenClaw(button) {
   return handleActionWithIndicator('openclaw', button, '停止中...', '/api/openclaw/stop', 'green');
+}
+
+async function startMediaProxy(button) {
+  return handleActionWithIndicator('media-proxy', button, '启动中...', '/api/media-proxy/start', 'red');
+}
+
+async function restartMediaProxy(button) {
+  return handleActionWithIndicator('media-proxy', button, '重启中...', '/api/media-proxy/restart', 'red');
+}
+
+async function stopMediaProxy(button) {
+  return handleActionWithIndicator('media-proxy', button, '停止中...', '/api/media-proxy/stop', 'green');
 }
 
 async function enableExposureMode(button) {

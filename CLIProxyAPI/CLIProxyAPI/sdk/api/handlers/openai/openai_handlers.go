@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +20,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	responsesconverter "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/openai/openai/responses"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers/mediaproxy"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -110,6 +112,11 @@ func (h *OpenAIAPIHandler) ChatCompletions(c *gin.Context) {
 				Type:    "invalid_request_error",
 			},
 		})
+		return
+	}
+
+	modelName := strings.TrimSpace(gjson.GetBytes(rawJSON, "model").String())
+	if h.handleChatToMedia(c, rawJSON, modelName) {
 		return
 	}
 
@@ -686,4 +693,75 @@ func (h *OpenAIAPIHandler) handleStreamResult(c *gin.Context, flusher http.Flush
 			_, _ = fmt.Fprint(c.Writer, "data: [DONE]\n\n")
 		},
 	})
+}
+
+// BillingSubscription handles GET /v1/dashboard/billing/subscription.
+func (h *OpenAIAPIHandler) BillingSubscription(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"object":                "billing_subscription",
+		"has_payment_method":    true,
+		"canceled":              false,
+		"access_until":          2082787200, // Unix timestamp far in the future
+		"soft_limit":            115,
+		"hard_limit":            120,
+		"system_hard_limit":     120,
+		"soft_limit_usd":        115,
+		"hard_limit_usd":        120,
+		"system_hard_limit_usd": 120,
+		"plan": gin.H{
+			"title": "Developer",
+			"id":    "developer",
+		},
+		"account_name": "Antigravity Dev",
+		"features":     gin.H{},
+		"active":       true,
+	})
+}
+
+// BillingUsage handles GET /v1/dashboard/billing/usage.
+func (h *OpenAIAPIHandler) BillingUsage(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"object":      "list",
+		"daily_costs": []any{},
+		"total_usage": 0,
+	})
+}
+
+// Usage handles GET /v1/usage.
+func (h *OpenAIAPIHandler) Usage(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"object":      "list",
+		"daily_costs": []any{},
+		"total_usage": 0,
+	})
+}
+
+func (h *OpenAIAPIHandler) handleChatToMedia(c *gin.Context, rawJSON []byte, modelName string) bool {
+	lowerModel := strings.ToLower(modelName)
+	isImage := strings.Contains(lowerModel, "image") || isImageModelNameLocal(modelName)
+	isVideo := strings.Contains(lowerModel, "video") || isVideoModelNameLocal(modelName)
+	if !isImage && !isVideo {
+		return false
+	}
+	mediaproxy.ProxyOpenAIChat(c, rawJSON)
+	return true
+}
+
+func isImageModelNameLocal(modelName string) bool {
+	lower := strings.ToLower(modelName)
+	keywords := []string{
+		"image", "dall-e", "dalle", "stable-diffusion", "flux", "imagine", "midjourney", "sdxl",
+		"sd-", "mj-", "dream", "kolors", "cogview", "seedream", "recraft", "playground", "pixelart",
+	}
+	for _, kw := range keywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func isVideoModelNameLocal(modelName string) bool {
+	lower := strings.ToLower(modelName)
+	return strings.Contains(lower, "video")
 }

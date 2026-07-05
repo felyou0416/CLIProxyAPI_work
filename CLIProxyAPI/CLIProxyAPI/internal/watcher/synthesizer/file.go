@@ -76,13 +76,24 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) []
 		return nil
 	}
 	t, _ := metadata["type"].(string)
+	if t == "" {
+		if content, ok := metadata["content"].(map[string]any); ok {
+			t, _ = content["type"].(string)
+		}
+	}
 	provider := strings.ToLower(strings.TrimSpace(t))
 	if provider == "gemini" {
 		provider = "gemini-cli"
 	}
 	// Normalize generic "oauth" or "api_key" type to the actual provider name.
 	if provider == "oauth" || provider == "api_key" {
-		if p, ok := metadata["provider"].(string); ok && p != "" {
+		var p string
+		if val, ok := metadata["provider"].(string); ok && val != "" {
+			p = val
+		} else if content, ok := metadata["content"].(map[string]any); ok {
+			p, _ = content["provider"].(string)
+		}
+		if p != "" {
 			provider = strings.ToLower(strings.TrimSpace(p))
 		}
 	}

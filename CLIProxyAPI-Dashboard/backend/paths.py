@@ -47,6 +47,7 @@ PROXY_ROOT = _resolve_proxy_root()
 ROOT_DIR = PROXY_ROOT
 PROJECT_ROOT = PROXY_ROOT
 APP_DIR = PROXY_ROOT
+MEDIA_PROXY_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI-MediaProxy'
 
 LEGACY_DEV_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI_dev'
 LEGACY_APP_DIR = LEGACY_DEV_ROOT / 'app'
@@ -73,6 +74,7 @@ CACHE_DIR = STORAGE_DIR / 'cache'
 LOGS_DIR = STORAGE_DIR / 'logs'
 BACKUPS_DIR = STORAGE_DIR / 'backups'
 TEMP_DIR = RUNTIME_DIR / 'tmp'
+GENERATED_IMAGES_DIR = STORAGE_DIR / 'generated' / 'images'
 
 LEGACY_AUTH_MANAGEMENT_DIR = LEGACY_INTERFACES_DIR / 'auth-management'
 LEGACY_DASHBOARD_DIR = LEGACY_INTERFACES_DIR / 'dashboard-panel'
@@ -101,12 +103,15 @@ MODEL_MAPPING_OVERRIDES_FILE = MODELS_DIR / 'provider_model_overrides.json'
 AGGREGATE_MODEL_ALIASES_FILE = MODELS_DIR / 'aggregate_model_aliases.json'
 PROVIDER_MODEL_TEST_STATE_FILE = MODELS_DIR / 'provider_model_test_state.json'
 MODEL_PROXY_SETTINGS_FILE = MODELS_DIR / 'model_proxy_settings.json'
+MODEL_THINKING_CONFIGS_FILE = MODELS_DIR / 'model_thinking_configs.json'
 QUOTA_CACHE_FILE = CACHE_DIR / 'quota_cache.json'
 
 DEVICE_LOGIN_STDOUT = LOGS_DIR / 'device-login.stdout.log'
 DEVICE_LOGIN_STDERR = LOGS_DIR / 'device-login.stderr.log'
 PROXY_STDOUT = LOGS_DIR / 'proxy.stdout.log'
 PROXY_STDERR = LOGS_DIR / 'proxy.stderr.log'
+MEDIA_PROXY_STDOUT = LOGS_DIR / 'media-proxy.stdout.log'
+MEDIA_PROXY_STDERR = LOGS_DIR / 'media-proxy.stderr.log'
 RUNTIME_CONFIG = RUNTIME_DIR / 'cliproxyapi-active-config.yaml'
 REQUEST_LOG_DIR = LOGS_DIR / 'request_logs'
 REQUEST_ARCHIVE_DIR = LOGS_DIR / 'request_archive'
@@ -389,6 +394,7 @@ for directory in (
     ACTIVE_AUTH_DIR,
     CACHE_DIR,
     LOGS_DIR,
+    GENERATED_IMAGES_DIR,
     REQUEST_ARCHIVE_DIR,
     BACKUPS_DIR,
     TEMP_DIR,
