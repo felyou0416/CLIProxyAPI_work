@@ -4410,36 +4410,61 @@ def build_runtime_config(
 
     active_auth_entries = []
     for active_path in _iter_pool_auth_json_files():
-            payload = _read_auth_payload(active_path)
-            if not isinstance(payload, dict):
-                continue
-            compat_entry = _extract_manual_api_config(payload, active_path.name)
-            if compat_entry:
-                provider_key = str(compat_entry.get('provider') or '').strip().lower()
-                if provider_key and provider_key not in providers:
-                    providers.append(provider_key)
-                if compat_entry.get('api') == 'anthropic-messages':
-                    claude_compat_entries.append(compat_entry)
-                else:
-                    openai_compat_entries.append(compat_entry)
-                continue
-            provider = detect_provider(payload, active_path.name)
-            auth_kind = _detect_auth_payload_kind(payload)
-            active_auth_entries.append({
-                'source': active_path,
-                'source_name': active_path.name,
-                'provider': provider,
-                'auth_kind': auth_kind,
-            })
-            if provider not in providers:
-                providers.append(provider)
+        payload = _read_auth_payload(active_path)
+        if not isinstance(payload, dict):
+            continue
+        compat_entry = _extract_manual_api_config(payload, active_path.name)
+        if compat_entry:
+            provider_key = str(compat_entry.get('provider') or '').strip().lower()
+            if provider_key and provider_key not in providers:
+                providers.append(provider_key)
+            if compat_entry.get('api') == 'anthropic-messages':
+                claude_compat_entries.append(compat_entry)
+            else:
+                openai_compat_entries.append(compat_entry)
+            continue
+        provider = detect_provider(payload, active_path.name)
+        auth_kind = _detect_auth_payload_kind(payload)
+        active_auth_entries.append({
+            'source': active_path,
+            'source_name': active_path.name,
+            'provider': provider,
+            'auth_kind': auth_kind,
+            'payload': payload,
+        })
+        if provider not in providers:
+            providers.append(provider)
 
     if not openai_compat_entries and not claude_compat_entries and not active_auth_entries:
         raise FileNotFoundError('No auth JSON files found in storage/auth. Put account files under storage/auth/<provider>/ first.')
 
+    runtime_auth_payloads = {}
+    for entry in active_auth_entries:
+        payload = entry['payload']
+        provider = entry['provider']
+        runtime_payload = _normalize_runtime_oauth_payload(payload, provider, entry['auth_kind'])
+        if not isinstance(runtime_payload, dict):
+            payload_type = str(payload.get('type') or '').strip().lower()
+            if payload_type and payload_type not in ('oauth', 'api_key'):
+                runtime_payload = payload
+        if not isinstance(runtime_payload, dict):
+            continue
+        provider_token = _auth_filename_token(provider, 'provider')
+        source_token = _auth_filename_token(Path(entry['source_name']).stem, 'account')
+        runtime_auth_payloads[f'{provider_token}--{source_token}.json'] = runtime_payload
+
+    ACTIVE_AUTH_DIR.mkdir(parents=True, exist_ok=True)
+    for stale_path in ACTIVE_AUTH_DIR.glob('*.json'):
+        if stale_path.name not in runtime_auth_payloads:
+            stale_path.unlink()
+    for target_name, runtime_payload in runtime_auth_payloads.items():
+        target_path = ACTIVE_AUTH_DIR / target_name
+        _write_runtime_auth_payload(target_path, runtime_payload)
+        copied.append(target_path)
+
     config_text = BASE_CONFIG.read_text(encoding='utf-8', errors='ignore')
     runtime_text = rewrite_host(config_text, bind_host)
-    runtime_text = rewrite_auth_dir(runtime_text, POOL_AUTH_DIR)
+    runtime_text = rewrite_auth_dir(runtime_text, ACTIVE_AUTH_DIR)
 
     # Merge admin access keys with all active virtual API keys
     all_api_keys = list(access_api_keys or ['cliproxyapi'])
