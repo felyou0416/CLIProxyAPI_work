@@ -129,7 +129,7 @@ class ProviderModelMappingTests(unittest.TestCase):
 
             self.assertEqual([item['call_id'] for item in mappings], ['local-b'])
 
-    def test_deleting_last_specific_mapping_restores_default(self):
+    def test_deleting_last_specific_mapping_hides_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'provider_model_overrides.json'
             with patch.object(auth, 'MODEL_MAPPING_OVERRIDES_FILE', path):
@@ -140,7 +140,8 @@ class ProviderModelMappingTests(unittest.TestCase):
                 overrides = auth._load_model_mapping_overrides()
                 mappings = auth.resolve_provider_mappings('codex', 'gpt-test', 'gpt-test', overrides=overrides)
 
-            self.assertEqual([item['call_id'] for item in mappings], ['codex-gpt-test'])
+            self.assertEqual(len(mappings), 1)
+            self.assertTrue(mappings[0]['deleted'])
 
     def test_setting_same_call_id_updates_current_mapping(self):
         with tempfile.TemporaryDirectory() as tmp:

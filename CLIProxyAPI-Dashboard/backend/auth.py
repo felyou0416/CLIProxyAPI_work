@@ -1821,7 +1821,9 @@ def delete_provider_model_override(provider: str, upstream_id: str, call_id: str
             if str(item.get('call_id') or '').strip() != call_value
         ]
         if not next_entries:
-            provider_map.pop(upstream_value, None)
+            provider_map[upstream_value] = {'mappings': [
+                _model_mapping_entry('', provider_value, upstream_value, True)
+            ]}
         else:
             provider_map[upstream_value] = {'mappings': next_entries}
     else:
