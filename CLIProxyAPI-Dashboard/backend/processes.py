@@ -1616,7 +1616,17 @@ def start_proxy():
     state['last_proxy_api_key'] = access_api_key
     state['applied_route_strategy'] = normalize_route_strategy(state.get('route_strategy'))
     save_state(state)
-    return {'ok': True, 'message': f'Started RelayX with storage/auth account files: {len(selected_items)} active.'}
+    media_result = start_media_proxy()
+    media_message = ''
+    if media_result.get('ok'):
+        media_message = ' MediaProxy is ready on port 8320.'
+    else:
+        media_message = f' MediaProxy was not started: {media_result.get("message", "unknown error")}'
+    return {
+        'ok': True,
+        'message': f'Started RelayX with storage/auth account files: {len(selected_items)} active.{media_message}',
+        'media_proxy': media_result,
+    }
 
 
 def stop_proxy():
