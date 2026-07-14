@@ -607,7 +607,10 @@ def _aggregate_alias_id_set():
 def _read_auth_payload(path: Path):
     for encoding in ('utf-8-sig', 'utf-8', 'utf-16', 'gbk'):
         try:
-            return json.loads(path.read_text(encoding=encoding, errors='ignore'))
+            payload = json.loads(path.read_text(encoding=encoding, errors='ignore'))
+            if isinstance(payload, list) and len(payload) == 1 and isinstance(payload[0], dict):
+                return payload[0]
+            return payload
         except Exception:
             continue
     return None
@@ -692,6 +695,12 @@ def _detect_auth_payload_kind(payload):
 
     if auth_mode == 'chatgpt' or has_tokens_block:
         return 'codex_chatgpt'
+    if auth_mode == 'oauth' and (
+        bool(payload.get('has_grok_code_access'))
+        or str(payload.get('principal_type') or '').strip().lower() == 'user'
+        or bool(payload.get('team_id'))
+    ):
+        return 'xai_oauth_profile'
     if payload_type in ('codex', 'openai-codex'):
         return 'codex_flat'
     if payload_type == 'antigravity' or payload.get('project_id'):
@@ -1173,6 +1182,39 @@ def _normalize_runtime_oauth_payload(payload, provider: str, auth_kind: str):
             normalized['expired'] = expired
         if timestamp:
             normalized['timestamp'] = int(timestamp)
+        return normalized
+
+    if normalized_provider in ('xai', 'grok') or auth_kind == 'xai_oauth_profile':
+        access_token = (
+            content.get('access_token')
+            or content.get('access')
+            or payload.get('access_token')
+            or payload.get('access')
+        )
+        refresh_token = (
+            content.get('refresh_token')
+            or content.get('refresh')
+            or payload.get('refresh_token')
+            or payload.get('refresh')
+        )
+        email = content.get('email') or metadata.get('email') or payload.get('email')
+        base_url = content.get('base_url') or payload.get('base_url') or 'https://api.x.ai/v1'
+        if not str(access_token or '').strip():
+            return None
+        normalized = {
+            'type': 'xai',
+            'provider': 'xai',
+            'access_token': str(access_token).strip(),
+            'refresh_token': str(refresh_token or '').strip(),
+            'email': str(email or '').strip(),
+            'base_url': str(base_url).strip().rstrip('/'),
+            'auth_kind': 'oauth',
+            'attributes': {
+                'account_email': str(email or '').strip(),
+            },
+        }
+        if payload.get('expires_at'):
+            normalized['expires_at'] = payload.get('expires_at')
         return normalized
 
     return None
@@ -2606,6 +2648,8 @@ def detect_provider(payload, file_name: str):
                 provider = 'codex'
             elif auth_kind in ('antigravity_google', 'antigravity_oauth_content', 'antigravity_oauth_flat'):
                 provider = 'antigravity'
+            elif auth_kind == 'xai_oauth_profile':
+                provider = 'xai'
             elif auth_kind in ('oauth_flat', 'oauth_content'):
                 token_claims = _extract_token_claims(payload)
                 if token_claims.get('openai_auth'):

@@ -11,6 +11,40 @@ from backend import auth
 
 
 class CodexAccessOnlyAuthTests(unittest.TestCase):
+    def test_xai_profile_array_is_unwrapped_and_requires_access_token(self):
+        payload = {
+            'auth_mode': 'oauth',
+            'has_grok_code_access': True,
+            'email': 'cqj@example.com',
+            'team_id': 'team-1',
+            'access_token': '',
+        }
+        auth_kind = auth._detect_auth_payload_kind(payload)
+        self.assertEqual(auth_kind, 'xai_oauth_profile')
+        self.assertEqual(auth.detect_provider(payload, 'accounts.json'), 'xai')
+        self.assertIsNone(auth._normalize_runtime_oauth_payload(payload, 'xai', auth_kind))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'accounts.json'
+            path.write_text(json.dumps([payload]), encoding='utf-8')
+            unwrapped = auth._read_auth_payload(path)
+        self.assertEqual(unwrapped['email'], 'cqj@example.com')
+
+    def test_xai_profile_with_access_token_normalizes_to_cpa_auth(self):
+        payload = {
+            'auth_mode': 'oauth',
+            'has_grok_code_access': True,
+            'email': 'cqj@example.com',
+            'access_token': 'xai-access',
+            'refresh_token': 'xai-refresh',
+        }
+        auth_kind = auth._detect_auth_payload_kind(payload)
+        normalized = auth._normalize_runtime_oauth_payload(payload, 'xai', auth_kind)
+        self.assertEqual(normalized['type'], 'xai')
+        self.assertEqual(normalized['access_token'], 'xai-access')
+        self.assertEqual(normalized['refresh_token'], 'xai-refresh')
+        self.assertEqual(normalized['base_url'], 'https://api.x.ai/v1')
+
     def test_normalize_runtime_codex_oauth_content_without_refresh(self):
         payload = {
             'metadata': {
