@@ -1,50 +1,61 @@
 #section-auth-health {
-  --table-max-height: 520px;
+  --table-max-height: 560px;
+  --ah-ok: #059669;
+  --ah-warn: #d97706;
+  --ah-off: #dc2626;
+  --ah-unknown: #64748b;
 }
 
-/* Summary cards */
+.auth-health-meta {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 550;
+}
+
 .auth-health-summary {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 12px;
-  margin: 16px 0;
+  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  gap: 10px;
+  margin: 14px 0;
 }
 
 .summary-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 98%, white), var(--panel));
-  border-radius: 18px;
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-}
-
-.summary-card:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.1);
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+  background: var(--panel);
+  border-radius: 8px;
 }
 
 .summary-icon {
-  width: 38px;
-  height: 38px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
-  font-size: 18px;
   flex: 0 0 auto;
+  border-radius: 8px;
   background: var(--panel-2);
 }
 
-.summary-card.total .summary-icon { background: color-mix(in srgb, var(--accent) 10%, var(--panel-2)); }
-.summary-card.ok .summary-icon { background: color-mix(in srgb, #10b981 12%, var(--panel-2)); }
-.summary-card.warn .summary-icon { background: color-mix(in srgb, #f59e0b 12%, var(--panel-2)); }
-.summary-card.off .summary-icon { background: color-mix(in srgb, var(--danger) 12%, var(--panel-2)); }
-.summary-card.requests .summary-icon { background: color-mix(in srgb, #6366f1 12%, var(--panel-2)); }
-.summary-card.tokens .summary-icon { background: color-mix(in srgb, #8b5cf6 12%, var(--panel-2)); }
+.summary-icon span {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--text-muted);
+}
+
+.summary-card.total .summary-icon span { background: var(--accent); }
+.summary-card.ok .summary-icon span { background: var(--ah-ok); }
+.summary-card.warn .summary-icon span { background: var(--ah-warn); }
+.summary-card.off .summary-icon span { background: var(--ah-off); }
+.summary-card.unknown .summary-icon span { background: var(--ah-unknown); }
+.summary-card.requests .summary-icon span { background: #2563eb; }
+.summary-card.tokens .summary-icon span { background: #7c3aed; }
 
 .summary-main {
   min-width: 0;
@@ -52,9 +63,9 @@
 
 .summary-value {
   color: var(--text);
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 800;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
   line-height: 1;
 }
 
@@ -62,30 +73,33 @@
   margin-top: 4px;
   color: var(--text-muted);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 650;
 }
 
-.summary-card.ok .summary-value { color: #059669; }
-.summary-card.warn .summary-value { color: #d97706; }
-.summary-card.off .summary-value { color: var(--danger); }
+.summary-card.ok .summary-value { color: var(--ah-ok); }
+.summary-card.warn .summary-value { color: var(--ah-warn); }
+.summary-card.off .summary-value { color: var(--ah-off); }
+.summary-card.unknown .summary-value { color: var(--ah-unknown); }
 
-[data-theme="dark"] .summary-card.ok .summary-value { color: #34d399; }
-[data-theme="dark"] .summary-card.warn .summary-value { color: #fbbf24; }
-[data-theme="dark"] .summary-card.off .summary-value { color: #ff6b6b; }
+[data-theme="dark"] #section-auth-health {
+  --ah-ok: #34d399;
+  --ah-warn: #fbbf24;
+  --ah-off: #ff6b6b;
+  --ah-unknown: #94a3b8;
+}
 
-/* Toolbar */
 .auth-health-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
+  gap: 10px;
+  margin-bottom: 12px;
   flex-wrap: wrap;
 }
 
 .ah-search-wrap {
   position: relative;
-  flex: 1 1 220px;
-  min-width: 180px;
+  flex: 1 1 280px;
+  min-width: 220px;
 }
 
 .ah-search-icon {
@@ -101,10 +115,10 @@
 
 .ah-search {
   width: 100%;
-  height: 38px;
+  height: 36px;
   padding: 0 12px 0 38px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--panel);
   color: var(--text);
   font-size: 13px;
@@ -112,7 +126,8 @@
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.ah-search:focus {
+.ah-search:focus,
+.ah-provider-filter:focus {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
 }
@@ -124,7 +139,7 @@
 .ah-state-pills {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
@@ -132,19 +147,20 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
-  border-radius: 999px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--text-soft);
   font-size: 12px;
   font-weight: 650;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
 
 .ah-state-pills .pill:hover {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
   background: color-mix(in srgb, var(--accent) 5%, var(--panel));
 }
 
@@ -152,7 +168,6 @@
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .ah-state-pills .pill .count {
@@ -163,26 +178,22 @@
   height: 18px;
   padding: 0 5px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--text-muted) 18%, transparent);
-  color: var(--text-soft);
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
+  color: inherit;
   font-size: 10px;
-  font-weight: 700;
-}
-
-.ah-state-pills .pill.active .count {
-  background: rgba(255, 255, 255, 0.25);
-  color: #fff;
+  font-weight: 750;
 }
 
 .ah-provider-filter {
-  height: 38px;
-  padding: 0 28px 0 12px;
+  height: 36px;
+  min-width: 148px;
+  padding: 0 30px 0 12px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--panel);
   color: var(--text);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 550;
   cursor: pointer;
   outline: none;
   appearance: none;
@@ -192,49 +203,52 @@
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.ah-provider-filter:focus {
-  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
-}
-
-/* Custom table styling */
 #section-auth-health .metric-table-wrap {
   overflow: auto;
   width: 100%;
   max-height: var(--table-max-height);
-  border-radius: 14px;
   border: 1px solid var(--border);
+  border-radius: 8px;
   scrollbar-width: thin;
 }
 
 #section-auth-health .metric-table {
-  border-collapse: separate;
-  border-spacing: 0 4px;
+  border-collapse: collapse;
   table-layout: fixed;
   width: 100%;
+  min-width: 980px;
 }
 
 #section-auth-health .metric-table thead th {
   position: sticky;
   top: 0;
-  background: var(--panel);
   z-index: 10;
+  background: var(--panel);
   border-bottom: 1px solid var(--border);
-  position: relative;
   color: var(--text-soft);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 750;
+  text-align: left;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
 }
 
 #section-auth-health .metric-table th,
 #section-auth-health .metric-table td {
   white-space: nowrap;
   vertical-align: middle;
-  padding: 6px 10px;
+  padding: 8px 10px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+#section-auth-health .metric-table tbody tr {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  transition: background-color 0.15s ease;
+}
+
+#section-auth-health .metric-table tbody tr:hover {
+  background-color: color-mix(in srgb, var(--panel-2) 58%, transparent);
 }
 
 #section-auth-health .metric-table th.sortable {
@@ -248,8 +262,8 @@
   background: color-mix(in srgb, var(--accent) 5%, var(--panel));
 }
 
-#section-auth-health .metric-table th.sortable span:first-child {
-  vertical-align: middle;
+#section-auth-health .metric-table .num {
+  text-align: right;
 }
 
 .sort-indicator {
@@ -274,30 +288,110 @@
   opacity: 1;
 }
 
-/* Premium row hover background highlight */
-#section-auth-health .metric-table tbody tr {
-  transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-#section-auth-health .metric-table tbody tr:hover {
-  background-color: color-mix(in srgb, var(--panel-2) 60%, transparent);
-}
-
-/* Ellipsis truncation classes */
+.identity-cell,
 .ellipsis-cell {
   cursor: pointer;
-  display: inline-block;
+}
+
+.identity-main,
+.identity-sub,
+.ah-status-detail,
+.metric-stack span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity-main {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.identity-sub {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ah-status {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
   max-width: 100%;
-  transition: color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-              transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  vertical-align: middle;
 }
 
-.ellipsis-cell:hover {
-  color: var(--accent);
-  transform: translateX(4px);
+.ah-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 700;
 }
 
-/* Draggable column resize handle */
+.ah-status-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.ah-status-pill.ok {
+  color: var(--ah-ok);
+  background: color-mix(in srgb, var(--ah-ok) 10%, var(--panel));
+  border-color: color-mix(in srgb, var(--ah-ok) 32%, var(--border));
+}
+
+.ah-status-pill.warn {
+  color: var(--ah-warn);
+  background: color-mix(in srgb, var(--ah-warn) 11%, var(--panel));
+  border-color: color-mix(in srgb, var(--ah-warn) 34%, var(--border));
+}
+
+.ah-status-pill.off {
+  color: var(--ah-off);
+  background: color-mix(in srgb, var(--ah-off) 10%, var(--panel));
+  border-color: color-mix(in srgb, var(--ah-off) 32%, var(--border));
+}
+
+.ah-status-pill.unknown {
+  color: var(--ah-unknown);
+  background: color-mix(in srgb, var(--ah-unknown) 10%, var(--panel));
+  border-color: color-mix(in srgb, var(--ah-unknown) 28%, var(--border));
+}
+
+.ah-status-detail {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.metric-stack {
+  line-height: 1.25;
+}
+
+.metric-stack strong {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.metric-stack span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 #section-auth-health .metric-table th .resize-handle {
   position: absolute;
   top: 0;
@@ -318,11 +412,8 @@
   width: 2px;
   background-color: var(--accent);
   opacity: 0;
-  transform: scaleY(0.85);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent);
-  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-              transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-              background-color 0.2s ease;
+  transform: scaleY(0.78);
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
 #section-auth-health .metric-table th .resize-handle:hover::after,
@@ -335,17 +426,24 @@
   user-select: none;
 }
 
-/* Loading / empty states */
 .auth-health-empty {
-  padding: 48px 20px;
+  padding: 42px 20px;
   text-align: center;
   color: var(--text-muted);
 }
 
 .auth-health-empty-icon {
-  font-size: 32px;
-  margin-bottom: 12px;
-  opacity: 0.6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 16px;
+  font-weight: 750;
 }
 
 .auth-health-loading {
@@ -371,43 +469,23 @@
   to { transform: rotate(360deg); }
 }
 
-/* Modern floating popover box styling */
 .text-popover {
   font-family: Inter, system-ui, sans-serif;
-  animation: popoverFadeIn 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-@keyframes popoverFadeIn {
-  from {
-    transform: translateY(-4px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-/* Responsive adjustments */
-@media (max-width: 1200px) {
-  .auth-health-summary {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 768px) {
-  .auth-health-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+@media (max-width: 900px) {
   .auth-health-toolbar {
-    flex-direction: column;
     align-items: stretch;
+    flex-direction: column;
   }
+
   .ah-search-wrap,
   .ah-provider-filter {
     width: 100%;
+    min-width: 0;
   }
+
   .ah-state-pills {
-    justify-content: flex-start;
+    align-items: stretch;
   }
 }

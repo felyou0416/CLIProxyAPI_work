@@ -53,6 +53,10 @@ type AuthModelRule struct {
 	RequestFormat     string `json:"request_format"`
 	ResponseFormat    string `json:"response_format"`
 	DefaultSize       string `json:"default_size"`
+	DefaultWidth      int    `json:"default_width"`
+	DefaultHeight     int    `json:"default_height"`
+	DefaultNumFrames  int    `json:"default_num_frames"`
+	DefaultFrameRate  int    `json:"default_frame_rate"`
 	PollIntervalMS    int    `json:"poll_interval_ms"`
 	PollTimeoutSecond int    `json:"poll_timeout_seconds"`
 }
@@ -67,6 +71,10 @@ type ModelConfig struct {
 	RequestFormat      string `json:"request_format"`
 	ResponseFormat     string `json:"response_format"`
 	DefaultSize        string `json:"default_size"`
+	DefaultWidth       int    `json:"default_width"`
+	DefaultHeight      int    `json:"default_height"`
+	DefaultNumFrames   int    `json:"default_num_frames"`
+	DefaultFrameRate   int    `json:"default_frame_rate"`
 	PollIntervalMillis int    `json:"poll_interval_ms"`
 	PollTimeoutSeconds int    `json:"poll_timeout_seconds"`
 }
@@ -341,6 +349,10 @@ func modelFromRule(name string, baseURL string, rule AuthModelRule) ModelConfig 
 		RequestFormat:      rule.RequestFormat,
 		ResponseFormat:     rule.ResponseFormat,
 		DefaultSize:        rule.DefaultSize,
+		DefaultWidth:       rule.DefaultWidth,
+		DefaultHeight:      rule.DefaultHeight,
+		DefaultNumFrames:   rule.DefaultNumFrames,
+		DefaultFrameRate:   rule.DefaultFrameRate,
 		PollIntervalMillis: rule.PollIntervalMS,
 		PollTimeoutSeconds: rule.PollTimeoutSecond,
 	}
@@ -702,9 +714,20 @@ func buildDirectPayload(model ModelConfig, req map[string]any) ([]byte, error) {
 		if _, ok := out["prompt"]; !ok || strings.TrimSpace(fmt.Sprint(out["prompt"])) == "" {
 			return nil, errors.New("prompt is required")
 		}
+		applyVideoDefaults(out, model)
 		extra := ensureObject(out, "extra_body")
+		if image, ok := out["image"]; ok {
+			if images := anySlice(image); len(images) > 1 {
+				extra["image"] = images
+				delete(out, "image")
+			}
+		}
 		if images, ok := out["images"]; ok {
-			extra["image"] = images
+			if values := anySlice(images); len(values) == 1 {
+				out["image"] = values[0]
+			} else {
+				extra["image"] = images
+			}
 			delete(out, "images")
 		}
 		return json.Marshal(out)
@@ -871,6 +894,67 @@ func applyDefaultSize(req map[string]any, defaultSize string) {
 		return
 	}
 	req["size"] = strings.TrimSpace(defaultSize)
+}
+
+func applyVideoDefaults(req map[string]any, model ModelConfig) {
+	applySizeAsWidthHeight(req)
+	if model.DefaultWidth > 0 {
+		setDefaultInt(req, "width", model.DefaultWidth)
+	}
+	if model.DefaultHeight > 0 {
+		setDefaultInt(req, "height", model.DefaultHeight)
+	}
+	if model.DefaultNumFrames > 0 {
+		setDefaultInt(req, "num_frames", model.DefaultNumFrames)
+	}
+	if model.DefaultFrameRate > 0 {
+		setDefaultInt(req, "frame_rate", model.DefaultFrameRate)
+	}
+}
+
+func applySizeAsWidthHeight(req map[string]any) {
+	raw := strings.TrimSpace(fmt.Sprint(req["size"]))
+	if raw == "" || raw == "<nil>" {
+		return
+	}
+	parts := strings.Split(strings.ToLower(raw), "x")
+	if len(parts) != 2 {
+		return
+	}
+	width, errW := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, errH := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if errW != nil || errH != nil || width <= 0 || height <= 0 {
+		return
+	}
+	if _, ok := req["width"]; !ok {
+		req["width"] = width
+	}
+	if _, ok := req["height"]; !ok {
+		req["height"] = height
+	}
+	delete(req, "size")
+}
+
+func setDefaultInt(req map[string]any, key string, value int) {
+	if _, ok := req[key]; ok && strings.TrimSpace(fmt.Sprint(req[key])) != "" {
+		return
+	}
+	req[key] = value
+}
+
+func anySlice(value any) []any {
+	switch v := value.(type) {
+	case []any:
+		return v
+	case []string:
+		out := make([]any, 0, len(v))
+		for _, item := range v {
+			out = append(out, item)
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func ensureObject(req map[string]any, key string) map[string]any {

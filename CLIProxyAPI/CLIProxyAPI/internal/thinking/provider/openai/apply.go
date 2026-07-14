@@ -6,6 +6,8 @@
 package openai
 
 import (
+	"strings"
+
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
 	"github.com/tidwall/gjson"
@@ -41,6 +43,24 @@ func setOrStripReasoningEffort(body []byte, effort string) ([]byte, error) {
 	return result, nil
 }
 
+func isAgnesOpenAIThinkingModel(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(model, "agnes-2.0-flash")
+}
+
+func modelIDFromBody(body []byte) string {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return ""
+	}
+	return gjson.GetBytes(body, "model").String()
+}
+
+func setAgnesEnableThinking(body []byte, enabled bool) ([]byte, error) {
+	result, _ := sjson.SetBytes(body, "chat_template_kwargs.enable_thinking", enabled)
+	result, _ = sjson.DeleteBytes(result, "reasoning_effort")
+	return result, nil
+}
+
 // Apply applies thinking configuration to OpenAI request body.
 //
 // Expected output format:
@@ -50,19 +70,23 @@ func setOrStripReasoningEffort(body []byte, effort string) ([]byte, error) {
 //	}
 func (a *Applier) Apply(body []byte, config thinking.ThinkingConfig, modelInfo *registry.ModelInfo) ([]byte, error) {
 	if thinking.IsUserDefinedModel(modelInfo) {
-		return applyCompatibleOpenAI(body, config)
+		return applyCompatibleOpenAI(body, config, modelInfo)
 	}
 	if modelInfo.Thinking == nil {
 		return body, nil
 	}
 
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		body = []byte(`{}`)
+	}
+
+	if isAgnesOpenAIThinkingModel(modelInfo.ID) || isAgnesOpenAIThinkingModel(modelIDFromBody(body)) {
+		return setAgnesEnableThinking(body, config.Mode != thinking.ModeNone)
+	}
+
 	// Only handle ModeLevel and ModeNone; other modes pass through unchanged.
 	if config.Mode != thinking.ModeLevel && config.Mode != thinking.ModeNone {
 		return body, nil
-	}
-
-	if len(body) == 0 || !gjson.ValidBytes(body) {
-		body = []byte(`{}`)
 	}
 
 	if config.Mode == thinking.ModeLevel {
@@ -89,9 +113,13 @@ func (a *Applier) Apply(body []byte, config thinking.ThinkingConfig, modelInfo *
 	return setOrStripReasoningEffort(body, effort)
 }
 
-func applyCompatibleOpenAI(body []byte, config thinking.ThinkingConfig) ([]byte, error) {
+func applyCompatibleOpenAI(body []byte, config thinking.ThinkingConfig, modelInfo *registry.ModelInfo) ([]byte, error) {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		body = []byte(`{}`)
+	}
+
+	if isAgnesOpenAIThinkingModel(modelIDFromBody(body)) || (modelInfo != nil && isAgnesOpenAIThinkingModel(modelInfo.ID)) {
+		return setAgnesEnableThinking(body, config.Mode != thinking.ModeNone)
 	}
 
 	var effort string
@@ -122,4 +150,3 @@ func applyCompatibleOpenAI(body []byte, config thinking.ThinkingConfig) ([]byte,
 
 	return setOrStripReasoningEffort(body, effort)
 }
-

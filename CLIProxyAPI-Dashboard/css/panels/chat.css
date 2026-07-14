@@ -1166,3 +1166,185 @@
   white-space: pre-wrap;
   background: color-mix(in srgb, var(--panel-2) 40%, transparent);
 }
+
+/* ─── Chat Console Completion Pass ─── */
+.chat-mode-summary {
+  margin: 0 6px 16px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel-2) 68%, var(--panel));
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chat-panel .chat-sidebar-head {
+  margin-top: 0;
+}
+
+.chat-panel .chat-session-empty {
+  padding: 18px 10px;
+  border: 1px dashed color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+}
+
+.chat-thread-title {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.chat-thread-title span,
+.chat-thread-title small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-image-options {
+  display: grid;
+  gap: 10px;
+}
+
+.image-option-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.image-option-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.image-option-field > span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.image-option-field select,
+.image-option-field input[type="text"] {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.video-audio-field {
+  align-content: start;
+}
+
+.video-audio-toggle {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.video-audio-toggle input {
+  margin: 0;
+}
+
+.video-audio-toggle strong {
+  font-weight: 700;
+}
+
+.video-audio-prompt-field {
+  grid-column: span 2;
+}
+
+.image-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.image-preset-row button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.image-preset-row button.active,
+.image-preset-row button:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  color: var(--text);
+}
+
+.chat-panel .chat-message.error .chat-message-content {
+  background: color-mix(in srgb, var(--danger) 9%, var(--panel));
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--border));
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.chat-panel .chat-generated-video {
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+}
+
+@media (max-width: 980px) {
+  .chat-panel .chat-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+    padding: 0 12px 14px;
+    overflow: visible;
+  }
+
+  .chat-panel .chat-sidebar {
+    border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+    border-radius: 14px;
+  }
+
+  .chat-panel .chat-container {
+    min-height: 620px;
+  }
+}
+
+@media (max-width: 720px) {
+  .image-option-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .video-audio-prompt-field {
+    grid-column: 1 / -1;
+  }
+
+  .chat-panel .chat-message {
+    max-width: 94%;
+  }
+}
+
+@media (max-width: 520px) {
+  .image-option-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-panel .chat-input-area,
+  .chat-image-options {
+    width: calc(100% - 12px);
+  }
+}

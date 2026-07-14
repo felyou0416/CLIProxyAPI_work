@@ -481,10 +481,12 @@ def summarize_auth_health(auth_items: list[dict], events: list[dict], provider_m
         available_count = sum(1 for result in matching_results if result.get('available'))
         failure_count = sum(1 for result in matching_results if result and not result.get('available'))
         state = 'unknown'
-        if available_count:
+        if available_count and failure_count:
+            state = 'degraded'
+        elif available_count:
             state = 'healthy'
         elif failure_count:
-            state = 'degraded'
+            state = 'failed'
         rows.append({
             'auth_id': str(item.get('id') or '').strip(),
             'name': str(item.get('name') or '').strip(),

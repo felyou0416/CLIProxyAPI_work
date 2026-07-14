@@ -2,7 +2,7 @@ from backend.auth import create_manual_auth_entry, create_manual_auth_bundle_ent
 from backend.model_thinking import save_model_thinking_configs
 from backend.api_keys import create_api_key, update_api_key, delete_api_key, reset_api_key_usage, reveal_api_key
 from backend.state import load_state, save_state, normalize_route_strategy
-from backend.processes import start_device_login, stop_device_login, start_proxy, stop_proxy, restart_proxy, start_project, start_oauth_manager, stop_oauth_manager, start_openclaw_gateway, stop_openclaw_gateway, restart_openclaw_gateway, start_media_proxy, stop_media_proxy, restart_media_proxy, current_status, ensure_firewall_access, ensure_custom_firewall_ports, remove_custom_firewall_ports, ensure_external_firewall_ports, remove_external_firewall_ports, ensure_port_bindings, remove_port_bindings, set_ip_helper_service, stop_dashboard_panel, restart_dashboard_panel
+from backend.processes import start_device_login, stop_device_login, start_proxy, stop_proxy, restart_proxy, start_project, start_oauth_manager, stop_oauth_manager, start_openclaw_gateway, stop_openclaw_gateway, restart_openclaw_gateway, start_media_proxy, stop_media_proxy, restart_media_proxy, current_status, ensure_firewall_access, ensure_custom_firewall_ports, remove_custom_firewall_ports, ensure_port_bindings, remove_port_bindings, set_ip_helper_service, stop_dashboard_panel, restart_dashboard_panel
 from backend.tools import run_tool, stop_tool, test_provider_models, test_image_models, test_auth_entry, queue_provider_model_tests, clear_provider_model_test_state, stop_provider_model_tests, run_storage_cleanup, _proxy_request
 from backend.terminals import open_terminal, open_desktop_terminal, close_terminal, list_terminals, write_terminal, resize_terminal
 from backend.routes.helpers import send_json
@@ -494,12 +494,14 @@ def handle_post(handler, parsed, data):
                 item = add_custom_aggregate_alias_members(
                     data.get('alias_id', ''),
                     data.get('members') if isinstance(data.get('members'), list) else [],
+                    data.get('version'),
                 )
                 message = f'Updated aggregate ID: {item.get("alias_id")}'
             elif action == 'set_members':
                 item = set_custom_aggregate_alias_members(
                     data.get('alias_id', ''),
                     data.get('members') if isinstance(data.get('members'), list) else [],
+                    data.get('version'),
                 )
                 message = f'Saved aggregate order: {item.get("alias_id")}'
             else:
@@ -746,37 +748,6 @@ def handle_post(handler, parsed, data):
             return True
         send_json(handler, result, status=200 if result.get('ok') else 400)
         return True
-    if parsed.path == '/api/external-access/allow':
-        if not isinstance(data, dict):
-            send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
-            return True
-        try:
-            result = ensure_external_firewall_ports(
-                data.get('ports') or [],
-                data.get('protocols') or data.get('protocol') or ['TCP'],
-                data.get('remote_addresses') or data.get('remoteAddress') or [],
-                elevated=bool(data.get('elevated', True)),
-            )
-        except ValueError as e:
-            send_json(handler, {'ok': False, 'message': str(e)}, status=400)
-            return True
-        send_json(handler, result, status=200 if result.get('ok') else 400)
-        return True
-    if parsed.path == '/api/external-access/remove':
-        if not isinstance(data, dict):
-            send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
-            return True
-        try:
-            result = remove_external_firewall_ports(
-                data.get('ports') or [],
-                data.get('protocols') or data.get('protocol') or ['TCP'],
-                elevated=bool(data.get('elevated', True)),
-            )
-        except ValueError as e:
-            send_json(handler, {'ok': False, 'message': str(e)}, status=400)
-            return True
-        send_json(handler, result, status=200 if result.get('ok') else 400)
-        return True
     if parsed.path == '/api/port-bindings/enable':
         if not isinstance(data, dict):
             send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
@@ -871,6 +842,23 @@ def handle_post(handler, parsed, data):
                 send_json(handler, body, status=status_code)
             except:
                 send_json(handler, {'ok': False, 'message': result.get('error') or result.get('body') or 'Proxy request failed'}, status=status_code)
+        return True
+    if parsed.path == '/api/video-generation':
+        if not isinstance(data, dict):
+            send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
+            return True
+
+        result = _proxy_request('/v1/videos/generations', data, timeout=180)
+        status_code = result.get('status_code') or (200 if result.get('ok') else 500)
+        try:
+            import json
+            body = json.loads(result.get('body') or '{}')
+            send_json(handler, body, status=status_code)
+        except Exception as e:
+            if result.get('ok'):
+                send_json(handler, {'ok': False, 'message': f'Failed to parse video response: {e}'}, status=500)
+            else:
+                send_json(handler, {'ok': False, 'message': result.get('error') or result.get('body') or 'Video generation proxy request failed'}, status=status_code)
         return True
     if parsed.path == '/api/virtual-keys':
         if not isinstance(data, dict):

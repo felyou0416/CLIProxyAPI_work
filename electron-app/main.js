@@ -132,6 +132,7 @@ function startDashboard() {
   const resPath = getResourcesPath();
   const dashboardDir = path.join(resPath, 'dashboard');
   const dashboardExe = path.join(dashboardDir, 'dashboard.exe');
+  const accessGatewayBinary = path.join(resPath, 'CLIProxyAPI-AccessGateway', 'cli-access-gateway.exe');
 
   if (!fs.existsSync(dashboardExe)) {
     console.log('[Dashboard] Binary not found, skipping:', dashboardExe);
@@ -149,11 +150,12 @@ function startDashboard() {
       ...process.env,
       CLIPROXYAPI_ROOT: resPath,
       CLIPROXYAPI_STORAGE_DIR: storagePath,
+      CLIPROXYAPI_ACCESS_GATEWAY_BINARY: accessGatewayBinary,
       RELAYX_CLI_BINARY: path.join(resPath, 'cli-proxy-api.exe'),
       RELAYX_DASHBOARD_ROOT: dashboardDir,
       CLIPROXYAPI_DASHBOARD_PORT: String(DASHBOARD_PORT),
       CLIPROXYAPI_DASHBOARD_HOST: '127.0.0.1',
-      CLIPROXYAPI_AUTO_START: '0',
+      CLIPROXYAPI_AUTO_START: '1',
     },
   });
 
@@ -268,16 +270,14 @@ function showTray() {
 }
 
 app.whenReady().then(async () => {
-  proxyProcess = startProxyServer();
-
-  await waitForPort(PROXY_PORT, 5000).catch(() => {
-    console.log('[Proxy] Port wait timeout, continuing anyway');
-  });
-
   dashboardProcess = startDashboard();
 
   await waitForPort(DASHBOARD_PORT, 10000).catch(() => {
     console.log('[Dashboard] Port wait timeout, continuing anyway');
+  });
+
+  await waitForPort(PROXY_PORT, 30000).catch(() => {
+    console.log('[Proxy] Port wait timeout, continuing anyway');
   });
 
   createWindow();

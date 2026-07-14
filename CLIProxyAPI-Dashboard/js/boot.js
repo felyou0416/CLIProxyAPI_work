@@ -10,7 +10,7 @@ async function boot() {
     return;
   }
   const hashSection = String(window.location.hash || '').replace(/^#/, '').trim();
-  if (hashSection && document.getElementById('tab-' + hashSection)) {
+  if (hashSection && (typeof isKnownSection !== 'function' || isKnownSection(hashSection))) {
     await showSection(hashSection);
   } else {
     await showSection(getActiveSection());
@@ -125,7 +125,7 @@ async function submitLogin() {
 
 window.addEventListener('hashchange', () => {
   const next = getActiveSection();
-  if (document.getElementById('tab-' + next)) showSection(next);
+  if (typeof isKnownSection !== 'function' || isKnownSection(next)) showSection(next);
 });
 
 boot();

@@ -1787,11 +1787,8 @@ def set_provider_model_override(
     next_entry = _model_mapping_entry(call_value, target_provider_value, target_upstream_value, False)
     next_entries = [
         item for item in current_entries
-        if not bool(item.get('deleted')) and not (
-            str(item.get('provider') or '').strip().lower() == target_provider_value
-            and str(item.get('upstream_id') or '').strip() == target_upstream_value
-            and str(item.get('call_id') or '').strip() == call_value
-        )
+        if not bool(item.get('deleted'))
+        and str(item.get('call_id') or '').strip() != call_value
     ]
     next_entries.append(next_entry)
     provider_map[upstream_value] = {'mappings': next_entries}
@@ -1821,16 +1818,10 @@ def delete_provider_model_override(provider: str, upstream_id: str, call_id: str
         current_entries = iter_model_mapping_entries(overrides, provider_value, upstream_value)
         next_entries = [
             item for item in current_entries
-            if not (
-                str(item.get('provider') or '').strip().lower() == provider_value
-                and str(item.get('upstream_id') or '').strip() == upstream_value
-                and str(item.get('call_id') or '').strip() == call_value
-            )
+            if str(item.get('call_id') or '').strip() != call_value
         ]
         if not next_entries:
-            provider_map[upstream_value] = {'mappings': [
-                _model_mapping_entry('', provider_value, upstream_value, True)
-            ]}
+            provider_map.pop(upstream_value, None)
         else:
             provider_map[upstream_value] = {'mappings': next_entries}
     else:
@@ -2401,6 +2392,8 @@ def add_custom_aggregate_alias_members(alias_id: str, members: list[dict] | None
     return {
         'alias_id': alias_value,
         'members': old_val['members'],
+        'target_version': target_version,
+        'version_members': alias_members,
         'added_count': added,
     }
 
@@ -2465,6 +2458,8 @@ def set_custom_aggregate_alias_members(alias_id: str, members: list[dict] | None
     return {
         'alias_id': alias_value,
         'members': old_val['members'],
+        'target_version': target_version,
+        'version_members': normalized,
         'saved_count': len(normalized),
     }
 
@@ -3001,6 +2996,22 @@ def rewrite_host(config_text: str, host: str):
             output.append(line)
     if not replaced:
         output.append(f'host: "{host_value}"')
+    return '\n'.join(output) + '\n'
+
+
+def rewrite_port(config_text: str, port: int):
+    port_value = max(1, min(65535, int(port or 8317)))
+    lines = config_text.splitlines()
+    replaced = False
+    output = []
+    for line in lines:
+        if line.strip().startswith('port:'):
+            output.append(f'port: {port_value}')
+            replaced = True
+        else:
+            output.append(line)
+    if not replaced:
+        output.append(f'port: {port_value}')
     return '\n'.join(output) + '\n'
 
 
@@ -4206,13 +4217,8 @@ def build_oauth_model_alias_block(providers, auth_refs: list[str] | None = None)
                 for custom_alias in get_custom_aggregate_aliases_for_model(effective_provider, model_name):
                     if custom_alias not in call_ids:
                         call_ids.append(custom_alias)
-                lines.extend([
-                    f'    - name: "{actual_model_name}"',
-                    f'      alias: "{actual_model_name}"',
-                    '      fork: true',
-                ])
                 for call_id in call_ids:
-                    if not call_id:
+                    if not call_id or call_id.lower() == actual_model_name.lower():
                         continue
                     alias_is_aggregate = call_id in aggregate_alias_ids
                     if alias_is_aggregate or (bool(strategy.get('enabled')) and not bool(strategy.get('aggregate_only'))):
@@ -4230,7 +4236,7 @@ def build_oauth_model_alias_block(providers, auth_refs: list[str] | None = None)
                         lines.extend([
                             f'    - name: "{actual_model_name}"',
                             f'      alias: "{call_id}"',
-                            '      fork: true',
+                            '      fork: false',
                         ])
         for alias_id, rows in aggregate_rows.items():
             rows.sort(key=lambda item: item.get('rank') or (1, 0, 0))
@@ -4238,7 +4244,7 @@ def build_oauth_model_alias_block(providers, auth_refs: list[str] | None = None)
                 lines.extend([
                     f'    - name: "{row["name"]}"',
                     f'      alias: "{alias_id}"',
-                    '      fork: true',
+                    '      fork: false',
                 ])
     return '\n'.join(lines) + '\n'
 
@@ -4361,6 +4367,7 @@ def build_runtime_config(
     selected_auth_ref: str | None = None,
     selected_auth_name: str | None = None,
     bind_host: str = '127.0.0.1',
+    listen_port: int = 8317,
     access_api_keys: list[str] | None = None,
     state: dict | None = None,
 ):
@@ -4376,36 +4383,62 @@ def build_runtime_config(
 
     active_auth_entries = []
     for active_path in _iter_pool_auth_json_files():
-            payload = _read_auth_payload(active_path)
-            if not isinstance(payload, dict):
-                continue
-            compat_entry = _extract_manual_api_config(payload, active_path.name)
-            if compat_entry:
-                provider_key = str(compat_entry.get('provider') or '').strip().lower()
-                if provider_key and provider_key not in providers:
-                    providers.append(provider_key)
-                if compat_entry.get('api') == 'anthropic-messages':
-                    claude_compat_entries.append(compat_entry)
-                else:
-                    openai_compat_entries.append(compat_entry)
-                continue
-            provider = detect_provider(payload, active_path.name)
-            auth_kind = _detect_auth_payload_kind(payload)
-            active_auth_entries.append({
-                'source': active_path,
-                'source_name': active_path.name,
-                'provider': provider,
-                'auth_kind': auth_kind,
-            })
-            if provider not in providers:
-                providers.append(provider)
+        payload = _read_auth_payload(active_path)
+        if not isinstance(payload, dict):
+            continue
+        compat_entry = _extract_manual_api_config(payload, active_path.name)
+        if compat_entry:
+            provider_key = str(compat_entry.get('provider') or '').strip().lower()
+            if provider_key and provider_key not in providers:
+                providers.append(provider_key)
+            if compat_entry.get('api') == 'anthropic-messages':
+                claude_compat_entries.append(compat_entry)
+            else:
+                openai_compat_entries.append(compat_entry)
+            continue
+        provider = detect_provider(payload, active_path.name)
+        auth_kind = _detect_auth_payload_kind(payload)
+        active_auth_entries.append({
+            'source': active_path,
+            'source_name': active_path.name,
+            'provider': provider,
+            'auth_kind': auth_kind,
+            'payload': payload,
+        })
+        if provider not in providers:
+            providers.append(provider)
 
     if not openai_compat_entries and not claude_compat_entries and not active_auth_entries:
         raise FileNotFoundError('No auth JSON files found in storage/auth. Put account files under storage/auth/<provider>/ first.')
 
+    runtime_auth_payloads = {}
+    for entry in active_auth_entries:
+        payload = entry['payload']
+        provider = entry['provider']
+        runtime_payload = _normalize_runtime_oauth_payload(payload, provider, entry['auth_kind'])
+        if not isinstance(runtime_payload, dict):
+            payload_type = str(payload.get('type') or '').strip().lower()
+            if payload_type and payload_type not in ('oauth', 'api_key'):
+                runtime_payload = payload
+        if not isinstance(runtime_payload, dict):
+            continue
+        provider_token = _auth_filename_token(provider, 'provider')
+        source_token = _auth_filename_token(Path(entry['source_name']).stem, 'account')
+        runtime_auth_payloads[f'{provider_token}--{source_token}.json'] = runtime_payload
+
+    ACTIVE_AUTH_DIR.mkdir(parents=True, exist_ok=True)
+    for stale_path in ACTIVE_AUTH_DIR.glob('*.json'):
+        if stale_path.name not in runtime_auth_payloads:
+            stale_path.unlink()
+    for target_name, runtime_payload in runtime_auth_payloads.items():
+        target_path = ACTIVE_AUTH_DIR / target_name
+        _write_runtime_auth_payload(target_path, runtime_payload)
+        copied.append(target_path)
+
     config_text = BASE_CONFIG.read_text(encoding='utf-8', errors='ignore')
     runtime_text = rewrite_host(config_text, bind_host)
-    runtime_text = rewrite_auth_dir(runtime_text, POOL_AUTH_DIR)
+    runtime_text = rewrite_port(runtime_text, listen_port)
+    runtime_text = rewrite_auth_dir(runtime_text, ACTIVE_AUTH_DIR)
 
     # Merge admin access keys with all active virtual API keys
     all_api_keys = list(access_api_keys or ['cliproxyapi'])

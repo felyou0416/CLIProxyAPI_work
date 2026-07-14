@@ -26,6 +26,7 @@ THINKING_HINT_TOKENS = (
     'glm-4.1v-thinking-flash',
     'hunyuan-2.0-thinking',
     'step-3.5-flash',
+    'agnes-2.0-flash',
     # OpenAI Reasoning models
     'o1-',
     'o3-',

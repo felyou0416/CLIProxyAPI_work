@@ -145,8 +145,8 @@ function getNavGroups() {
   return {
     runtime: ['account', 'chat', 'requests', 'token-usage', 'model-stats', 'clients', 'auth-health', 'settings'],
     config: ['providers', 'media-models', 'aggregates', 'model-thinking', 'model-map', 'api-key-intake', 'auths'],
-    access: ['firewall-access', 'terminals', 'external-access', 'tools', 'virtual-keys', 'doc'],
-    system: ['network-access', 'cooldown', 'storage-config', 'home-config', 'docker-deploy', 'advanced-config', 'cloaking-config', 'amp-config', 'model-proxy'],
+    access: ['firewall-access', 'terminals', 'tools', 'virtual-keys', 'doc'],
+    system: ['system', 'network-access', 'model-proxy', 'cooldown', 'storage-config', 'home-config', 'docker-deploy', 'advanced-config', 'cloaking-config', 'amp-config', 'data-transfer'],
   };
 }
 
@@ -186,7 +186,7 @@ function persistActiveGroup(group) {
 }
 
 function getDefaultSidebarNavOrder() {
-  return ['account', 'chat', 'requests', 'token-usage', 'model-stats', 'clients', 'auth-health', 'settings', 'providers', 'media-models', 'aggregates', 'model-map', 'api-key-intake', 'auths', 'firewall-access', 'terminals', 'network-access', 'external-access', 'model-proxy', 'model-thinking', 'doc', 'tools'];
+  return ['account', 'chat', 'requests', 'token-usage', 'model-stats', 'clients', 'auth-health', 'settings', 'providers', 'media-models', 'aggregates', 'model-thinking', 'model-map', 'api-key-intake', 'auths', 'firewall-access', 'terminals', 'tools', 'virtual-keys', 'doc', 'system'];
 }
 
 function getSidebarNavOrder() {
@@ -517,14 +517,36 @@ function moveSidebarNav(key, direction) {
 
 const loadingSections = {};
 
-async function showSection(name) {
-  if (!document.getElementById('tab-' + name)) {
+function isKnownSection(name) {
+  const value = String(name || '').trim();
+  if (!value) return false;
+  if (document.getElementById('tab-' + value)) return true;
+  return Object.values(getNavGroups()).some(items => items.includes(value));
+}
+
+function getNavTabForSection(name, activeGroup) {
+  const value = String(name || '').trim();
+  if (activeGroup === 'system') return 'tab-system';
+  if (document.getElementById('tab-' + value)) return 'tab-' + value;
+  if (getSectionGroup(value) === 'system') return 'tab-system';
+  return '';
+}
+
+async function showSection(name, options = {}) {
+  if (name === 'external-access') {
+    name = 'firewall-access';
+  }
+  if (!isKnownSection(name)) {
     name = 'account';
   }
 
+  const requestedGroup = options && options.fromSystemHub ? 'system' : getSectionGroup(name);
   if (document.getElementById('section-' + name)?.classList.contains('active-view')) {
     persistActiveSection(name);
-    persistActiveGroup(getSectionGroup(name));
+    persistActiveGroup(requestedGroup);
+    document.querySelectorAll('.top-nav-btn').forEach(el => el.classList.remove('active'));
+    const currentTabId = getNavTabForSection(name, requestedGroup);
+    if (currentTabId) document.getElementById(currentTabId)?.classList.add('active');
     return;
   }
 
@@ -552,12 +574,13 @@ async function showSection(name) {
     }
   }
 
-  const activeGroup = getSectionGroup(name);
+  const activeGroup = requestedGroup;
   document.querySelectorAll('.section-view').forEach(el => el.classList.remove('active-view'));
   document.querySelectorAll('.top-nav-btn').forEach(el => el.classList.remove('active'));
   updateGroupNavigation(activeGroup);
   document.getElementById('section-' + name)?.classList.add('active-view');
-  document.getElementById('tab-' + name)?.classList.add('active');
+  const activeTabId = getNavTabForSection(name, activeGroup);
+  if (activeTabId) document.getElementById(activeTabId)?.classList.add('active');
   persistActiveSection(name);
   persistActiveGroup(activeGroup);
   if (name === 'aggregates' && typeof loadAggregateModels === 'function') {
@@ -622,9 +645,6 @@ async function showSection(name) {
   if (name === 'firewall-access' && typeof loadFirewallAccessPanel === 'function') {
     loadFirewallAccessPanel();
   }
-  if (name === 'external-access' && typeof loadExternalAccessPanel === 'function') {
-    loadExternalAccessPanel();
-  }
   if (name === 'cooldown' && typeof loadCooldownPanel === 'function') {
     loadCooldownPanel(true);
   }
@@ -661,6 +681,10 @@ async function showSection(name) {
 
 function showPage(name) {
   showSection(name);
+}
+
+function openSystemSection(name) {
+  showSection(name, { fromSystemHub: true });
 }
 
 function getAuthToken() {

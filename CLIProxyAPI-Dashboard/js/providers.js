@@ -876,7 +876,7 @@ function providerModelMapCardHtml(item) {
                   <div class="provider-map-actions provider-map-actions-inline">
                     <input class="provider-map-input" type="text" value="${callId}" data-provider-map-input="${lookupProvider}" data-provider-map-row-index="${index}" data-upstream-id="${lookupUpstreamId}" />
                     <div class="provider-map-btns">
-                      <button type="button" class="provider-map-save" data-provider-map-save="${lookupProvider}" data-provider-map-row-index="${index}" data-upstream-id="${lookupUpstreamId}">保存</button>
+                      <button type="button" class="provider-map-save" data-provider-map-save="${lookupProvider}" data-provider-map-row-index="${index}" data-upstream-id="${lookupUpstreamId}" data-original-call-id="${callId}">保存</button>
                       <button type="button" class="provider-map-delete danger" data-provider-map-delete="${lookupProvider}" data-upstream-id="${lookupUpstreamId}" data-call-id="${callId}">删除</button>
                     </div>
                   </div>
@@ -929,6 +929,7 @@ function bindProviderModelMapActions(root) {
     btn.onclick = async () => {
       const provider = btn.getAttribute('data-provider-map-save') || '';
       const upstreamId = btn.getAttribute('data-upstream-id') || '';
+      const originalCallId = btn.getAttribute('data-original-call-id') || '';
       const rowIndex = btn.getAttribute('data-provider-map-row-index') || '';
       const providerInput = root.querySelector(`[data-provider-map-group-provider="${escapeSelectorValue(provider)}"]`);
       const upstreamInput = root.querySelector(`[data-provider-map-upstream="${escapeSelectorValue(provider)}"][data-provider-map-row-index="${escapeSelectorValue(rowIndex)}"]`);
@@ -951,6 +952,7 @@ function bindProviderModelMapActions(root) {
           for (const rowButton of rowButtons) {
             const nextRowIndex = rowButton.getAttribute('data-provider-map-row-index') || '';
             const oldUpstreamId = rowButton.getAttribute('data-upstream-id') || '';
+            const oldCallId = rowButton.getAttribute('data-original-call-id') || '';
             const nextUpstreamInput = root.querySelector(`[data-provider-map-upstream="${escapeSelectorValue(provider)}"][data-provider-map-row-index="${escapeSelectorValue(nextRowIndex)}"]`);
             const nextCallInput = root.querySelector(`[data-provider-map-input="${escapeSelectorValue(provider)}"][data-provider-map-row-index="${escapeSelectorValue(nextRowIndex)}"]`);
             const nextUpstreamId = nextUpstreamInput?.value?.trim() || '';
@@ -964,15 +966,16 @@ function bindProviderModelMapActions(root) {
               call_id: nextCallId,
             });
             replacedCount += Number(res?.item?.removed_conflicts_count || 0);
-            if (nextUpstreamId !== oldUpstreamId) {
+            if (oldCallId && (nextUpstreamId !== oldUpstreamId || nextCallId !== oldCallId)) {
               await api('/api/provider-model-delete', 'POST', {
                 provider,
                 upstream_id: oldUpstreamId,
+                call_id: oldCallId,
               });
             }
           }
         } else {
-          if (targetUpstreamId !== upstreamId) {
+          if (targetUpstreamId !== upstreamId || (originalCallId && callId !== originalCallId)) {
             const res = await api('/api/provider-model-override', 'POST', {
               provider,
               target_provider: targetProvider,
@@ -981,10 +984,13 @@ function bindProviderModelMapActions(root) {
               call_id: callId,
             });
             replacedCount += Number(res?.item?.removed_conflicts_count || 0);
-            await api('/api/provider-model-delete', 'POST', {
-              provider,
-              upstream_id: upstreamId,
-            });
+            if (originalCallId) {
+              await api('/api/provider-model-delete', 'POST', {
+                provider,
+                upstream_id: upstreamId,
+                call_id: originalCallId,
+              });
+            }
           } else {
             const res = await api('/api/provider-model-override', 'POST', {
               provider,

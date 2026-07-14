@@ -30,9 +30,9 @@
         <span>+</span>
         <strong>New task</strong>
       </button>
-      <div class="chat-side-link">Projects</div>
-      <div class="chat-side-link">Scheduled</div>
-      <div class="chat-side-link">Customize</div>
+      <div class="chat-mode-summary">
+        <span id="chat-mode-status">0 chats in this mode</span>
+      </div>
       <div class="chat-sidebar-head">
         <span class="chat-sidebar-title">Recents</span>
         <span id="chat-session-count" class="chat-session-count">0</span>
@@ -46,7 +46,7 @@
     <div class="chat-main">
       <div class="chat-thread-title">
         <span id="chat-active-title">New Chat</span>
-        <small>当前模型会随会话保存</small>
+        <small id="chat-active-subtitle">CHAT · No model selected</small>
       </div>
       <div class="chat-container">
         <div class="chat-settings-bar">
@@ -112,6 +112,17 @@
                 <option value="24">24 FPS</option>
                 <option value="16">16 FPS</option>
               </select>
+            </label>
+            <label class="image-option-field video-audio-field">
+              <span>Audio</span>
+              <label class="video-audio-toggle">
+                <input id="video-audio-toggle" type="checkbox" checked>
+                <strong>Generate audio</strong>
+              </label>
+            </label>
+            <label class="image-option-field video-audio-prompt-field">
+              <span>Audio prompt</span>
+              <input id="video-audio-prompt" type="text" placeholder="Optional sound or narration direction">
             </label>
           </div>
         </div>

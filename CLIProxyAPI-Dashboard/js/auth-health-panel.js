@@ -7,6 +7,22 @@ let authHealthSearch = '';
 let authHealthProvider = '';
 let authHealthLimit = 20;
 
+const AUTH_HEALTH_STATE_META = {
+  healthy: { className: 'ok', labelKey: 'authHealth.healthy', fallback: '健康' },
+  degraded: { className: 'warn', labelKey: 'authHealth.degraded', fallback: '部分异常' },
+  failed: { className: 'off', labelKey: 'authHealth.failed', fallback: '不可用' },
+  unknown: { className: 'unknown', labelKey: 'authHealth.unknown', fallback: '未检测' },
+};
+
+function normalizeAuthHealthState(state) {
+  return AUTH_HEALTH_STATE_META[state] ? state : 'unknown';
+}
+
+function authHealthStateLabel(state) {
+  const meta = AUTH_HEALTH_STATE_META[normalizeAuthHealthState(state)];
+  return t(meta.labelKey, meta.fallback);
+}
+
 function formatAuthHealthTs(ts) {
   const res = formatDashboardTs(ts);
   if (!res || res === '-') return '-';
@@ -14,6 +30,36 @@ function formatAuthHealthTs(ts) {
     return `${res.day} ${res.time}`;
   }
   return res;
+}
+
+function authHealthCellTitle(...values) {
+  return values
+    .map(value => String(value || '').trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+function authHealthStateDetail(item) {
+  const available = parseInt(item.available_models, 10) || 0;
+  const failed = parseInt(item.failed_models, 10) || 0;
+  if (available && failed) return `${available} ${t('authHealth.availableShort', '可用')} / ${failed} ${t('authHealth.failedShort', '失败')}`;
+  if (available) return `${available} ${t('authHealth.modelsAvailable', '个模型可用')}`;
+  if (failed) return `${failed} ${t('authHealth.modelsFailed', '个模型失败')}`;
+  return t('authHealth.awaitingProbe', '等待模型探测');
+}
+
+function authHealthStatusHtml(item) {
+  const state = normalizeAuthHealthState(item.state);
+  const meta = AUTH_HEALTH_STATE_META[state];
+  return `
+    <div class="ah-status">
+      <span class="ah-status-pill ${meta.className}">
+        <span class="ah-status-dot" aria-hidden="true"></span>
+        ${escapeHtml(authHealthStateLabel(state))}
+      </span>
+      <span class="ah-status-detail">${escapeHtml(authHealthStateDetail(item))}</span>
+    </div>
+  `;
 }
 
 function showTextPopover(element, event) {
@@ -97,18 +143,35 @@ function showTextPopover(element, event) {
 }
 
 function authHealthRowHtml(item) {
-  const stateClass = item.state === 'healthy' ? 'ok' : item.state === 'degraded' ? 'warn' : 'off';
+  const state = normalizeAuthHealthState(item.state);
   const reasonText = item.recent_failure_reason || '';
+  const name = item.name || '-';
+  const email = item.email || '';
+  const identityTitle = authHealthCellTitle(name, email);
+  const modelTitle = authHealthCellTitle(
+    `${t('authHealth.availableModels', '可用模型')}: ${item.available_models || 0}`,
+    `${t('authHealth.failedModels', '失败模型')}: ${item.failed_models || 0}`
+  );
+  const usageTitle = authHealthCellTitle(
+    `${t('authHealth.requests', '请求数')}: ${(parseInt(item.request_count, 10) || 0).toLocaleString()}`,
+    `${t('authHealth.tokens', '总 Token')}: ${(parseInt(item.total_tokens, 10) || 0).toLocaleString()}`
+  );
   return `
-    <tr>
-      <td class="ellipsis-cell file-col" title="${escapeHtml(item.name || '')}" onclick="showTextPopover(this, event)">${escapeHtml(item.name || '-')}</td>
+    <tr data-state="${escapeHtml(state)}">
+      <td class="identity-cell" title="${escapeHtml(identityTitle)}" onclick="showTextPopover(this, event)">
+        <div class="identity-main">${escapeHtml(name)}</div>
+        <div class="identity-sub">${email ? escapeHtml(email) : t('authHealth.noEmail', '无邮箱')}</div>
+      </td>
       <td>${escapeHtml(item.provider || '-')}</td>
-      <td class="ellipsis-cell email-col" title="${escapeHtml(item.email || '')}" onclick="showTextPopover(this, event)">${escapeHtml(item.email || '-')}</td>
-      <td><span class="pill ${stateClass}">${escapeHtml(item.state || 'unknown')}</span></td>
-      <td>${item.available_models || 0}</td>
-      <td>${item.failed_models || 0}</td>
-      <td>${item.request_count || 0}</td>
-      <td>${item.total_tokens || 0}</td>
+      <td>${authHealthStatusHtml(item)}</td>
+      <td class="metric-stack num" title="${escapeHtml(modelTitle)}">
+        <strong>${formatCompactNumber(parseInt(item.available_models, 10) || 0)}</strong>
+        <span>${formatCompactNumber(parseInt(item.failed_models, 10) || 0)} ${t('authHealth.failedShort', '失败')}</span>
+      </td>
+      <td class="metric-stack num" title="${escapeHtml(usageTitle)}">
+        <strong>${formatCompactNumber(parseInt(item.request_count, 10) || 0)}</strong>
+        <span>${formatCompactNumber(parseInt(item.total_tokens, 10) || 0)} Token</span>
+      </td>
       <td class="ellipsis-cell reason-col" title="${escapeHtml(reasonText)}" onclick="showTextPopover(this, event)">${escapeHtml(reasonText || '-')}</td>
       <td>${escapeHtml(formatAuthHealthTs(item.recent_failure_at))}</td>
     </tr>
@@ -125,12 +188,13 @@ function formatCompactNumber(n) {
 
 function computeAuthHealthSummary(items) {
   const total = items.length;
-  const healthy = items.filter(i => i.state === 'healthy').length;
-  const degraded = items.filter(i => i.state === 'degraded').length;
-  const failed = items.filter(i => i.state && i.state !== 'healthy' && i.state !== 'degraded').length;
+  const healthy = items.filter(i => normalizeAuthHealthState(i.state) === 'healthy').length;
+  const degraded = items.filter(i => normalizeAuthHealthState(i.state) === 'degraded').length;
+  const failed = items.filter(i => normalizeAuthHealthState(i.state) === 'failed').length;
+  const unknown = items.filter(i => normalizeAuthHealthState(i.state) === 'unknown').length;
   const requests = items.reduce((sum, i) => sum + (parseInt(i.request_count, 10) || 0), 0);
   const tokens = items.reduce((sum, i) => sum + (parseInt(i.total_tokens, 10) || 0), 0);
-  return { total, healthy, degraded, failed, requests, tokens };
+  return { total, healthy, degraded, failed, unknown, requests, tokens };
 }
 
 function updateAuthHealthSummary() {
@@ -139,6 +203,7 @@ function updateAuthHealthSummary() {
   const healthyEl = document.getElementById('ah-summary-healthy');
   const degradedEl = document.getElementById('ah-summary-degraded');
   const failedEl = document.getElementById('ah-summary-failed');
+  const unknownEl = document.getElementById('ah-summary-unknown');
   const requestsEl = document.getElementById('ah-summary-requests');
   const tokensEl = document.getElementById('ah-summary-tokens');
 
@@ -146,33 +211,38 @@ function updateAuthHealthSummary() {
   if (healthyEl) healthyEl.textContent = formatCompactNumber(summary.healthy);
   if (degradedEl) degradedEl.textContent = formatCompactNumber(summary.degraded);
   if (failedEl) failedEl.textContent = formatCompactNumber(summary.failed);
+  if (unknownEl) unknownEl.textContent = formatCompactNumber(summary.unknown);
   if (requestsEl) requestsEl.textContent = formatCompactNumber(summary.requests);
   if (tokensEl) tokensEl.textContent = formatCompactNumber(summary.tokens);
 
   // Tooltips with exact numbers
   if (totalEl) totalEl.title = `${t('authHealth.totalItems', '认证项')} ${summary.total.toLocaleString()}`;
   if (healthyEl) healthyEl.title = `${t('authHealth.healthy', '健康')} ${summary.healthy.toLocaleString()}`;
-  if (degradedEl) degradedEl.title = `${t('authHealth.degraded', '降级')} ${summary.degraded.toLocaleString()}`;
-  if (failedEl) failedEl.title = `${t('authHealth.failed', '异常')} ${summary.failed.toLocaleString()}`;
+  if (degradedEl) degradedEl.title = `${t('authHealth.degraded', '部分异常')} ${summary.degraded.toLocaleString()}`;
+  if (failedEl) failedEl.title = `${t('authHealth.failed', '不可用')} ${summary.failed.toLocaleString()}`;
+  if (unknownEl) unknownEl.title = `${t('authHealth.unknown', '未检测')} ${summary.unknown.toLocaleString()}`;
   if (requestsEl) requestsEl.title = `${t('authHealth.requests', '请求数')} ${summary.requests.toLocaleString()}`;
   if (tokensEl) tokensEl.title = `${t('authHealth.tokens', '总 Token')} ${summary.tokens.toLocaleString()}`;
 }
 
 function updateAuthHealthStatePills() {
   const all = authHealthItems.length;
-  const healthy = authHealthItems.filter(i => i.state === 'healthy').length;
-  const degraded = authHealthItems.filter(i => i.state === 'degraded').length;
-  const failed = authHealthItems.filter(i => i.state && i.state !== 'healthy' && i.state !== 'degraded').length;
+  const healthy = authHealthItems.filter(i => normalizeAuthHealthState(i.state) === 'healthy').length;
+  const degraded = authHealthItems.filter(i => normalizeAuthHealthState(i.state) === 'degraded').length;
+  const failed = authHealthItems.filter(i => normalizeAuthHealthState(i.state) === 'failed').length;
+  const unknown = authHealthItems.filter(i => normalizeAuthHealthState(i.state) === 'unknown').length;
 
   const allCount = document.getElementById('ah-count-all');
   const healthyCount = document.getElementById('ah-count-healthy');
   const degradedCount = document.getElementById('ah-count-degraded');
   const failedCount = document.getElementById('ah-count-failed');
+  const unknownCount = document.getElementById('ah-count-unknown');
 
   if (allCount) allCount.textContent = all;
   if (healthyCount) healthyCount.textContent = healthy;
   if (degradedCount) degradedCount.textContent = degraded;
   if (failedCount) failedCount.textContent = failed;
+  if (unknownCount) unknownCount.textContent = unknown;
 
   document.querySelectorAll('#ah-state-pills .pill').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.state === authHealthState);
@@ -212,12 +282,16 @@ function sortAuthHealthItems(items) {
 
   const numericCols = ['available_models', 'failed_models', 'request_count', 'total_tokens'];
   const isNumeric = numericCols.includes(column);
+  const stateOrder = { failed: 0, degraded: 1, unknown: 2, healthy: 3 };
 
   return [...items].sort((a, b) => {
     let va = a[column];
     let vb = b[column];
 
-    if (isNumeric) {
+    if (column === 'state') {
+      va = stateOrder[normalizeAuthHealthState(va)];
+      vb = stateOrder[normalizeAuthHealthState(vb)];
+    } else if (isNumeric) {
       va = parseInt(va, 10) || 0;
       vb = parseInt(vb, 10) || 0;
     } else {
@@ -242,7 +316,7 @@ function filterAuthHealthItems() {
   let result = [...authHealthItems];
 
   if (authHealthState !== 'all') {
-    result = result.filter(i => i.state === authHealthState);
+    result = result.filter(i => normalizeAuthHealthState(i.state) === authHealthState);
   }
 
   if (authHealthProvider) {
@@ -255,7 +329,9 @@ function filterAuthHealthItems() {
       const name = (i.name || '').toLowerCase();
       const provider = (i.provider || '').toLowerCase();
       const email = (i.email || '').toLowerCase();
-      return name.includes(q) || provider.includes(q) || email.includes(q);
+      const state = authHealthStateLabel(i.state).toLowerCase();
+      const reason = (i.recent_failure_reason || '').toLowerCase();
+      return name.includes(q) || provider.includes(q) || email.includes(q) || state.includes(q) || reason.includes(q);
     });
   }
 
@@ -276,7 +352,7 @@ function renderAuthHealthTable() {
   if (!body) return;
 
   if (!authHealthFiltered.length) {
-    body.innerHTML = `<tr><td colspan="10"><div class="auth-health-empty"><div class="auth-health-empty-icon">📭</div><div>${t('authHealth.noData', '暂无符合条件的认证健康数据')}</div></div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="7"><div class="auth-health-empty"><div class="auth-health-empty-icon">-</div><div>${t('authHealth.noData', '暂无符合条件的认证健康数据')}</div></div></td></tr>`;
     return;
   }
 
@@ -319,6 +395,16 @@ function updateLoadMoreButton() {
   btn.disabled = allLoaded;
 }
 
+function updateAuthHealthMeta(data) {
+  const meta = document.getElementById('auth-health-meta');
+  if (!meta) return;
+
+  const refreshedAt = formatAuthHealthTs(data?.refreshed_at);
+  const cacheText = data?.cached ? t('authHealth.cached', '缓存就绪') : t('authHealth.refreshing', '等待刷新');
+  const countText = `${authHealthItems.length.toLocaleString()} ${t('authHealth.totalItems', '认证项')}`;
+  meta.textContent = `${cacheText} · ${t('authHealth.lastRefresh', '最近刷新')} ${refreshedAt} · ${countText}`;
+}
+
 let authHealthResizerInitialized = false;
 
 function applyAuthHealthColumnWidths() {
@@ -326,16 +412,13 @@ function applyAuthHealthColumnWidths() {
   if (!headers.length) return;
 
   const defaultWidths = {
-    0: '18%',  // 认证文件
+    0: '22%',  // 认证标识
     1: '10%',  // Provider
-    2: '15%',  // 邮箱
-    3: '8%',   // 状态
-    4: '9%',   // 可用模型
-    5: '9%',   // 失败模型
-    6: '8%',   // 请求数
-    7: '9%',   // 总 Token
-    8: '24%',  // 最近失败
-    9: '16%'   // 失败时间
+    2: '14%',  // 健康标识
+    3: '12%',  // 模型探测
+    4: '12%',  // 请求 / Token
+    5: '20%',  // 最近失败
+    6: '10%'   // 失败时间
   };
 
   headers.forEach((th, index) => {
@@ -417,7 +500,7 @@ async function loadAuthHealthPanel(force = false) {
   const body = document.getElementById('auth-health-body');
   authHealthLimit = force ? 100 : 20;
 
-  if (body) body.innerHTML = `<tr><td colspan="10"><div class="auth-health-loading">${t('common.loading', '加载中...')}</div></td></tr>`;
+  if (body) body.innerHTML = `<tr><td colspan="7"><div class="auth-health-loading">${t('common.loading', '加载中...')}</div></td></tr>`;
 
   try {
     const data = await api(`/api/auth-health?limit=${authHealthLimit}`);
@@ -427,6 +510,7 @@ async function loadAuthHealthPanel(force = false) {
     updateAuthHealthSummary();
     updateAuthHealthStatePills();
     updateAuthHealthProviderFilter();
+    updateAuthHealthMeta(data);
     filterAuthHealthItems();
     updateSortIndicators();
     renderAuthHealthTable();
@@ -435,7 +519,7 @@ async function loadAuthHealthPanel(force = false) {
     authHealthPanelLoaded = true;
     updateLoadMoreButton();
   } catch (error) {
-    if (body) body.innerHTML = `<tr><td colspan="10"><div class="auth-health-empty"><div class="auth-health-empty-icon">⚠️</div><div>${error.message || t('common.requestFailed', '加载失败')}</div></div></td></tr>`;
+    if (body) body.innerHTML = `<tr><td colspan="7"><div class="auth-health-empty"><div class="auth-health-empty-icon">!</div><div>${error.message || t('common.requestFailed', '加载失败')}</div></div></td></tr>`;
   }
 }
 
@@ -444,7 +528,7 @@ async function loadAllAuthHealth() {
   if (btn) btn.disabled = true;
 
   const body = document.getElementById('auth-health-body');
-  if (body) body.innerHTML = `<tr><td colspan="10"><div class="auth-health-loading">${t('authHealth.loadingAll', '加载全部认证项')}</div></td></tr>`;
+  if (body) body.innerHTML = `<tr><td colspan="7"><div class="auth-health-loading">${t('authHealth.loadingAll', '加载全部认证项')}</div></td></tr>`;
 
   try {
     const data = await api('/api/auth-health?limit=500');
@@ -454,6 +538,7 @@ async function loadAllAuthHealth() {
     updateAuthHealthSummary();
     updateAuthHealthStatePills();
     updateAuthHealthProviderFilter();
+    updateAuthHealthMeta(data);
     filterAuthHealthItems();
     updateSortIndicators();
     renderAuthHealthTable();
@@ -461,8 +546,8 @@ async function loadAllAuthHealth() {
     initAuthHealthResizer();
     updateLoadMoreButton();
   } catch (error) {
-    if (body) body.innerHTML = `<tr><td colspan="10"><div class="auth-health-empty"><div class="auth-health-empty-icon">⚠️</div><div>${error.message || t('common.requestFailed', '加载失败')}</div></div></td></tr>`;
+    if (body) body.innerHTML = `<tr><td colspan="7"><div class="auth-health-empty"><div class="auth-health-empty-icon">!</div><div>${error.message || t('common.requestFailed', '加载失败')}</div></div></td></tr>`;
   } finally {
-    if (btn) btn.disabled = false;
+    updateLoadMoreButton();
   }
 }

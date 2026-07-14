@@ -48,6 +48,8 @@ ROOT_DIR = PROXY_ROOT
 PROJECT_ROOT = PROXY_ROOT
 APP_DIR = PROXY_ROOT
 MEDIA_PROXY_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI-MediaProxy'
+ACCESS_GATEWAY_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI-AccessGateway'
+ACCESS_GATEWAY_BINARY = Path(os.environ.get('CLIPROXYAPI_ACCESS_GATEWAY_BINARY', '')).expanduser() if os.environ.get('CLIPROXYAPI_ACCESS_GATEWAY_BINARY', '').strip() else ACCESS_GATEWAY_ROOT / ('cli-access-gateway.exe' if os.name == 'nt' else 'cli-access-gateway')
 
 LEGACY_DEV_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI_dev'
 LEGACY_APP_DIR = LEGACY_DEV_ROOT / 'app'
@@ -112,6 +114,8 @@ PROXY_STDOUT = LOGS_DIR / 'proxy.stdout.log'
 PROXY_STDERR = LOGS_DIR / 'proxy.stderr.log'
 MEDIA_PROXY_STDOUT = LOGS_DIR / 'media-proxy.stdout.log'
 MEDIA_PROXY_STDERR = LOGS_DIR / 'media-proxy.stderr.log'
+ACCESS_GATEWAY_STDOUT = LOGS_DIR / 'access-gateway.stdout.log'
+ACCESS_GATEWAY_STDERR = LOGS_DIR / 'access-gateway.stderr.log'
 RUNTIME_CONFIG = RUNTIME_DIR / 'cliproxyapi-active-config.yaml'
 REQUEST_LOG_DIR = LOGS_DIR / 'request_logs'
 REQUEST_ARCHIVE_DIR = LOGS_DIR / 'request_archive'

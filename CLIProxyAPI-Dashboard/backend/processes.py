@@ -21,11 +21,15 @@ from backend.paths import (
     RUNTIME_CONFIG,
     PROXY_ROOT,
     MEDIA_PROXY_ROOT,
+    ACCESS_GATEWAY_ROOT,
+    ACCESS_GATEWAY_BINARY,
     DASHBOARD_ROOT,
     STORAGE_DIR,
     LOGS_DIR,
     MEDIA_PROXY_STDOUT,
     MEDIA_PROXY_STDERR,
+    ACCESS_GATEWAY_STDOUT,
+    ACCESS_GATEWAY_STDERR,
     RUNTIME_VARIANT,
     POOL_AUTH_DIR,
 )
@@ -41,7 +45,7 @@ def get_process_name(pid):
         return psutil.Process(pid).name()
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
         return None
-processes = {'device_login': None, 'proxy': None, 'media_proxy': None, 'oauth_manager': None, 'openclaw': None}
+processes = {'device_login': None, 'proxy': None, 'access_gateway': None, 'media_proxy': None, 'oauth_manager': None, 'openclaw': None}
 tool_processes: dict = {}
 tool_states: dict = {}
 DEFAULT_TRUSTED_REMOTE_ADDRESSES = ['fd7a:115c:a1e0::9e39:c580', '100.89.197.128']
@@ -83,11 +87,30 @@ def _cli_unavailable_message():
 
 
 def _managed_proxy_process_names():
-    return {'cli-proxy-api.exe', 'cliproxyapi.exe', 'cli-proxy-api', 'cliproxyapi'}
+    return {'cli-proxy-api.exe', 'cliproxyapi.exe', 'cli-proxy-api', 'cliproxyapi', 'cli-access-gateway.exe', 'cli-access-gateway'}
+
+
+def core_proxy_port():
+    return 8318
 
 
 def media_proxy_port():
     return 8320
+
+
+def wait_for_listener(port: int, proc=None, timeout_seconds: float = 30.0):
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if proc is not None and proc.poll() is not None:
+            return False
+        if find_proxy_listener_pid(port):
+            return True
+        try:
+            with socket.create_connection(('127.0.0.1', port), timeout=0.4):
+                return True
+        except OSError:
+            time.sleep(0.2)
+    return False
 
 
 def _tool_log_path(tool_logs_dir, tool_id: str, suffix='stdout'):
@@ -438,15 +461,6 @@ def normalize_remote_addresses(value):
     return addresses
 
 
-def normalize_external_remote_addresses(value):
-    if value in (None, '', []):
-        raise ValueError('At least one external source IP or CIDR is required.')
-    addresses = normalize_remote_addresses(value)
-    if any(str(addr).lower() == 'localsubnet' for addr in addresses):
-        raise ValueError('LocalSubnet is not allowed here. Use specific external IPs or CIDR ranges.')
-    return addresses
-
-
 def _custom_firewall_rule(port: int, protocol: str = 'TCP'):
     protocol = str(protocol or 'TCP').upper()
     return {
@@ -631,179 +645,6 @@ def remove_custom_firewall_ports(ports, protocols=None, elevated: bool = True):
             'message': f'Failed to request administrator approval: {exc}',
             'firewall': current,
         }
-
-
-def _external_firewall_rule(port: int, protocol: str = 'TCP'):
-    protocol = str(protocol or 'TCP').upper()
-    return {
-        'id': f'external-{protocol.lower()}-{port}',
-        'display_name': f'CLIProxyAPI External {protocol} {port}',
-        'port': int(port),
-        'protocol': protocol,
-        'description': f'Allow selected external IPs to access {protocol} port {port}',
-    }
-
-
-def external_firewall_status(ports, protocols=None):
-    normalized = normalize_firewall_ports(ports) if ports else []
-    normalized_protocols = normalize_firewall_protocols(protocols or ['TCP'])
-    rules = [
-        _firewall_rule_status(_external_firewall_rule(port, protocol))
-        for port in normalized
-        for protocol in normalized_protocols
-    ]
-    return {
-        'supported': bool(is_windows() and command_exists('powershell')),
-        'ports': normalized,
-        'protocols': normalized_protocols,
-        'rules': rules,
-        'all_ok': bool(rules and all(rule.get('ok') for rule in rules)),
-    }
-
-
-def _external_firewall_apply_script(ports, protocols=None, remote_addresses=None):
-    normalized = normalize_firewall_ports(ports)
-    normalized_protocols = normalize_firewall_protocols(protocols or ['TCP'])
-    normalized_remote = normalize_external_remote_addresses(remote_addresses)
-    rows = '\n'.join(
-        f"  @{{ Name='CLIProxyAPI External {protocol} {port}'; Protocol='{protocol}'; Port='{port}'; Desc='Allow selected external IPs to access {protocol} port {port}' }}"
-        for port in normalized
-        for protocol in normalized_protocols
-    )
-    remote_rows = ', '.join(f"'{addr}'" for addr in normalized_remote)
-    return f"""
-$ErrorActionPreference = 'Stop'
-$remoteAddresses = @({remote_rows})
-$rules = @(
-{rows}
-)
-foreach ($rule in $rules) {{
-  $existing = Get-NetFirewallRule -DisplayName $rule.Name -ErrorAction SilentlyContinue
-  if ($existing) {{
-    Set-NetFirewallRule -DisplayName $rule.Name -Enabled True -Direction Inbound -Action Allow -Profile Any
-    Set-NetFirewallPortFilter -AssociatedNetFirewallRule $existing -Protocol $rule.Protocol -LocalPort $rule.Port
-    Set-NetFirewallAddressFilter -AssociatedNetFirewallRule $existing -RemoteAddress $remoteAddresses
-  }} else {{
-    New-NetFirewallRule -DisplayName $rule.Name -Direction Inbound -Action Allow -Protocol $rule.Protocol -LocalPort $rule.Port -RemoteAddress $remoteAddresses -Profile Any -Description $rule.Desc | Out-Null
-  }}
-}}
-"""
-
-
-def _external_firewall_remove_script(ports, protocols=None):
-    normalized = normalize_firewall_ports(ports)
-    normalized_protocols = normalize_firewall_protocols(protocols or ['TCP'])
-    rows = '\n'.join(
-        f"  'CLIProxyAPI External {protocol} {port}'"
-        for port in normalized
-        for protocol in normalized_protocols
-    )
-    return f"""
-$ErrorActionPreference = 'Stop'
-$rules = @(
-{rows}
-)
-foreach ($name in $rules) {{
-  Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-}}
-"""
-
-
-def ensure_external_firewall_ports(ports, protocols=None, remote_addresses=None, elevated: bool = True):
-    normalized = normalize_firewall_ports(ports)
-    normalized_protocols = normalize_firewall_protocols(protocols or ['TCP'])
-    if not normalized:
-        return {'ok': False, 'message': 'No ports were provided.', 'firewall': external_firewall_status([], normalized_protocols)}
-    normalize_external_remote_addresses(remote_addresses)
-    if not is_windows() or not command_exists('powershell'):
-        return {
-            'ok': False,
-            'message': 'External firewall access is only supported on Windows with PowerShell.',
-            'firewall': external_firewall_status(normalized, normalized_protocols),
-        }
-    current = external_firewall_status(normalized, normalized_protocols)
-    script = _external_firewall_apply_script(normalized, normalized_protocols, remote_addresses)
-    try:
-        subprocess.run(
-            ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script],
-            check=True,
-            text=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            timeout=12,
-            creationflags=_creationflags(),
-        )
-        return {'ok': True, 'message': 'External firewall rules are enabled.', 'firewall': external_firewall_status(normalized, normalized_protocols)}
-    except subprocess.CalledProcessError as exc:
-        if not elevated:
-            return {'ok': False, 'message': str(exc.stderr or '').strip() or 'Failed to update external firewall rules.', 'firewall': current}
-    except Exception as exc:
-        if not elevated:
-            return {'ok': False, 'message': str(exc), 'firewall': current}
-    encoded = base64.b64encode(script.encode('utf-16le')).decode('ascii')
-    try:
-        subprocess.Popen(
-            ['powershell', '-NoProfile', '-Command', f"Start-Process -Verb RunAs -FilePath powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','{encoded}')"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=_creationflags(),
-        )
-        return {
-            'ok': True,
-            'pending_elevation': True,
-            'message': 'Administrator approval was requested. Confirm the UAC prompt, then refresh this panel.',
-            'firewall': current,
-        }
-    except Exception as exc:
-        return {'ok': False, 'message': f'Failed to request administrator approval: {exc}', 'firewall': current}
-
-
-def remove_external_firewall_ports(ports, protocols=None, elevated: bool = True):
-    normalized = normalize_firewall_ports(ports)
-    normalized_protocols = normalize_firewall_protocols(protocols or ['TCP'])
-    if not normalized:
-        return {'ok': False, 'message': 'No ports were provided.', 'firewall': external_firewall_status([], normalized_protocols)}
-    if not is_windows() or not command_exists('powershell'):
-        return {
-            'ok': False,
-            'message': 'External firewall remove is only supported on Windows with PowerShell.',
-            'firewall': external_firewall_status(normalized, normalized_protocols),
-        }
-    current = external_firewall_status(normalized, normalized_protocols)
-    script = _external_firewall_remove_script(normalized, normalized_protocols)
-    try:
-        subprocess.run(
-            ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script],
-            check=True,
-            text=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            timeout=12,
-            creationflags=_creationflags(),
-        )
-        return {'ok': True, 'message': 'External firewall rules are removed.', 'firewall': external_firewall_status(normalized, normalized_protocols)}
-    except subprocess.CalledProcessError as exc:
-        if not elevated:
-            return {'ok': False, 'message': str(exc.stderr or '').strip() or 'Failed to remove external firewall rules.', 'firewall': current}
-    except Exception as exc:
-        if not elevated:
-            return {'ok': False, 'message': str(exc), 'firewall': current}
-    encoded = base64.b64encode(script.encode('utf-16le')).decode('ascii')
-    try:
-        subprocess.Popen(
-            ['powershell', '-NoProfile', '-Command', f"Start-Process -Verb RunAs -FilePath powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','{encoded}')"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=_creationflags(),
-        )
-        return {
-            'ok': True,
-            'pending_elevation': True,
-            'message': 'Administrator approval was requested. Confirm the UAC prompt, then refresh this panel.',
-            'firewall': current,
-        }
-    except Exception as exc:
-        return {'ok': False, 'message': f'Failed to request administrator approval: {exc}', 'firewall': current}
 
 
 def _portproxy_rows():
@@ -1347,19 +1188,30 @@ def _openclaw_command():
     return ['openclaw', 'gateway']
 
 
+def _openclaw_launch_details(command=None):
+    return {
+        'command': command or _openclaw_command(),
+        'cwd': str(OPENCLAW_HOME if OPENCLAW_HOME.exists() else PROXY_ROOT),
+        'stdout': str(OPENCLAW_STDOUT),
+        'stderr': str(OPENCLAW_STDERR),
+    }
+
+
 def start_openclaw_gateway():
     _openclaw_pid_cache['time'] = 0
     with process_lock:
         proc = processes.get('openclaw')
-        if process_alive(proc) or find_openclaw_gateway_pid():
-            return {'ok': True, 'message': 'OpenClaw gateway is already running.'}
+        running_pid = proc.pid if process_alive(proc) else find_openclaw_gateway_pid()
+        if running_pid:
+            return {'ok': True, 'message': 'OpenClaw gateway is already running.', 'pid': running_pid, **_openclaw_launch_details()}
 
         try:
             LOGS_DIR.mkdir(parents=True, exist_ok=True)
             fout = open(OPENCLAW_STDOUT, 'w', encoding='utf-8', errors='ignore')
             ferr = open(OPENCLAW_STDERR, 'w', encoding='utf-8', errors='ignore')
+            command = _openclaw_command()
             proc = subprocess.Popen(
-                _openclaw_command(),
+                command,
                 cwd=str(OPENCLAW_HOME if OPENCLAW_HOME.exists() else PROXY_ROOT),
                 stdout=fout,
                 stderr=ferr,
@@ -1369,9 +1221,14 @@ def start_openclaw_gateway():
             processes['openclaw'] = proc
             _openclaw_pid_cache['value'] = proc.pid
             _openclaw_pid_cache['time'] = time.time()
-            return {'ok': True, 'message': 'Started OpenClaw gateway.', 'pid': proc.pid}
+            return {
+                'ok': True,
+                'message': 'Started OpenClaw gateway. It may take a minute or two to become ready.',
+                'pid': proc.pid,
+                **_openclaw_launch_details(command),
+            }
         except Exception as exc:
-            return {'ok': False, 'message': f'Failed to start OpenClaw gateway: {exc}'}
+            return {'ok': False, 'message': f'Failed to start OpenClaw gateway: {exc}', **_openclaw_launch_details()}
 
 
 def stop_openclaw_gateway():
@@ -1679,6 +1536,8 @@ def stop_device_login():
 def start_proxy():
     if not _cli_binary_ready():
         return {'ok': False, 'message': _cli_unavailable_message()}
+    if not ACCESS_GATEWAY_BINARY.is_file():
+        return {'ok': False, 'message': f'Access gateway binary was not found: {ACCESS_GATEWAY_BINARY}. Run CLIProxyAPI-AccessGateway/build.ps1 first.'}
     state = load_state()
     auth_files = list_auth_files()
     has_active_auth_files = bool(auth_files)
@@ -1690,22 +1549,24 @@ def start_proxy():
     if socket_issue:
         return {'ok': False, 'message': socket_issue}
     with process_lock:
-        if process_alive(processes.get('proxy')):
+        if process_alive(processes.get('proxy')) and process_alive(processes.get('access_gateway')):
             return {'ok': True, 'message': 'RelayX is already running.'}
-        listener_pid = find_proxy_listener_pid()
-        if listener_pid:
+        for port in (8317, core_proxy_port()):
+            listener_pid = find_proxy_listener_pid(port)
+            if not listener_pid:
+                continue
             process_name = get_process_name(listener_pid)
             normalized_name = str(process_name or '').strip().lower()
-            if normalized_name in _managed_proxy_process_names():
-                if not stop_pid(listener_pid):
-                    return {'ok': False, 'message': f'Port 8317 is occupied by existing RelayX (PID {listener_pid}) and could not be stopped.'}
-                time.sleep(0.5)
-            else:
+            if normalized_name not in _managed_proxy_process_names():
                 label = process_name or f'PID {listener_pid}'
-                return {'ok': False, 'message': f'Port 8317 is occupied by {label}. Please stop it first.'}
+                return {'ok': False, 'message': f'Port {port} is occupied by {label}. Please stop it first.'}
+            if not stop_pid(listener_pid):
+                return {'ok': False, 'message': f'Port {port} is occupied by existing RelayX (PID {listener_pid}) and could not be stopped.'}
+            time.sleep(0.3)
         try:
             build_runtime_config(
-                bind_host=bind_host,
+                bind_host='127.0.0.1',
+                listen_port=core_proxy_port(),
                 access_api_keys=[access_api_key],
                 state=state,
             )
@@ -1726,6 +1587,22 @@ def start_proxy():
         stderr = open(PROXY_STDERR, 'a', encoding='utf-8', errors='ignore')
         proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), stdout=stdout, stderr=stderr, stdin=subprocess.DEVNULL, creationflags=_creationflags(), env=merged_env)
         processes['proxy'] = proc
+        if not wait_for_listener(core_proxy_port(), proc=proc):
+            kill_process(proc)
+            processes['proxy'] = None
+            return {'ok': False, 'message': f'CPA core did not become ready on 127.0.0.1:{core_proxy_port()}. Check {PROXY_STDERR}.'}
+        ACCESS_GATEWAY_STDOUT.parent.mkdir(parents=True, exist_ok=True)
+        gateway_stdout = open(ACCESS_GATEWAY_STDOUT, 'a', encoding='utf-8', errors='ignore')
+        gateway_stderr = open(ACCESS_GATEWAY_STDERR, 'a', encoding='utf-8', errors='ignore')
+        gateway_cmd = [str(ACCESS_GATEWAY_BINARY), '-listen', f'{bind_host}:8317', '-upstream', f'http://127.0.0.1:{core_proxy_port()}', '-config', str(RUNTIME_CONFIG)]
+        gateway_proc = subprocess.Popen(gateway_cmd, cwd=str(ACCESS_GATEWAY_ROOT), stdout=gateway_stdout, stderr=gateway_stderr, stdin=subprocess.DEVNULL, creationflags=_creationflags())
+        processes['access_gateway'] = gateway_proc
+        if not wait_for_listener(8317, proc=gateway_proc):
+            kill_process(gateway_proc)
+            kill_process(proc)
+            processes['access_gateway'] = None
+            processes['proxy'] = None
+            return {'ok': False, 'message': f'Access gateway did not become ready on {bind_host}:8317. Check {ACCESS_GATEWAY_STDERR}.'}
     selected_items = auth_files
     state['selected_auth_refs'] = [item.get('id') for item in selected_items]
     state['selected_auths'] = [item.get('name') for item in selected_items]
@@ -1744,13 +1621,17 @@ def start_proxy():
 
 def stop_proxy():
     with process_lock:
+        gateway_stopped = kill_process(processes.get('access_gateway'))
+        processes['access_gateway'] = None
         proc = processes.get('proxy')
         stopped = kill_process(proc)
         processes['proxy'] = None
-    if not stopped:
-        listener_pid = find_proxy_listener_pid()
+    for port in (8317, core_proxy_port()):
+        listener_pid = find_proxy_listener_pid(port)
         if listener_pid:
-            stopped = stop_pid(listener_pid)
+            process_name = str(get_process_name(listener_pid) or '').strip().lower()
+            if process_name in _managed_proxy_process_names():
+                stopped = stop_pid(listener_pid) or stopped
     state = load_state()
     state['applied_auth'] = None
     state['applied_auth_ref'] = None
@@ -1759,7 +1640,7 @@ def stop_proxy():
     state['last_proxy_bind_host'] = None
     state['last_proxy_api_key'] = None
     save_state(state)
-    return {'ok': True, 'message': 'Stopped RelayX.' if stopped else 'RelayX was not running.'}
+    return {'ok': True, 'message': 'Stopped RelayX.' if (stopped or gateway_stopped) else 'RelayX was not running.'}
 
 
 def restart_proxy():
@@ -1848,7 +1729,7 @@ def current_status(include_logs: bool = True):
     selected_display = f'{len(selected_items)} active file(s)'
     applied_display = f'{len(applied_items)} active file(s)' if applied_items else None
 
-    tracked_proxy_running = process_alive(processes.get('proxy'))
+    tracked_proxy_running = process_alive(processes.get('proxy')) and process_alive(processes.get('access_gateway'))
     tracked_media_proxy_running = process_alive(processes.get('media_proxy'))
     tracked_oauth_manager_running = process_alive(processes.get('oauth_manager'))
     tracked_openclaw_proc = processes.get('openclaw')
@@ -1860,7 +1741,7 @@ def current_status(include_logs: bool = True):
     listener_pid = find_proxy_listener_pid()
     media_proxy_pid = processes.get('media_proxy').pid if tracked_media_proxy_running else find_proxy_listener_pid(media_proxy_port())
     listener_process_name = get_process_name(listener_pid) if listener_pid else None
-    listener_is_proxy = bool(listener_pid and listener_process_name and listener_process_name.lower() == 'cli-proxy-api.exe')
+    listener_is_proxy = bool(listener_pid and listener_process_name and listener_process_name.lower() in _managed_proxy_process_names())
     proxy_running = bool(tracked_proxy_running or listener_is_proxy)
     bind_host = get_proxy_bind_host(state)
     effective_api_key = get_proxy_api_key(state)

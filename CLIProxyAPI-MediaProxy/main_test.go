@@ -143,16 +143,19 @@ func TestBuildDirectPayloadAgnesImageRequiresSize(t *testing.T) {
 
 func TestBuildDirectPayloadAgnesVideoShape(t *testing.T) {
 	payload, err := buildDirectPayload(ModelConfig{
-		Name:          "agnes-video-v2.0",
-		Type:          "video",
-		RequestFormat: "agnes-video",
+		Name:             "agnes-video-v2.0",
+		Type:             "video",
+		RequestFormat:    "agnes-video",
+		DefaultWidth:     1280,
+		DefaultHeight:    704,
+		DefaultNumFrames: 121,
+		DefaultFrameRate: 24,
 	}, map[string]any{
-		"model":      "alias",
-		"prompt":     "animate",
-		"images":     []any{"https://example.com/one.png", "https://example.com/two.png"},
-		"tags":       []any{"img2video"},
-		"num_frames": float64(121),
-		"frame_rate": float64(24),
+		"model":  "alias",
+		"prompt": "animate",
+		"images": []any{"https://example.com/one.png", "https://example.com/two.png"},
+		"size":   "1024x576",
+		"tags":   []any{"img2video"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -171,6 +174,15 @@ func TestBuildDirectPayloadAgnesVideoShape(t *testing.T) {
 	if _, ok := got["tags"]; ok {
 		t.Fatal("tags should be removed")
 	}
+	if _, ok := got["size"]; ok {
+		t.Fatal("size should be converted to width/height")
+	}
+	if got["width"] != float64(1024) || got["height"] != float64(576) {
+		t.Fatalf("width/height = %#v/%#v", got["width"], got["height"])
+	}
+	if got["num_frames"] != float64(121) || got["frame_rate"] != float64(24) {
+		t.Fatalf("num_frames/frame_rate = %#v/%#v", got["num_frames"], got["frame_rate"])
+	}
 	extra, ok := got["extra_body"].(map[string]any)
 	if !ok {
 		t.Fatalf("extra_body = %#v", got["extra_body"])
@@ -178,6 +190,32 @@ func TestBuildDirectPayloadAgnesVideoShape(t *testing.T) {
 	images, ok := extra["image"].([]any)
 	if !ok || len(images) != 2 {
 		t.Fatalf("extra_body.image = %#v", extra["image"])
+	}
+}
+
+func TestBuildDirectPayloadAgnesVideoSingleImageUsesTopLevelImage(t *testing.T) {
+	payload, err := buildDirectPayload(ModelConfig{
+		Name:          "agnes-video-v2.0",
+		Type:          "video",
+		RequestFormat: "agnes-video",
+	}, map[string]any{
+		"prompt": "animate",
+		"images": []any{"https://example.com/one.png"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["image"] != "https://example.com/one.png" {
+		t.Fatalf("top-level image = %#v", got["image"])
+	}
+	extra, _ := got["extra_body"].(map[string]any)
+	if _, ok := extra["image"]; ok {
+		t.Fatalf("single image should not be in extra_body: %#v", extra["image"])
 	}
 }
 
@@ -500,6 +538,10 @@ func testAgnesAuthProviderConfig() AuthProviderConfig {
 				Method:            http.MethodPost,
 				RequestFormat:     "agnes-video",
 				ResponseFormat:    "auto",
+				DefaultWidth:      1280,
+				DefaultHeight:     704,
+				DefaultNumFrames:  121,
+				DefaultFrameRate:  24,
 				PollIntervalMS:    3000,
 				PollTimeoutSecond: 180,
 			},

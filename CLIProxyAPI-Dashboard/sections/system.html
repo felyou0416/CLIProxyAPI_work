@@ -1,0 +1,73 @@
+<section id="section-system" class="panel panel-scroll section-view system-hub" hidden>
+  <div class="panel-head system-hub-head">
+    <div>
+      <div class="section-kicker" data-i18n="section.systemKicker">System</div>
+      <h2 class="section-title" data-i18n="section.systemTitle">系统中心</h2>
+      <p class="system-hub-subtitle" data-i18n="section.systemDesc">把网络、路由、部署、数据和高级策略收拢到一个入口，左侧导航保持干净。</p>
+    </div>
+    <div class="action-row">
+      <button class="secondary" type="button" onclick="refreshStatus()" data-i18n="btn.refresh">刷新</button>
+    </div>
+  </div>
+
+  <div class="system-hub-grid">
+    <article class="system-hub-card primary-card">
+      <div class="system-card-top">
+        <span class="system-card-dot"></span>
+        <span class="system-card-kicker">Access</span>
+      </div>
+      <h3>网络与入口</h3>
+      <p>本机地址、端口、外部访问和控制台入口。</p>
+      <div class="system-link-grid">
+        <button type="button" onclick="openSystemSection('network-access')">网络接入</button>
+        <button type="button" onclick="openSystemSection('firewall-access')">端口放行</button>
+        <button type="button" onclick="openSystemSection('home-config')">Home 控制面</button>
+      </div>
+    </article>
+
+    <article class="system-hub-card">
+      <div class="system-card-top">
+        <span class="system-card-dot route"></span>
+        <span class="system-card-kicker">Routing</span>
+      </div>
+      <h3>路由与代理</h3>
+      <p>模型默认代理、请求伪装和 AMP 兼容策略。</p>
+      <div class="system-link-grid">
+        <button type="button" onclick="openSystemSection('model-proxy')">模型代理</button>
+        <button type="button" onclick="openSystemSection('cloaking-config')">请求伪装</button>
+        <button type="button" onclick="openSystemSection('amp-config')">AMP 集成</button>
+        <button type="button" onclick="openSystemSection('cooldown')">冷却状态</button>
+      </div>
+    </article>
+
+    <article class="system-hub-card">
+      <div class="system-card-top">
+        <span class="system-card-dot deploy"></span>
+        <span class="system-card-kicker">Ops</span>
+      </div>
+      <h3>部署与数据</h3>
+      <p>Docker、存储后端、数据导入导出和维护工具。</p>
+      <div class="system-link-grid">
+        <button type="button" onclick="openSystemSection('docker-deploy')">Docker</button>
+        <button type="button" onclick="openSystemSection('storage-config')">存储后端</button>
+        <button type="button" onclick="openSystemSection('data-transfer')">导入导出</button>
+        <button type="button" onclick="openSystemSection('tools')">工具</button>
+      </div>
+    </article>
+
+    <article class="system-hub-card">
+      <div class="system-card-top">
+        <span class="system-card-dot advanced"></span>
+        <span class="system-card-kicker">Control</span>
+      </div>
+      <h3>高级控制</h3>
+      <p>低频但高影响的配置和本地维护入口。</p>
+      <div class="system-link-grid">
+        <button type="button" onclick="openSystemSection('advanced-config')">高级配置</button>
+        <button type="button" onclick="openSystemSection('settings')">面板设置</button>
+        <button type="button" onclick="openSystemSection('terminals')">终端</button>
+        <button type="button" onclick="openSystemSection('doc')">文档</button>
+      </div>
+    </article>
+  </div>
+</section>

@@ -56,6 +56,35 @@ function populateModelThinkingSelect() {
   });
 }
 
+function mergeModelThinkingCandidates(candidates, configs) {
+  const merged = new Map();
+  (Array.isArray(candidates) ? candidates : []).forEach((item) => {
+    const modelId = String(item?.model_id || '').trim();
+    if (!modelId) return;
+    merged.set(modelId.toLowerCase(), {
+      model_id: modelId,
+      provider: item.provider || '-',
+      upstream_id: item.upstream_id || '',
+      sources: Array.isArray(item.sources) && item.sources.length ? item.sources : ['candidate'],
+    });
+  });
+  Object.keys(configs || {}).forEach((modelId) => {
+    const key = String(modelId || '').trim().toLowerCase();
+    if (!key || merged.has(key)) return;
+    merged.set(key, {
+      model_id: modelId,
+      provider: '-',
+      upstream_id: '',
+      sources: ['configs'],
+    });
+  });
+  return Array.from(merged.values()).sort((left, right) => {
+    const providerCompare = String(left.provider || '').localeCompare(String(right.provider || ''));
+    if (providerCompare) return providerCompare;
+    return String(left.model_id || '').localeCompare(String(right.model_id || ''));
+  });
+}
+
 function addManualModelThinkingRow() {
   const input = document.getElementById('model-thinking-add-id');
   if (!input) return;
@@ -218,19 +247,9 @@ async function loadModelThinkingPanel(force = false) {
   modelThinkingLoading = true;
   try {
     const data = await api('/api/model-thinking-configs', 'GET');
-    modelThinkingCandidates = [];
     modelThinkingConfigs = data.configs && typeof data.configs === 'object' ? data.configs : {};
     modelThinkingAllModels = Array.isArray(data.all_models) ? data.all_models : [];
-
-    // Populate candidates list ONLY with actually configured models
-    Object.keys(modelThinkingConfigs).forEach((modelId) => {
-      modelThinkingCandidates.push({
-        model_id: modelId,
-        provider: '-',
-        upstream_id: '',
-        sources: ['configs'],
-      });
-    });
+    modelThinkingCandidates = mergeModelThinkingCandidates(data.candidates, modelThinkingConfigs);
 
     populateModelThinkingSelect();
     renderModelThinkingPanel();

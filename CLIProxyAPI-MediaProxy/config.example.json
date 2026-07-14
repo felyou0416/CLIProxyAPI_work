@@ -25,6 +25,10 @@
           "method": "POST",
           "request_format": "agnes-video",
           "response_format": "auto",
+          "default_width": 1280,
+          "default_height": 704,
+          "default_num_frames": 121,
+          "default_frame_rate": 24,
           "poll_interval_ms": 3000,
           "poll_timeout_seconds": 180
         }

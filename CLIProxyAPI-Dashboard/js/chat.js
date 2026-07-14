@@ -1,34 +1,210 @@
 /* ─── Chat Module ─── */
 const CHAT_STORAGE_KEY = 'cliproxyapi_chat_sessions';
 const CHAT_ACTIVE_KEY  = 'cliproxyapi_chat_active';
+const CHAT_ACTIVE_BY_MODE_KEY = 'cliproxyapi_chat_active_by_mode';
 const CHAT_MODE_KEY = 'cliproxyapi_chat_mode';
 const MAX_SESSIONS = 20;
 
 let chatContext = [];
 let isGenerating = false;
 let chatSessions = [];   // [{id, title, model, messages, ts}]
+let chatSessionsLoaded = false;
 let activeSessionId = null;
-let chatMode = localStorage.getItem(CHAT_MODE_KEY) || 'chat';
+let activeSessionIdsByMode = {};
+let chatMode = normalizeChatMode(localStorage.getItem(CHAT_MODE_KEY));
+let chatRequestSeq = 0;
+const chatRequestViews = {};
+
+function normalizeChatMode(mode) {
+  return mode === 'image' ? 'image' : mode === 'video' ? 'video' : 'chat';
+}
 
 // ─── Persistence helpers ───
 function loadChatSessions() {
+  if (chatSessionsLoaded) {
+    activeSessionId = activeSessionIdsByMode[chatMode] || null;
+    return;
+  }
   try {
     chatSessions = JSON.parse(localStorage.getItem(CHAT_STORAGE_KEY) || '[]');
   } catch { chatSessions = []; }
-  activeSessionId = localStorage.getItem(CHAT_ACTIVE_KEY) || null;
+  chatSessions = Array.isArray(chatSessions) ? chatSessions : [];
+  chatSessions.forEach((session) => {
+    session.mode = normalizeChatMode(session.mode);
+    session.messages = Array.isArray(session.messages) ? session.messages : [];
+    session.ts = Number(session.ts || 0) || Date.now();
+    session.status = session.status || 'idle';
+    session.pendingRequestId = session.pendingRequestId || '';
+    session.pendingMode = session.pendingRequestId ? normalizeChatMode(session.pendingMode || session.mode) : '';
+    session.pendingStartedAt = Number(session.pendingStartedAt || 0) || 0;
+    session.pendingDraftText = typeof session.pendingDraftText === 'string' ? session.pendingDraftText : '';
+    session.pendingError = session.pendingError || '';
+  });
+  try {
+    const stored = JSON.parse(localStorage.getItem(CHAT_ACTIVE_BY_MODE_KEY) || '{}');
+    activeSessionIdsByMode = stored && typeof stored === 'object' ? stored : {};
+  } catch {
+    activeSessionIdsByMode = {};
+  }
+  const legacyActiveId = localStorage.getItem(CHAT_ACTIVE_KEY) || null;
+  const legacySession = legacyActiveId ? chatSessions.find(s => s.id === legacyActiveId) : null;
+  if (legacySession && !activeSessionIdsByMode[legacySession.mode]) {
+    activeSessionIdsByMode[legacySession.mode] = legacySession.id;
+  }
+  ['chat', 'image', 'video'].forEach((mode) => {
+    const id = activeSessionIdsByMode[mode];
+    const found = id ? chatSessions.find(s => s.id === id && normalizeChatMode(s.mode) === mode) : null;
+    if (!found) {
+      const latest = getModeSessions(mode)[0];
+      if (latest) activeSessionIdsByMode[mode] = latest.id;
+      else delete activeSessionIdsByMode[mode];
+    }
+  });
+  activeSessionId = activeSessionIdsByMode[chatMode] || null;
+  chatSessionsLoaded = true;
 }
 
 function saveChatSessions() {
-  // Trim to MAX_SESSIONS
-  if (chatSessions.length > MAX_SESSIONS) {
-    chatSessions = chatSessions.slice(-MAX_SESSIONS);
-  }
+  ['chat', 'image', 'video'].forEach((mode) => {
+    const modeSessions = chatSessions
+      .filter(s => normalizeChatMode(s.mode) === mode)
+      .sort((left, right) => Number(right.ts || 0) - Number(left.ts || 0));
+    const keepIds = new Set(modeSessions.slice(0, MAX_SESSIONS).map(s => s.id));
+    chatSessions = chatSessions.filter(s => normalizeChatMode(s.mode) !== mode || keepIds.has(s.id));
+    if (activeSessionIdsByMode[mode] && !keepIds.has(activeSessionIdsByMode[mode])) {
+      const next = modeSessions.find(s => keepIds.has(s.id));
+      if (next) activeSessionIdsByMode[mode] = next.id;
+      else delete activeSessionIdsByMode[mode];
+    }
+  });
+  activeSessionId = activeSessionIdsByMode[chatMode] || null;
   localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatSessions));
   localStorage.setItem(CHAT_ACTIVE_KEY, activeSessionId || '');
+  localStorage.setItem(CHAT_ACTIVE_BY_MODE_KEY, JSON.stringify(activeSessionIdsByMode));
 }
 
 function getActiveSession() {
-  return chatSessions.find(s => s.id === activeSessionId) || null;
+  const session = chatSessions.find(s => s.id === activeSessionId) || null;
+  return session && normalizeChatMode(session.mode) === chatMode ? session : null;
+}
+
+function isSessionRunning(session) {
+  return !!(session && session.status === 'running' && session.pendingRequestId);
+}
+
+function isCurrentSessionRunning() {
+  return isSessionRunning(getActiveSession());
+}
+
+function getSessionModeLabel(mode) {
+  const normalized = normalizeChatMode(mode);
+  if (normalized === 'image') return 'Image';
+  if (normalized === 'video') return 'Video';
+  return 'Assistant';
+}
+
+function makeChatRequestId() {
+  chatRequestSeq += 1;
+  return `r_${Date.now()}_${chatRequestSeq}`;
+}
+
+function isSessionVisible(session) {
+  return !!(session && session.id === activeSessionId && normalizeChatMode(session.mode) === chatMode);
+}
+
+function markSessionRunning(session, mode, requestId) {
+  if (!session) return;
+  session.status = 'running';
+  session.pendingRequestId = requestId;
+  session.pendingMode = normalizeChatMode(mode || session.mode);
+  session.pendingStartedAt = Date.now();
+  session.pendingDraftText = '';
+  session.pendingError = '';
+  session.ts = Date.now();
+  saveChatSessions();
+}
+
+function markSessionDraft(session, requestId, draftText, forceSave = false) {
+  if (!session || session.pendingRequestId !== requestId) return;
+  session.pendingDraftText = draftText || '';
+  session.ts = Date.now();
+  const view = chatRequestViews[requestId];
+  if (view?.contentDiv?.isConnected) {
+    if (session.pendingDraftText) updateBotMessageContent(view.contentDiv, session.pendingDraftText, false);
+    else view.contentDiv.innerHTML = `<div class="typing-indicator"><span></span><span></span><span></span></div>`;
+    if (view.history?.isConnected) {
+      requestAnimationFrame(() => view.history.scrollTo({ top: view.history.scrollHeight, behavior: 'smooth' }));
+    }
+  }
+  if (forceSave || !session._lastPendingSaveAt || Date.now() - session._lastPendingSaveAt > 300) {
+    Object.defineProperty(session, '_lastPendingSaveAt', {
+      value: Date.now(),
+      writable: true,
+      configurable: true
+    });
+    saveChatSessions();
+  }
+}
+
+function clearSessionPending(session) {
+  if (!session) return;
+  delete session._lastPendingSaveAt;
+  session.pendingRequestId = '';
+  session.pendingMode = '';
+  session.pendingStartedAt = 0;
+  session.pendingDraftText = '';
+  session.pendingError = '';
+}
+
+function finalizeSessionReply(session, requestId, replyText) {
+  if (!session || session.pendingRequestId !== requestId) return;
+  const content = replyText || session.pendingDraftText || '';
+  if (content) session.messages.push({ role: 'assistant', content });
+  session.status = 'idle';
+  clearSessionPending(session);
+  session.ts = Date.now();
+  saveChatSessions();
+  delete chatRequestViews[requestId];
+  if (isSessionVisible(session)) {
+    restoreChatSessionView(session);
+    renderChatHistoryList();
+  }
+}
+
+function markSessionFailed(session, requestId, message) {
+  if (!session || session.pendingRequestId !== requestId) return;
+  session.status = 'error';
+  session.pendingError = message || 'Request failed';
+  session.ts = Date.now();
+  saveChatSessions();
+  delete chatRequestViews[requestId];
+  if (isSessionVisible(session)) {
+    restoreChatSessionView(session);
+    renderChatHistoryList();
+  }
+}
+
+function updateChatGeneratingState() {
+  isGenerating = isCurrentSessionRunning();
+}
+
+function getModeSessions(mode = chatMode) {
+  const normalized = normalizeChatMode(mode);
+  return chatSessions
+    .filter(s => normalizeChatMode(s.mode) === normalized)
+    .sort((left, right) => Number(right.ts || 0) - Number(left.ts || 0));
+}
+
+function setActiveSessionForMode(mode, id) {
+  const normalized = normalizeChatMode(mode);
+  const found = id ? chatSessions.find(s => s.id === id && normalizeChatMode(s.mode) === normalized) : null;
+  if (found) {
+    activeSessionIdsByMode[normalized] = found.id;
+    if (normalized === chatMode) activeSessionId = found.id;
+  } else {
+    delete activeSessionIdsByMode[normalized];
+    if (normalized === chatMode) activeSessionId = null;
+  }
 }
 
 function generateSessionId() {
@@ -53,15 +229,19 @@ function isMediaMode() {
 }
 
 function setChatMode(mode) {
-  chatMode = mode === 'image' ? 'image' : mode === 'video' ? 'video' : 'chat';
+  chatMode = normalizeChatMode(mode);
   localStorage.setItem(CHAT_MODE_KEY, chatMode);
+  activeSessionId = activeSessionIdsByMode[chatMode] || null;
   const session = getActiveSession();
-  if (session) {
-    session.mode = chatMode;
-    session.ts = Date.now();
-    saveChatSessions();
-    renderChatHistoryList();
+  if (session) restoreChatSessionView(session);
+  else {
+    const sp = document.getElementById('chat-system-prompt');
+    if (sp) sp.value = '';
+    chatContext = [];
+    clearChatView();
   }
+  saveChatSessions();
+  renderChatHistoryList();
   syncChatModeUI();
 }
 
@@ -168,6 +348,7 @@ function syncChatModeUI() {
 
   const history = document.getElementById('chat-history');
   if (history && history.querySelector('.chat-welcome')) renderChatWelcome();
+  renderChatHistoryList();
   updateChatSendState();
 }
 
@@ -197,11 +378,28 @@ function getImageOptions() {
 function getVideoOptions() {
   const numFrames = Number(document.getElementById('video-frames-select')?.value || 81);
   const frameRate = Number(document.getElementById('video-frame-rate-select')?.value || 24);
-  return {
+  const withAudio = Boolean(document.getElementById('video-audio-toggle')?.checked);
+  const audioPrompt = (document.getElementById('video-audio-prompt')?.value || '').trim();
+  const options = {
+    num_frames: numFrames,
+    frame_rate: frameRate,
+    generate_audio: withAudio,
+    with_audio: withAudio,
     extra_body: {
       num_frames: numFrames,
       frame_rate: frameRate
     }
+  };
+  if (audioPrompt) {
+    options.audio_prompt = audioPrompt;
+    options.extra_body.audio_prompt = audioPrompt;
+  }
+  if (withAudio) {
+    options.extra_body.generate_audio = true;
+    options.extra_body.with_audio = true;
+  }
+  return {
+    ...options
   };
 }
 
@@ -248,10 +446,65 @@ async function chatFetchFirstJson(paths, method = 'GET', body) {
     try {
       return await chatFetchJson(path, method, body);
     } catch (err) {
+      err.requestPath = path;
       lastError = err;
     }
   }
   throw lastError || new Error('Request failed');
+}
+
+function extractVideoResultFromPayload(payload) {
+  const root = payload && typeof payload === 'object' ? payload : {};
+  const pick = (obj, path) => {
+    let current = obj;
+    for (const part of path.split('.')) {
+      if (!current || typeof current !== 'object' || !(part in current)) return '';
+      current = current[part];
+    }
+    return typeof current === 'string' || typeof current === 'number' ? String(current).trim() : '';
+  };
+  for (const path of ['video.url', 'video_url', 'url', 'data.url', 'output.video.url']) {
+    const url = pick(root, path);
+    if (url) return { url, id: '' };
+  }
+  if (Array.isArray(root.data)) {
+    for (const item of root.data) {
+      const nested = extractVideoResultFromPayload(item);
+      if (nested.url || nested.id) return nested;
+    }
+  }
+  for (const path of ['video_id', 'request_id', 'task_id', 'id', 'data.id']) {
+    const id = pick(root, path);
+    if (id) return { url: '', id };
+  }
+  return { url: '', id: '' };
+}
+
+function chatCompletionText(response) {
+  return response?.choices?.[0]?.message?.content || '';
+}
+
+async function requestVideoGenerationFallback(model, prompt, options) {
+  const directPayload = {
+    model,
+    prompt,
+    stream: false,
+    ...options
+  };
+  const response = await chatFetchFirstJson(['/api/video-generation', '/v1/videos/generations'], 'POST', directPayload);
+  const result = extractVideoResultFromPayload(response);
+  if (result.url) return `[video](${result.url})`;
+  if (result.id) {
+    try {
+      const retrieved = await chatFetchJson(`/v1/videos/${encodeURIComponent(result.id)}?model=${encodeURIComponent(model)}`, 'GET');
+      const retrievedResult = extractVideoResultFromPayload(retrieved);
+      if (retrievedResult.url) return `[video](${retrievedResult.url})`;
+    } catch (err) {
+      console.warn('Video retrieve fallback failed', err);
+    }
+    return `Video generation task created: ${result.id}\n\nThe provider returned a task id but no playable URL yet.`;
+  }
+  throw new Error('Video response did not include a playable URL or task id.');
 }
 
 function modelsFromProviderItems(items) {
@@ -285,10 +538,16 @@ function createNewSession(silent) {
     mode: chatMode,
     systemPrompt: '',
     messages: [],   // [{role, content}]
+    status: 'idle',
+    pendingRequestId: '',
+    pendingMode: '',
+    pendingStartedAt: 0,
+    pendingDraftText: '',
+    pendingError: '',
     ts: Date.now()
   };
   chatSessions.push(session);
-  activeSessionId = id;
+  setActiveSessionForMode(chatMode, id);
   chatContext = [];
   saveChatSessions();
   if (!silent) {
@@ -300,53 +559,99 @@ function createNewSession(silent) {
   return session;
 }
 
-function switchToSession(id) {
-  const session = chatSessions.find(s => s.id === id);
-  if (!session) return;
-  activeSessionId = id;
-  if (session.mode) {
-    chatMode = session.mode === 'image' ? 'image' : session.mode === 'video' ? 'video' : 'chat';
-    localStorage.setItem(CHAT_MODE_KEY, chatMode);
+function restoreChatSessionView(session) {
+  if (!session) {
+    chatContext = [];
+    clearChatView();
+    return;
   }
-  saveChatSessions();
 
-  // Restore model
   const sel = document.getElementById('chat-model-select');
   if (sel && session.model) sel.value = session.model;
 
-  // Restore system prompt
   const sp = document.getElementById('chat-system-prompt');
   if (sp) sp.value = session.systemPrompt || '';
 
-  // Rebuild context & DOM
   chatContext = [];
   clearChatView();
   session.messages.forEach(m => {
-    appendMessage(m.role, m.content, true); // quiet = no save
-    chatContext.push({ role: m.role, content: m.content });
+    appendMessage(m.role, m.content, true);
+    if (!isMediaMode()) chatContext.push({ role: m.role, content: m.content });
   });
-  // Prepend system prompt into context
-  if (session.systemPrompt) {
+  if (!isMediaMode() && session.systemPrompt) {
     chatContext.unshift({ role: 'system', content: session.systemPrompt });
   }
+  renderPendingSessionState(session);
+  updateChatGeneratingState();
+  updateChatSendState();
+}
+
+function renderPendingSessionState(session) {
+  if (!session || (!isSessionRunning(session) && session.status !== 'error')) return;
+  const history = document.getElementById('chat-history');
+  if (!history) return;
+  const welcome = history.querySelector('.chat-welcome');
+  if (welcome) welcome.remove();
+  const requestId = session.pendingRequestId || `error_${session.id}`;
+  const msgDiv = document.createElement('div');
+  msgDiv.className = `chat-message ${session.status === 'error' ? 'error' : 'assistant'}`;
+  const metaDiv = document.createElement('div');
+  metaDiv.className = 'chat-message-meta';
+  metaDiv.innerHTML = `${session.status === 'error' ? ICON.error : ICON.assistant}<span>${session.status === 'error' ? 'Error' : getSessionModeLabel(session.pendingMode || session.mode)}</span>`;
+  const contentDiv = document.createElement('div');
+  contentDiv.className = 'chat-message-content markdown-body';
+  if (session.status === 'error') {
+    const draft = session.pendingDraftText ? `${session.pendingDraftText}\n\n` : '';
+    contentDiv.innerHTML = `<span style="color:var(--danger)">${escapeHtml(draft + (session.pendingError || 'Request failed'))}</span>`;
+  } else if (session.pendingDraftText) {
+    updateBotMessageContent(contentDiv, session.pendingDraftText, false);
+  } else {
+    contentDiv.innerHTML = `<div class="typing-indicator"><span></span><span></span><span></span></div>`;
+  }
+  msgDiv.appendChild(metaDiv);
+  msgDiv.appendChild(contentDiv);
+  history.appendChild(msgDiv);
+  if (isSessionRunning(session)) {
+    chatRequestViews[requestId] = { history, msgDiv, contentDiv };
+  }
+  requestAnimationFrame(() => history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' }));
+}
+
+function switchToSession(id) {
+  const session = chatSessions.find(s => s.id === id);
+  if (!session) return;
+  chatMode = normalizeChatMode(session.mode);
+  localStorage.setItem(CHAT_MODE_KEY, chatMode);
+  setActiveSessionForMode(chatMode, id);
+  restoreChatSessionView(session);
+  saveChatSessions();
 
   renderChatHistoryList();
   syncChatModeUI();
 }
 
 function deleteSession(id) {
+  const deleted = chatSessions.find(s => s.id === id);
+  const deletedMode = normalizeChatMode(deleted?.mode || chatMode);
   chatSessions = chatSessions.filter(s => s.id !== id);
-  if (activeSessionId === id) {
-    if (chatSessions.length) {
-      switchToSession(chatSessions[chatSessions.length - 1].id);
-    } else {
-      activeSessionId = null;
+  if (activeSessionIdsByMode[deletedMode] === id) {
+    const next = getModeSessions(deletedMode)[0];
+    if (next) setActiveSessionForMode(deletedMode, next.id);
+    else setActiveSessionForMode(deletedMode, null);
+  }
+  if (chatMode === deletedMode) {
+    const nextId = activeSessionIdsByMode[chatMode] || null;
+    activeSessionId = nextId;
+    const next = getActiveSession();
+    if (next) restoreChatSessionView(next);
+    else {
       chatContext = [];
       clearChatView();
     }
   }
   saveChatSessions();
   renderChatHistoryList();
+  syncChatModeUI();
 }
 
 function renameSession(id) {
@@ -364,27 +669,38 @@ function renameSession(id) {
 function renderChatHistoryList() {
   const container = document.getElementById('chat-session-list');
   if (!container) return;
+  const modeSessions = getModeSessions(chatMode);
   const countEl = document.getElementById('chat-session-count');
-  if (countEl) countEl.textContent = String(chatSessions.length);
+  if (countEl) countEl.textContent = String(modeSessions.length);
   const titleEl = document.getElementById('chat-active-title');
   const activeSession = getActiveSession();
-  if (titleEl) titleEl.textContent = activeSession?.title || 'New Chat';
+  if (titleEl) titleEl.textContent = activeSession?.title || (isImageMode() ? 'New Image Task' : isVideoMode() ? 'New Video Task' : 'New Chat');
+  const subtitleEl = document.getElementById('chat-active-subtitle');
+  if (subtitleEl) {
+    const model = activeSession?.model || document.getElementById('chat-model-select')?.value || 'No model selected';
+    const running = isSessionRunning(activeSession) ? ' · Running' : '';
+    subtitleEl.textContent = `${chatMode.toUpperCase()} · ${model}${running}`;
+  }
+  const modeStatusEl = document.getElementById('chat-mode-status');
+  if (modeStatusEl) {
+    modeStatusEl.textContent = `${modeSessions.length} ${chatMode === 'chat' ? 'chats' : 'tasks'} in this mode`;
+  }
 
-  if (chatSessions.length === 0) {
-    container.innerHTML = `<div class="chat-session-empty">No chat sessions yet</div>`;
+  if (modeSessions.length === 0) {
+    const label = isImageMode() ? 'image tasks' : isVideoMode() ? 'video tasks' : 'chat sessions';
+    container.innerHTML = `<div class="chat-session-empty">No ${label} yet</div>`;
     return;
   }
 
   // Render in reverse-chronological order
-  const sorted = [...chatSessions].reverse();
-  container.innerHTML = sorted.map(s => {
+  container.innerHTML = modeSessions.map(s => {
     const active = s.id === activeSessionId ? 'active' : '';
     const msgCount = s.messages.filter(m => m.role !== 'system').length;
     const timeStr = new Date(s.ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
     return `<div class="chat-session-item ${active}" data-id="${s.id}" onclick="switchToSession('${s.id}')">
       <div class="chat-session-info">
-        <div class="chat-session-title">${escapeHtml(s.title)}</div>
-        <div class="chat-session-meta">${s.model ? escapeHtml(s.model).split('-').slice(0,3).join('-') : 'No model'} · ${msgCount} msg · ${timeStr}</div>
+        <div class="chat-session-title">${escapeHtml(s.title)}${isSessionRunning(s) ? ' · …' : ''}</div>
+        <div class="chat-session-meta">${s.model ? escapeHtml(s.model).split('-').slice(0,3).join('-') : 'No model'} · ${msgCount} msg${isSessionRunning(s) ? ' · running' : ''} · ${timeStr}</div>
       </div>
       <div class="chat-session-actions">
         <button class="msg-action-btn" onclick="event.stopPropagation();renameSession('${s.id}')" title="Rename">
@@ -460,13 +776,14 @@ async function loadChatPanel() {
     select.innerHTML = '<option value="">Error loading models</option>';
   }
 
-  // Restore active session if exists, otherwise don't auto-create
+  // Restore active session for the current mode if it exists; otherwise keep a clean view.
   const session = getActiveSession();
   if (session) {
-    switchToSession(session.id);
+    restoreChatSessionView(session);
   } else {
     clearChatView();
   }
+  renderChatHistoryList();
   syncChatModeUI();
   updateChatSendState();
 }
@@ -537,7 +854,13 @@ function decorateMediaEmbeds(contentDiv) {
   contentDiv.querySelectorAll('a[href]').forEach(link => {
     const href = link.getAttribute('href') || '';
     const normalized = href.split('?')[0].toLowerCase();
-    if (!normalized.endsWith('.mp4') && !normalized.endsWith('.webm') && !normalized.endsWith('.mov')) return;
+    const label = (link.textContent || '').trim().toLowerCase();
+    const looksVideo = normalized.endsWith('.mp4')
+      || normalized.endsWith('.webm')
+      || normalized.endsWith('.mov')
+      || label === 'video'
+      || label.includes('video');
+    if (!looksVideo) return;
     const video = document.createElement('video');
     video.controls = true;
     video.preload = 'metadata';
@@ -751,11 +1074,13 @@ function updateChatSendState() {
   if (!sendBtn) return;
   const hasContent = !!inputEl?.value.trim();
   const hasModel = !!selectEl?.value;
+  updateChatGeneratingState();
   sendBtn.disabled = isGenerating || !hasContent || !hasModel;
 }
 
 // ─── Send ───
 async function sendChatMessage() {
+  updateChatGeneratingState();
   if (isGenerating) return;
 
   const inputEl = document.getElementById('chat-input');
@@ -767,15 +1092,21 @@ async function sendChatMessage() {
   if (!content) return;
   if (!model) { alert('Please select a model first'); return; }
 
-  // Ensure a session exists
+  const requestMode = chatMode;
+  const requestIsImage = requestMode === 'image';
+  const requestIsVideo = requestMode === 'video';
+  const requestIsMedia = requestIsImage || requestIsVideo;
+
   let session = getActiveSession();
   if (!session) {
     session = createNewSession(true);
+  } else if (normalizeChatMode(session.mode) !== requestMode) {
+    session = createNewSession(true);
   }
 
-  // Update session model
   session.model = model;
-  session.mode = chatMode;
+  session.mode = normalizeChatMode(session.mode || requestMode);
+  setActiveSessionForMode(requestMode, session.id);
 
   let fullContentToSend = content;
   if (chatAttachedFiles.length > 0) {
@@ -784,10 +1115,9 @@ async function sendChatMessage() {
     });
   }
 
-  // Append user message
   appendMessage('user', fullContentToSend);
 
-  if (isMediaMode()) {
+  if (requestIsMedia) {
     chatContext = [];
   } else if (chatContext.length === 0) {
     const sysPrompt = document.getElementById('chat-system-prompt')?.value.trim();
@@ -796,18 +1126,17 @@ async function sendChatMessage() {
       session.systemPrompt = sysPrompt;
     }
   }
-  if (!isMediaMode()) {
+  if (!requestIsMedia) {
     chatContext.push({ role: 'user', content: fullContentToSend });
   }
 
-  // Save message to session
   session.messages.push({ role: 'user', content: fullContentToSend });
-  // Auto-title from first user message
   if (session.messages.filter(m => m.role === 'user').length === 1) {
     session.title = deriveTitle(content);
   }
-  session.ts = Date.now();
-  saveChatSessions();
+
+  const requestId = makeChatRequestId();
+  markSessionRunning(session, requestMode, requestId);
   renderChatHistoryList();
 
   inputEl.value = '';
@@ -815,29 +1144,30 @@ async function sendChatMessage() {
   chatAttachedFiles = [];
   renderChatAttachedFiles();
 
-  // Create bot message container
   const history = document.getElementById('chat-history');
   const botMsgDiv = document.createElement('div');
   botMsgDiv.className = 'chat-message assistant';
-  botMsgDiv.id = 'chat-bot-reply-container';
+  botMsgDiv.id = `chat-bot-reply-${requestId}`;
   const botMetaDiv = document.createElement('div');
   botMetaDiv.className = 'chat-message-meta';
-  botMetaDiv.innerHTML = `${ICON.assistant}<span>${isImageMode() ? 'Image' : isVideoMode() ? 'Video' : 'Assistant'}</span>`;
+  botMetaDiv.innerHTML = `${ICON.assistant}<span>${getSessionModeLabel(requestMode)}</span>`;
   const botContentDiv = document.createElement('div');
   botContentDiv.className = 'chat-message-content markdown-body';
   botMsgDiv.appendChild(botMetaDiv);
   botMsgDiv.appendChild(botContentDiv);
-
-  // Put typing indicator initially
   botContentDiv.innerHTML = `<div class="typing-indicator"><span></span><span></span><span></span></div>`;
-  history.appendChild(botMsgDiv);
-  requestAnimationFrame(() => history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' }));
+  if (history) {
+    history.appendChild(botMsgDiv);
+    chatRequestViews[requestId] = { history, msgDiv: botMsgDiv, contentDiv: botContentDiv };
+    requestAnimationFrame(() => history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' }));
+  }
 
-  isGenerating = true;
+  updateChatGeneratingState();
   updateChatSendState();
 
   try {
-    const payload = isImageMode()
+    const videoOptions = requestIsVideo ? getVideoOptions() : null;
+    const payload = requestIsImage
       ? {
           model,
           messages: [{ role: 'user', content: buildImagePrompt(content) }],
@@ -845,37 +1175,45 @@ async function sendChatMessage() {
           stream: false,
           ...getImageOptions()
         }
-      : isVideoMode()
+      : requestIsVideo
         ? {
             model,
             messages: [{ role: 'user', content }],
             max_tokens: 4096,
             stream: false,
-            ...getVideoOptions()
+            ...videoOptions
           }
-        : { model, messages: chatContext, max_tokens: 4096, stream: true };
+        : { model, messages: chatContext.slice(), max_tokens: 4096, stream: true };
 
-    if (isMediaMode()) {
-      // Non-streaming for media generation.
-      const response = await chatFetchFirstJson(['/api/chat', '/v1/chat/completions'], 'POST', payload);
-      if (response && response.choices && response.choices.length > 0) {
-        const reply = response.choices[0].message.content;
-        updateBotMessageContent(botContentDiv, reply, true);
-        session.messages.push({ role: 'assistant', content: reply });
-        session.ts = Date.now();
-        saveChatSessions();
-      } else {
-        throw new Error(response.error?.message || response.message || 'Invalid response format');
+    if (requestIsMedia) {
+      let reply = '';
+      let mediaError = null;
+      markSessionDraft(session, requestId, `${getSessionModeLabel(requestMode)} generation is running...`, true);
+      try {
+        const response = await chatFetchFirstJson(['/api/chat', '/v1/chat/completions'], 'POST', payload);
+        reply = chatCompletionText(response);
+        if (!reply) {
+          throw new Error(response.error?.message || response.message || 'Invalid response format');
+        }
+      } catch (err) {
+        mediaError = err;
+        if (requestIsVideo) {
+          reply = await requestVideoGenerationFallback(model, content, videoOptions || {});
+        } else {
+          throw err;
+        }
+      }
+      markSessionDraft(session, requestId, reply, true);
+      finalizeSessionReply(session, requestId, reply);
+      if (mediaError) {
+        console.warn('Primary media chat-completions path failed; video fallback succeeded.', mediaError);
       }
     } else {
-      // Attempt SSE Streaming
       let streamSucceeded = false;
       try {
         const proto = window.location.protocol;
         const host = window.location.hostname;
         const streamUrl = `${proto}//${host}:8317/v1/chat/completions`;
-
-        // Fetch virtual keys to authorize the direct request
         const apiKeys = await fetch('/api/virtual-keys').then(r => r.json()).catch(() => ({}));
         const api_key = Array.isArray(apiKeys.keys) && apiKeys.keys.length > 0 ? apiKeys.keys[0].key : '';
 
@@ -896,7 +1234,7 @@ async function sendChatMessage() {
         const decoder = new TextDecoder('utf-8');
         let buffer = '';
         let replyText = '';
-        botContentDiv.innerHTML = ''; // Clear typing indicator
+        markSessionDraft(session, requestId, '', true);
 
         while (true) {
           const { value, done } = await reader.read();
@@ -915,8 +1253,7 @@ async function sendChatMessage() {
                 const delta = chunkJson.choices?.[0]?.delta?.content || '';
                 if (delta) {
                   replyText += delta;
-                  updateBotMessageContent(botContentDiv, replyText, false);
-                  requestAnimationFrame(() => history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' }));
+                  markSessionDraft(session, requestId, replyText);
                 }
               } catch (e) {
                 // Ignore partial JSON parse errors
@@ -925,28 +1262,20 @@ async function sendChatMessage() {
           }
         }
 
-        // Finalize
-        updateBotMessageContent(botContentDiv, replyText, true);
-        session.messages.push({ role: 'assistant', content: replyText });
-        chatContext.push({ role: 'assistant', content: replyText });
-        session.ts = Date.now();
-        saveChatSessions();
+        markSessionDraft(session, requestId, replyText, true);
+        finalizeSessionReply(session, requestId, replyText);
         streamSucceeded = true;
       } catch (streamErr) {
         console.warn('Streaming failed, falling back to standard API', streamErr);
       }
 
-      // Fallback to non-streaming POST if streaming failed
       if (!streamSucceeded) {
         payload.stream = false;
         const response = await chatFetchFirstJson(['/api/chat', '/v1/chat/completions'], 'POST', payload);
         if (response && response.choices && response.choices.length > 0) {
           const reply = response.choices[0].message.content;
-          updateBotMessageContent(botContentDiv, reply, true);
-          session.messages.push({ role: 'assistant', content: reply });
-          chatContext.push({ role: 'assistant', content: reply });
-          session.ts = Date.now();
-          saveChatSessions();
+          markSessionDraft(session, requestId, reply, true);
+          finalizeSessionReply(session, requestId, reply);
         } else {
           throw new Error(response.error?.message || response.message || 'Invalid response format');
         }
@@ -954,28 +1283,16 @@ async function sendChatMessage() {
     }
   } catch (err) {
     console.error('Chat error:', err);
-    botContentDiv.innerHTML = `<span style="color:var(--danger)">Error: ${err.message}</span>`;
-    botMsgDiv.classList.add('error');
+    const pathHint = err.requestPath ? ` · ${err.requestPath}` : '';
+    markSessionFailed(session, requestId, `Error${pathHint} · ${model} · ${err.message || 'Request failed'}`);
   } finally {
-    // Add copy action
-    if (!botMsgDiv.classList.contains('error')) {
-      const actionsDiv = document.createElement('div');
-      actionsDiv.className = 'message-actions';
-      const copyBtn = document.createElement('button');
-      copyBtn.className = 'msg-action-btn';
-      copyBtn.innerHTML = `${ICON.copy} Copy`;
-      copyBtn.onclick = () => {
-        const lastMsg = session.messages[session.messages.length - 1];
-        navigator.clipboard.writeText(lastMsg?.content || '');
-        copyBtn.textContent = '✓ Copied';
-        setTimeout(() => { copyBtn.innerHTML = `${ICON.copy} Copy`; }, 1500);
-      };
-      actionsDiv.appendChild(copyBtn);
-      botMsgDiv.appendChild(actionsDiv);
-    }
-    botMsgDiv.removeAttribute('id');
-    isGenerating = false;
+    const view = chatRequestViews[requestId];
+    if (view?.msgDiv?.isConnected) view.msgDiv.removeAttribute('id');
+    delete chatRequestViews[requestId];
+    updateChatGeneratingState();
     updateChatSendState();
+    renderChatHistoryList();
+    if (document.activeElement !== inputEl) return;
     inputEl.focus();
   }
 }

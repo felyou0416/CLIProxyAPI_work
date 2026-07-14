@@ -301,7 +301,30 @@ async function withRuntimeAction(button, label, task) {
   }
 }
 
-async function handleActionWithIndicator(type, button, label, actionApiUrl, errorIndicatorState) {
+function sleepRuntime(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForRuntimeStatus(predicate, timeoutMs = 150000, intervalMs = 2500) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const data = await api('/api/status');
+      const status = data.status || {};
+      if (predicate(status)) {
+        await refreshStatus();
+        return status;
+      }
+    } catch (e) {
+      // Keep polling; transient startup timeouts are expected for slow services.
+    }
+    await sleepRuntime(intervalMs);
+  }
+  await refreshStatus();
+  return null;
+}
+
+async function handleActionWithIndicator(type, button, label, actionApiUrl, errorIndicatorState, options = {}) {
   const busyKey = type === 'media-proxy' ? 'mediaProxyActionBusy' : `${type}ActionBusy`;
   window[busyKey] = true;
   if (typeof window.updateIndicator === 'function') {
@@ -312,7 +335,20 @@ async function handleActionWithIndicator(type, button, label, actionApiUrl, erro
       try {
         const r = await api(actionApiUrl, 'POST');
         showMessage(r.message);
-        await refreshStatus();
+        if (typeof options.waitFor === 'function') {
+          const status = await waitForRuntimeStatus(options.waitFor, options.timeoutMs, options.intervalMs);
+          if (status) {
+            showMessage(options.readyMessage || r.message);
+          } else if (options.timeoutMessage) {
+            showMessage(options.timeoutMessage, true);
+            if (errorIndicatorState && typeof window.updateIndicator === 'function') {
+              window.updateIndicator(type, errorIndicatorState);
+              saveIndicatorStates();
+            }
+          }
+        } else {
+          await refreshStatus();
+        }
       } catch (e) {
         showMessage(e.message, true);
         if (errorIndicatorState && typeof window.updateIndicator === 'function') {
@@ -346,12 +382,22 @@ async function stopOAuthManager(button) {
   return handleActionWithIndicator('oauth', button, t('runtime.stoppingOAuthManager', '停止中...'), '/api/stop-oauth-manager', 'green');
 }
 
+async function waitForOpenClawRunning(button, label, actionApiUrl) {
+  return handleActionWithIndicator('openclaw', button, label, actionApiUrl, 'red', {
+    waitFor: status => !!status.openclaw_running,
+    timeoutMs: 180000,
+    intervalMs: 3000,
+    readyMessage: 'OpenClaw 已启动并可用。',
+    timeoutMessage: 'OpenClaw 启动命令已发出，但 3 分钟内未检测到网关。请查看 OpenClaw 日志。',
+  });
+}
+
 async function startOpenClaw(button) {
-  return handleActionWithIndicator('openclaw', button, '启动中...', '/api/openclaw/start', 'red');
+  return waitForOpenClawRunning(button, '启动中...', '/api/openclaw/start');
 }
 
 async function restartOpenClaw(button) {
-  return handleActionWithIndicator('openclaw', button, '重启中...', '/api/openclaw/restart', 'red');
+  return waitForOpenClawRunning(button, '重启中...', '/api/openclaw/restart');
 }
 
 async function stopOpenClaw(button) {

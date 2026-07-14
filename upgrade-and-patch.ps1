@@ -74,6 +74,14 @@ if (Test-Path "CLIProxyAPI\start.ps1") {
     Exit 1
 }
 
+if (Test-Path "CLIProxyAPI-AccessGateway\build.ps1") {
+    Write-Host "`nBuilding public access gateway..." -ForegroundColor Yellow
+    & ".\CLIProxyAPI-AccessGateway\build.ps1"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Access gateway build failed."
+    }
+}
+
 Write-Host "`n==========================================" -ForegroundColor Green
 Write-Host " CPA Upgraded & Customizations Applied Successfully!" -ForegroundColor Green
 Write-Host "==========================================" -ForegroundColor Green

@@ -115,7 +115,49 @@ class ProviderModelMappingTests(unittest.TestCase):
             # Verify that only local-b remains
             self.assertEqual([item['call_id'] for item in mappings], ['local-b'])
 
+    def test_delete_specific_cross_provider_mapping(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'provider_model_overrides.json'
+            with patch.object(auth, 'MODEL_MAPPING_OVERRIDES_FILE', path):
+                auth.set_provider_model_override('codex', 'gpt-test', 'local-a', 'openai-compatibility', 'gpt-test')
+                auth.set_provider_model_override('codex', 'gpt-test', 'local-b', 'codex', 'gpt-test')
+
+                auth.delete_provider_model_override('codex', 'gpt-test', 'local-a')
+
+                overrides = auth._load_model_mapping_overrides()
+                mappings = auth.resolve_provider_mappings('codex', 'gpt-test', 'gpt-test', overrides=overrides)
+
+            self.assertEqual([item['call_id'] for item in mappings], ['local-b'])
+
+    def test_deleting_last_specific_mapping_restores_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'provider_model_overrides.json'
+            with patch.object(auth, 'MODEL_MAPPING_OVERRIDES_FILE', path):
+                auth.set_provider_model_override('codex', 'gpt-test', 'local-a', 'codex', 'gpt-test')
+
+                auth.delete_provider_model_override('codex', 'gpt-test', 'local-a')
+
+                overrides = auth._load_model_mapping_overrides()
+                mappings = auth.resolve_provider_mappings('codex', 'gpt-test', 'gpt-test', overrides=overrides)
+
+            self.assertEqual([item['call_id'] for item in mappings], ['codex-gpt-test'])
+
+    def test_setting_same_call_id_updates_current_mapping(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'provider_model_overrides.json'
+            with patch.object(auth, 'MODEL_MAPPING_OVERRIDES_FILE', path):
+                auth.set_provider_model_override('codex', 'gpt-test', 'local-a', 'codex', 'gpt-test')
+                auth.set_provider_model_override('codex', 'gpt-test', 'local-a', 'openai-compatibility', 'gpt-4o')
+
+                overrides = auth._load_model_mapping_overrides()
+                entries = auth.iter_model_mapping_entries(overrides, 'codex', 'gpt-test')
+                mappings = auth.resolve_provider_mappings('codex', 'gpt-test', 'gpt-test', overrides=overrides)
+
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(mappings[0]['target_provider'], 'openai-compatibility')
+            self.assertEqual(mappings[0]['upstream_id'], 'gpt-4o')
+            self.assertEqual(mappings[0]['call_id'], 'local-a')
+
 
 if __name__ == '__main__':
     unittest.main()
-

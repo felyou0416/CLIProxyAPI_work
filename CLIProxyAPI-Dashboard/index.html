@@ -73,7 +73,6 @@
           <div class="nav-group-items-wrap"><div class="nav-group-items">
             <button class="nav-pill top-nav-btn" id="tab-firewall-access" data-group="access" onclick="showSection('firewall-access')"><span data-i18n="nav.firewallAccess">端口放行</span></button>
             <button class="nav-pill top-nav-btn" id="tab-terminals" data-group="access" onclick="showSection('terminals')"><span data-i18n="nav.terminals">终端</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-external-access" data-group="access" onclick="showSection('external-access')"><span data-i18n="nav.externalAccess">外部 IP</span></button>
             <button class="nav-pill top-nav-btn" id="tab-tools" data-group="access" onclick="showSection('tools')"><span data-i18n="nav.tools">工具</span></button>
             <button class="nav-pill top-nav-btn" id="tab-virtual-keys" data-group="access" onclick="showSection('virtual-keys')"><span data-i18n="nav.virtualKeys">密钥管理</span></button>
             <button class="nav-pill top-nav-btn" id="tab-doc" data-group="access" onclick="showSection('doc')"><span data-i18n="nav.doc">文档</span></button>
@@ -87,16 +86,7 @@
             <span class="nav-group-label" data-i18n="nav.group.system">系统</span>
           </button>
           <div class="nav-group-items-wrap"><div class="nav-group-items">
-            <button class="nav-pill top-nav-btn" id="tab-network-access" data-group="system" onclick="showSection('network-access')"><span data-i18n="nav.networkAccess">网络接入</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-model-proxy" data-group="system" onclick="showSection('model-proxy')"><span data-i18n="nav.modelProxy">模型代理</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-cooldown" data-group="system" onclick="showSection('cooldown')"><span data-i18n="nav.cooldown">冷却状态</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-storage-config" data-group="system" onclick="showSection('storage-config')"><span data-i18n="nav.storageConfig">存储后端</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-home-config" data-group="system" onclick="showSection('home-config')"><span data-i18n="nav.homeConfig">Home</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-docker-deploy" data-group="system" onclick="showSection('docker-deploy')"><span data-i18n="nav.dockerDeploy">Docker</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-advanced-config" data-group="system" onclick="showSection('advanced-config')"><span data-i18n="nav.advancedConfig">高级配置</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-cloaking-config" data-group="system" onclick="showSection('cloaking-config')"><span data-i18n="nav.cloakingConfig">请求伪装</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-amp-config" data-group="system" onclick="showSection('amp-config')"><span data-i18n="nav.ampConfig">AMP</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-data-transfer" data-group="system" onclick="showSection('data-transfer')"><span>数据导入导出</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-system" data-group="system" onclick="showSection('system')"><span data-i18n="nav.systemCenter">系统中心</span></button>
           </div></div>
         </div>
 
@@ -112,6 +102,7 @@
     <div id="message" class="message"></div>
 
     <div class="content-grid" id="main-sections">
+      <!-- INCLUDE: sections/system.html -->
     </div>
   </main>
 </div>
@@ -136,7 +127,6 @@
 <script src="/js/virtual-keys.js?v=20260504-1"></script>
 <script src="/js/network-access.js?v=20260527-firewall-2"></script>
 <script src="/js/firewall-access.js?v=20260608-ip-helper-home"></script>
-<script src="/js/external-access.js?v=20260527-external-access"></script>
 <link rel="stylesheet" href="/css/xterm.min.css" />
 <script src="/js/xterm.min.js"></script>
 <script src="/js/xterm-addon-fit.min.js"></script>

@@ -30,6 +30,7 @@ const aggregateMemberMutationVersions = new Map();
 let aggregateSortMode = 'name';
 let editingAliasId = '';
 let viewedAggregateAliasVersion = '1';
+let viewedAggregateAliasId = '';
 let aggregateRefreshVersion = 0;
 let draggedAliasId = null;
 let draggedMemberKey = null;
@@ -267,6 +268,44 @@ function aggregateMemberPayload(members) {
   })).filter((member) => member.provider && member.upstream_id);
 }
 
+function normalizeAggregateVersion(version) {
+  const value = String(version || '1').trim();
+  return ['1', '2', '3'].includes(value) ? value : '1';
+}
+
+function aggregateActiveVersion(item) {
+  return normalizeAggregateVersion(item?.active_version || '1');
+}
+
+function getAggregateVersionMembers(item, version = viewedAggregateAliasVersion) {
+  if (!item) return [];
+  const targetVersion = normalizeAggregateVersion(version);
+  const versionMembers = item[`version_${targetVersion}_members`];
+  if (Array.isArray(versionMembers)) return versionMembers;
+  if (targetVersion === aggregateActiveVersion(item) && Array.isArray(item.members)) return item.members;
+  return [];
+}
+
+function getActiveAggregateItem() {
+  return aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId) || null;
+}
+
+function syncViewedAggregateVersionForActiveAlias(force = false) {
+  const current = getActiveAggregateItem();
+  if (!current?.alias_id) {
+    viewedAggregateAliasId = '';
+    viewedAggregateAliasVersion = '1';
+    return;
+  }
+  const aliasId = String(current.alias_id || '').trim();
+  if (force || viewedAggregateAliasId !== aliasId) {
+    viewedAggregateAliasId = aliasId;
+    viewedAggregateAliasVersion = aggregateActiveVersion(current);
+    return;
+  }
+  viewedAggregateAliasVersion = normalizeAggregateVersion(viewedAggregateAliasVersion);
+}
+
 function hasAggregatePendingWork() {
   return aggregateMemberPendingKeys.size > 0
     || aggregateAliasPendingIds.size > 0
@@ -289,9 +328,9 @@ function updateAggregateMembersInCache(aliasId, members, version = null) {
   const updatedItem = {
     ...aggregateItemsCache[index],
   };
-  const targetVersion = version || viewedAggregateAliasVersion || '1';
+  const targetVersion = normalizeAggregateVersion(version || viewedAggregateAliasVersion);
   updatedItem[`version_${targetVersion}_members`] = normalizedMembers;
-  const activeVersion = updatedItem.active_version || '1';
+  const activeVersion = aggregateActiveVersion(updatedItem);
   if (targetVersion === activeVersion) {
     updatedItem.members = normalizedMembers;
     updatedItem.member_count = normalizedMembers.length;
@@ -427,7 +466,7 @@ async function queueAggregateMemberSave(aliasId, members, successMessage = '', s
   const payloadMembers = aggregateMemberPayload(members);
   renderAggregateCurrentViews(true);
 
-  const targetVersion = version || viewedAggregateAliasVersion || '1';
+  const targetVersion = normalizeAggregateVersion(version || viewedAggregateAliasVersion);
 
   return new Promise((resolve) => {
     let entry = aggregateMemberSaveDebounces.get(targetId);
@@ -635,6 +674,9 @@ function renderAggregateAliasList() {
 
   if (!items.some((item) => item.alias_id === activeAggregateAliasId)) {
     activeAggregateAliasId = String(items[0]?.alias_id || '');
+    syncViewedAggregateVersionForActiveAlias(true);
+  } else {
+    syncViewedAggregateVersionForActiveAlias();
   }
 
   const isSorted = aggregateSortMode !== 'default';
@@ -682,6 +724,9 @@ function renderAggregateAliasList() {
   root.querySelectorAll('[data-aggregate-alias]').forEach((btn) => {
     btn.onclick = () => {
       activeAggregateAliasId = btn.getAttribute('data-aggregate-alias') || '';
+      syncViewedAggregateVersionForActiveAlias(true);
+      aggregateEditMode = false;
+      aggregateEditMembers.clear();
       renderAggregateAliasList();
       renderAggregateActiveDetails();
       renderAggregateProviderSourceList();
@@ -1041,14 +1086,15 @@ async function renameAggregateAlias(aliasId, nextId = null) {
   }
 }
 async function startAggregateMemberEdit() {
-  const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
+  syncViewedAggregateVersionForActiveAlias();
+  const current = getActiveAggregateItem();
   if (!current?.alias_id) {
     showMessage('Please select an aggregate ID first.', true);
     return;
   }
   aggregateEditMode = true;
   aggregateEditMembers.clear();
-  (current.members || []).forEach((member) => {
+  getAggregateVersionMembers(current).forEach((member) => {
     const key = aggregateMemberKey(member.provider, member.upstream_id);
     if (key !== '::') aggregateEditMembers.add(key);
   });
@@ -1101,7 +1147,8 @@ function renderAggregateActiveDetails() {
   if (!badge || !summary || !root) return;
   if (toggleBtn) toggleBtn.style.display = 'none';
 
-  const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
+  syncViewedAggregateVersionForActiveAlias();
+  const current = getActiveAggregateItem();
   if (!current) {
     if (versionContainer) versionContainer.innerHTML = '';
     updateAggregateWorkbenchStats();
@@ -1116,17 +1163,8 @@ function renderAggregateActiveDetails() {
     return;
   }
 
-  const viewedVersion = viewedAggregateAliasVersion || '1';
-  let members = [];
-  if (viewedVersion === '1') {
-    members = Array.isArray(current.version_1_members) ? current.version_1_members : [];
-  } else if (viewedVersion === '2') {
-    members = Array.isArray(current.version_2_members) ? current.version_2_members : [];
-  } else if (viewedVersion === '3') {
-    members = Array.isArray(current.version_3_members) ? current.version_3_members : [];
-  } else {
-    members = Array.isArray(current.members) ? current.members : [];
-  }
+  const viewedVersion = normalizeAggregateVersion(viewedAggregateAliasVersion);
+  const members = getAggregateVersionMembers(current, viewedVersion);
 
   const aliasId = String(current.alias_id || '').trim();
   badge.textContent = current.alias_id || t('common.notSelected', 'Not selected');
@@ -1152,7 +1190,10 @@ function renderAggregateActiveDetails() {
       btn.onclick = () => {
         const targetVersion = btn.getAttribute('data-version');
         if (targetVersion === viewedVersion) return;
-        viewedAggregateAliasVersion = targetVersion;
+        viewedAggregateAliasId = aliasId;
+        viewedAggregateAliasVersion = normalizeAggregateVersion(targetVersion);
+        aggregateEditMode = false;
+        aggregateEditMembers.clear();
         renderAggregateActiveDetails();
         renderAggregateProviderSourceList();
       };
@@ -1315,11 +1356,12 @@ async function applyAggregateAliasVersion(aliasId, version, button) {
 }
 
 async function reorderAggregateMembers(draggedKey, targetKey) {
-  const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
+  syncViewedAggregateVersionForActiveAlias();
+  const current = getActiveAggregateItem();
   if (!current?.alias_id || aggregateMemberPendingKeys.has(draggedKey) || aggregateMemberPendingKeys.has(targetKey)) {
     return;
   }
-  const members = Array.isArray(current.members) ? [...current.members] : [];
+  const members = [...getAggregateVersionMembers(current)];
   const draggedIndex = members.findIndex((member) => aggregateMemberKey(member.provider, member.upstream_id) === draggedKey);
   const targetIndex = members.findIndex((member) => aggregateMemberKey(member.provider, member.upstream_id) === targetKey);
   if (draggedIndex < 0 || targetIndex < 0 || draggedIndex === targetIndex) return;
@@ -1487,8 +1529,9 @@ function renderAggregateProviderSourceList() {
     return;
   }
 
-  const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
-  const existingKeys = new Set((current?.members || []).map((member) => aggregateMemberKey(member.provider, member.upstream_id)));
+  syncViewedAggregateVersionForActiveAlias();
+  const current = getActiveAggregateItem();
+  const existingKeys = new Set(getAggregateVersionMembers(current).map((member) => aggregateMemberKey(member.provider, member.upstream_id)));
   ensureAggregateProviderFilter();
   const visibleItems = aggregateProviderItemsCache
     .map((item) => {
@@ -1707,12 +1750,14 @@ async function createAggregateAlias() {
 }
 
 async function addSingleModelToAggregate(key) {
-  const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
+  syncViewedAggregateVersionForActiveAlias();
+  const current = getActiveAggregateItem();
   if (!current?.alias_id) {
     showMessage(getLanguage() === 'zh' ? '请先在左侧选择一个聚合 ID。' : 'Please select an aggregate ID first.', true);
     return;
   }
   const aliasId = String(current.alias_id || '').trim();
+  const targetVersion = normalizeAggregateVersion(viewedAggregateAliasVersion);
   if (hasAggregateMemberSaveWork(aliasId)) return;
 
   const [provider, ...rest] = String(key).split('::');
@@ -1727,11 +1772,14 @@ async function addSingleModelToAggregate(key) {
       alias_id: aliasId,
       members: [{ provider, upstream_id: upstreamId }],
       skip_restart: true,
+      version: targetVersion,
     });
-    const nextMembers = Array.isArray(res.item?.members)
-      ? res.item.members
-      : [...(Array.isArray(current.members) ? current.members : []), { provider, upstream_id: upstreamId }];
-    updateAggregateMembersInCache(aliasId, nextMembers);
+    const nextMembers = Array.isArray(res.item?.version_members)
+      ? res.item.version_members
+      : Array.isArray(res.item?.members) && normalizeAggregateVersion(res.item?.target_version) === aggregateActiveVersion(current)
+        ? res.item.members
+      : [...getAggregateVersionMembers(current, targetVersion), { provider, upstream_id: upstreamId }];
+    updateAggregateMembersInCache(aliasId, nextMembers, targetVersion);
     showMessage(res.message || (getLanguage() === 'zh' ? '已添加模型。' : 'Model added.'));
     renderAggregateCurrentViews(true);
     if (typeof loadProviderModels === 'function') void loadProviderModels();
@@ -1744,7 +1792,8 @@ async function addSingleModelToAggregate(key) {
 }
 
 async function saveCurrentAggregateMembers(reorderedMembers, successMessage, skipRestart = true) {
-  const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
+  syncViewedAggregateVersionForActiveAlias();
+  const current = getActiveAggregateItem();
   if (!current?.alias_id) {
     showMessage('Please select an aggregate ID first.', true);
     return false;
@@ -1756,7 +1805,7 @@ async function saveCurrentAggregateMembers(reorderedMembers, successMessage, ski
   }
   const mutationVersion = nextAggregateMemberMutationVersion(aliasId);
   const nextMembers = Array.isArray(reorderedMembers) ? reorderedMembers : [];
-  const targetVersion = viewedAggregateAliasVersion || '1';
+  const targetVersion = normalizeAggregateVersion(viewedAggregateAliasVersion);
   updateAggregateMembersInCache(aliasId, nextMembers, targetVersion);
   renderAggregateCurrentViews(true);
 
@@ -1773,12 +1822,13 @@ async function saveCurrentAggregateMembers(reorderedMembers, successMessage, ski
 }
 
 async function testCurrentAggregateMembers() {
-  const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
+  syncViewedAggregateVersionForActiveAlias();
+  const current = getActiveAggregateItem();
   if (!current?.alias_id) {
     showMessage('Please select an aggregate ID first.', true);
     return;
   }
-  const members = Array.isArray(current.members) ? current.members : [];
+  const members = getAggregateVersionMembers(current);
   const ids = [...new Set(members.map((member) => String(member.call_id || '').trim()).filter(Boolean))];
   if (!ids.length) {
     showMessage('This aggregate has no callable model IDs.', true);
@@ -1821,12 +1871,13 @@ async function testCurrentAggregateMembers() {
 }
 
 async function sortCurrentAggregateByScore() {
-  const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
+  syncViewedAggregateVersionForActiveAlias();
+  const current = getActiveAggregateItem();
   if (!current?.alias_id) {
     showMessage('Please select an aggregate ID first.', true);
     return;
   }
-  const members = Array.isArray(current.members) ? [...current.members] : [];
+  const members = [...getAggregateVersionMembers(current)];
   if (!members.length) return;
   const reordered = members
     .map((member, idx) => ({ member, idx, score: aggregateMemberScore(member) }))
@@ -1836,12 +1887,13 @@ async function sortCurrentAggregateByScore() {
 }
 
 async function sortCurrentAggregateUnavailableLast() {
-  const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
+  syncViewedAggregateVersionForActiveAlias();
+  const current = getActiveAggregateItem();
   if (!current?.alias_id) {
     showMessage('Please select an aggregate ID first.', true);
     return;
   }
-  const members = Array.isArray(current.members) ? [...current.members] : [];
+  const members = [...getAggregateVersionMembers(current)];
   if (!members.length) return;
   const rankOf = (member) => {
     const status = aggregateModelStatuses[String(member.call_id || '').trim()] || 'pending';
@@ -1858,12 +1910,13 @@ async function sortCurrentAggregateUnavailableLast() {
 }
 
 async function moveAggregateMember(key, direction) {
-  const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
+  syncViewedAggregateVersionForActiveAlias();
+  const current = getActiveAggregateItem();
   if (!current?.alias_id || aggregateMemberPendingKeys.has(key)) {
     if (!current?.alias_id) showMessage('Please select an aggregate ID first.', true);
     return;
   }
-  const members = Array.isArray(current.members) ? [...current.members] : [];
+  const members = [...getAggregateVersionMembers(current)];
   const index = members.findIndex((member) => aggregateMemberKey(member.provider, member.upstream_id) === key);
   if (index < 0) return;
   const nextIndex = index + Number(direction || 0);
@@ -1882,14 +1935,16 @@ async function moveAggregateMember(key, direction) {
 }
 
 async function removeAggregateMember(key) {
-  const current = aggregateItemsCache.find((item) => item.alias_id === activeAggregateAliasId);
+  syncViewedAggregateVersionForActiveAlias();
+  const current = getActiveAggregateItem();
   if (!current?.alias_id) {
     showMessage('Please select an aggregate ID first.', true);
     return;
   }
   if (!key || aggregateMemberPendingKeys.has(key)) return;
   const aliasId = String(current.alias_id || '').trim();
-  const members = Array.isArray(current.members) ? [...current.members] : [];
+  const targetVersion = normalizeAggregateVersion(viewedAggregateAliasVersion);
+  const members = [...getAggregateVersionMembers(current, targetVersion)];
   const filtered = members.filter((member) => aggregateMemberKey(member.provider, member.upstream_id) !== key);
   if (filtered.length === members.length) return;
 
@@ -1899,10 +1954,10 @@ async function removeAggregateMember(key) {
     aggregateMemberRollbackSnapshots.set(aliasId, previousItems);
   }
   aggregateMemberPendingKeys.add(key);
-  updateAggregateMembersInCache(aliasId, filtered);
+  updateAggregateMembersInCache(aliasId, filtered, targetVersion);
   renderAggregateCurrentViews(true);
 
-  const ok = await queueAggregateMemberSave(aliasId, filtered, `Removed model from ${aliasId}.`, true);
+  const ok = await queueAggregateMemberSave(aliasId, filtered, `Removed model from ${aliasId}.`, true, targetVersion);
   aggregateMemberPendingKeys.delete(key);
   if (!ok && isLatestAggregateMemberMutation(aliasId, mutationVersion)) {
     aggregateItemsCache = aggregateMemberRollbackSnapshots.get(aliasId) || previousItems;
@@ -1934,10 +1989,11 @@ function showAggregateMemberPopover(element, event, key) {
   document.querySelectorAll('.aggregate-member-popover').forEach(el => el.remove());
   
   // Find the member data in aggregateItemsCache
-  const current = aggregateItemsCache.find(item => item.alias_id === activeAggregateAliasId);
+  syncViewedAggregateVersionForActiveAlias();
+  const current = getActiveAggregateItem();
   if (!current) return;
   
-  const member = (current.members || []).find(m => aggregateMemberKey(m.provider, m.upstream_id) === key);
+  const member = getAggregateVersionMembers(current).find(m => aggregateMemberKey(m.provider, m.upstream_id) === key);
   if (!member) return;
   
   const callId = String(member.call_id || '-').trim();

@@ -29,7 +29,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-          cache-dependency-path: CLIProxyAPI/CLIProxyAPI/go.sum
+          cache-dependency-path: |
+            CLIProxyAPI/CLIProxyAPI/go.sum
+            CLIProxyAPI-AccessGateway/go.sum
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -45,6 +47,13 @@ jobs:
         run: |
           cd CLIProxyAPI/CLIProxyAPI
           go build -o ../../electron-app/resources/cli-proxy-api.exe ./cmd/server/
+
+      - name: Build access gateway
+        shell: pwsh
+        run: |
+          $outputDir = 'electron-app\resources\CLIProxyAPI-AccessGateway'
+          New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+          .\CLIProxyAPI-AccessGateway\build.ps1 -Output (Join-Path $outputDir 'cli-access-gateway.exe')
 
       - name: Install Python dependencies
         run: |
