@@ -129,6 +129,26 @@ class ProviderModelMappingTests(unittest.TestCase):
 
             self.assertEqual([item['call_id'] for item in mappings], ['local-b'])
 
+    def test_xai_oauth_aliases_are_publicly_prefixed(self):
+        with patch.object(auth, 'collect_provider_model_aliases', return_value={
+            'xai': [('grok-build-0.1', 'grok-build-0.1')],
+        }), patch.object(auth, '_load_model_mapping_overrides', return_value={}), \
+             patch.object(auth, '_aggregate_alias_id_set', return_value=set()), \
+             patch.object(auth, '_load_disabled_aggregate_aliases', return_value=set()), \
+             patch.object(auth, '_load_provider_model_test_results', return_value={}), \
+             patch.object(auth, '_current_route_strategy', return_value={'enabled': False, 'aggregate_only': False}), \
+             patch.object(auth, 'resolve_provider_mappings', return_value=[{
+                 'upstream_id': 'grok-build-0.1',
+                 'target_provider': 'xai',
+                 'call_id': 'xai-grok-build-0.1',
+             }]), patch.object(auth, 'derive_global_aggregate_aliases', return_value=[]), \
+             patch.object(auth, 'get_custom_aggregate_aliases_for_model', return_value=[]):
+            block = auth.build_oauth_model_alias_block(['xai'])
+
+        self.assertIn('alias: "xai-grok-build-0.1"', block)
+        self.assertNotIn('alias: "grok-build-0.1"', block)
+        self.assertIn('fork: false', block)
+
     def test_deleting_last_specific_mapping_hides_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'provider_model_overrides.json'

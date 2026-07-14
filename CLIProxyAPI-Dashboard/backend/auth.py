@@ -110,6 +110,21 @@ PROVIDER_MODEL_ALIASES = {
     'iflow': [
         ('glm-4.7', 'glm-4.7'),
     ],
+    'xai': [
+        ('grok-build-0.1', 'grok-build-0.1'),
+        ('grok-4.3', 'grok-4.3'),
+        ('grok-4.20-0309-reasoning', 'grok-4.20-0309-reasoning'),
+        ('grok-4.20-0309-non-reasoning', 'grok-4.20-0309-non-reasoning'),
+        ('grok-4.20-multi-agent-0309', 'grok-4.20-multi-agent-0309'),
+        ('grok-4.5', 'grok-4.5'),
+        ('grok-3-mini', 'grok-3-mini'),
+        ('grok-3-mini-fast', 'grok-3-mini-fast'),
+        ('grok-composer-2.5-fast', 'grok-composer-2.5-fast'),
+        ('grok-imagine-image', 'grok-imagine-image'),
+        ('grok-imagine-image-quality', 'grok-imagine-image-quality'),
+        ('grok-imagine-video', 'grok-imagine-video'),
+        ('grok-imagine-video-1.5-preview', 'grok-imagine-video-1.5-preview'),
+    ],
     'glm': [
         ('glm-4.7-flash', 'glm-4.7-flash'),
         ('glm-4.6v-flash', 'glm-4.6v-flash'),
