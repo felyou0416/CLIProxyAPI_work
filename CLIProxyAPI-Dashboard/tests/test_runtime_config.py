@@ -19,6 +19,7 @@ class RuntimeConfigRequestLogTests(unittest.TestCase):
             base_config = root / 'base-config.yaml'
             runtime_config = root / 'runtime.yaml'
             pool_auth_dir = root / 'auth'
+            active_auth_dir = root / 'runtime-auth'
             provider_dir = pool_auth_dir / 'test-provider'
             provider_dir.mkdir(parents=True)
             (provider_dir / 'test.json').write_text('{"api_key":"test"}', encoding='utf-8')
@@ -27,6 +28,7 @@ class RuntimeConfigRequestLogTests(unittest.TestCase):
             with patch.object(auth, 'BASE_CONFIG', base_config), \
                  patch.object(auth, 'RUNTIME_CONFIG', runtime_config), \
                  patch.object(auth, 'POOL_AUTH_DIR', pool_auth_dir), \
+                 patch.object(auth, 'ACTIVE_AUTH_DIR', active_auth_dir), \
                  patch.object(auth, 'iter_auth_source_dirs', return_value=[('test-provider', provider_dir)]), \
                  patch.object(auth, 'detect_provider', return_value='test-provider'), \
                  patch.object(auth, 'rewrite_oauth_model_aliases', side_effect=lambda text, providers, auth_refs=None: text), \
