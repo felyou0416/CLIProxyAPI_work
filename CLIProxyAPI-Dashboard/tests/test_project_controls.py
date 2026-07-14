@@ -53,6 +53,30 @@ class ProjectControlTests(unittest.TestCase):
         payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
         self.assertTrue(payload["proxy_running"])
 
+    def test_provider_model_delete_rebuilds_runtime_config(self):
+        handler = _FakeHandler()
+        with patch.object(post_routes, "delete_provider_model_override", return_value={
+            "provider": "codex", "upstream_id": "gpt-raw", "call_id": "codex-public",
+        }) as delete_mapping, patch.object(
+            post_routes, "load_state", return_value={"state": "demo"}
+        ) as load_state, patch.object(
+            post_routes, "rebuild_runtime_config_from_state", return_value={"rebuilt": True, "validation": {"ok": True}}
+        ) as rebuild_runtime:
+            handled = post_routes.handle_post(
+                handler,
+                SimpleNamespace(path="/api/provider-model-delete"),
+                {"provider": "codex", "upstream_id": "gpt-raw", "call_id": "codex-public"},
+            )
+
+        self.assertTrue(handled)
+        self.assertEqual(handler.status, 200)
+        delete_mapping.assert_called_once_with(provider="codex", upstream_id="gpt-raw", call_id="codex-public")
+        load_state.assert_called_once()
+        rebuild_runtime.assert_called_once_with({"state": "demo"})
+        payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["runtime_rebuilt"])
+
     def test_aggregate_update_skips_runtime_rebuild(self):
         handler = _FakeHandler()
         with patch.object(post_routes, "create_custom_aggregate_alias", return_value={"alias_id": "demo"}) as create_alias, patch.object(
@@ -99,7 +123,7 @@ class ProjectControlTests(unittest.TestCase):
 
         self.assertTrue(handled)
         self.assertEqual(handler.status, 200)
-        set_members.assert_called_once_with("demo", [])
+        set_members.assert_called_once_with("demo", [], None)
         current_status.assert_not_called()
         rebuild_runtime.assert_not_called()
         restart_proxy.assert_not_called()

@@ -1114,7 +1114,6 @@ def handle_post(handler, parsed, data):
             if result.get('ok'):
                 try:
                     from backend.state import load_state as _ls
-                    from backend.auth import rebuild_runtime_config_from_state
                     rebuild_runtime_config_from_state(_ls())
                 except Exception:
                     pass
