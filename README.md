@@ -1,13 +1,30 @@
 # CLIProxyAPI_work
 
-两个独立子项目放在同一目录下：
+官方内核与本地扩展分开维护：
 
 ```
 CLIProxyAPI_work/
-├── CLIProxyAPI/              # 代理（Go 源码 + storage）
+├── CLIProxyAPI/CLIProxyAPI/  # 官方 CPA 内核，不放本地补丁
+├── CLIProxyAPI-LocalPlugin/  # 本地动态插件（独立 DLL）
+├── CLIProxyAPI-MediaProxy/   # 图片/视频代理（独立 EXE）
 ├── CLIProxyAPI-Dashboard/    # Web 管理面板
+├── update-core.ps1           # 一键更新、构建和回归
+├── UPSTREAM_VERSION          # 已验证的官方内核版本
 └── README.md                 # 本文件
 ```
+
+## 更新官方内核
+
+```powershell
+# 默认更新到最新 v7 标签
+.\update-core.ps1
+
+# 或指定版本
+.\update-core.ps1 -TargetVersion v7.2.74
+```
+
+脚本只替换 `CLIProxyAPI/CLIProxyAPI`，并依次验证内核、插件、MediaProxy 和
+Dashboard。全部通过后才更新 `UPSTREAM_VERSION`；本地功能不再以内核补丁形式维护。
 
 ## 启动
 

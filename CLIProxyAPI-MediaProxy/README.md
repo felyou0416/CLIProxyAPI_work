@@ -5,11 +5,12 @@ Standalone media-model proxy for image and video generation providers.
 This program is intentionally separate from `CLIProxyAPI/CLIProxyAPI`, so media
 model routing does not get mixed into the text-model proxy core.
 
-## Run
+## Build and Run
 
 ```powershell
 cd E:\U_App\CLIProxyAPI_work\CLIProxyAPI-MediaProxy
-go run . -config config.example.json
+.\build.ps1
+.\cli-media-proxy.exe -config config.example.json
 ```
 
 ## Model Routing

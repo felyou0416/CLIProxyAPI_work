@@ -20,8 +20,8 @@ import (
 const defaultAPICallTimeout = 60 * time.Second
 
 const (
-	antigravityOAuthClientID     = "YOUR_CLIENT_ID"
-	antigravityOAuthClientSecret = "YOUR_CLIENT_SECRET"
+	antigravityOAuthClientID     = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+	antigravityOAuthClientSecret = "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"
 )
 
 var antigravityOAuthTokenURL = "https://oauth2.googleapis.com/token"

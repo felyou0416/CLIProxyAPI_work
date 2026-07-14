@@ -96,6 +96,7 @@ function initStorageDir() {
 function startProxyServer() {
   const resPath = getResourcesPath();
   const proxyExe = path.join(resPath, 'cli-proxy-api.exe');
+  const pluginDir = path.join(resPath, 'plugins');
 
   if (!fs.existsSync(proxyExe)) {
     console.log('[Proxy] Binary not found, skipping:', proxyExe);
@@ -113,6 +114,7 @@ function startProxyServer() {
     env: {
       ...process.env,
       CLIPROXYAPI_STORAGE_DIR: storagePath,
+      CLIPROXYAPI_PLUGIN_DIR: pluginDir,
     },
   });
 
@@ -132,6 +134,8 @@ function startDashboard() {
   const resPath = getResourcesPath();
   const dashboardDir = path.join(resPath, 'dashboard');
   const dashboardExe = path.join(dashboardDir, 'dashboard.exe');
+  const pluginDir = path.join(resPath, 'plugins');
+  const mediaProxyBinary = path.join(resPath, 'CLIProxyAPI-MediaProxy', 'cli-media-proxy.exe');
 
   if (!fs.existsSync(dashboardExe)) {
     console.log('[Dashboard] Binary not found, skipping:', dashboardExe);
@@ -149,6 +153,8 @@ function startDashboard() {
       ...process.env,
       CLIPROXYAPI_ROOT: resPath,
       CLIPROXYAPI_STORAGE_DIR: storagePath,
+      CLIPROXYAPI_PLUGIN_DIR: pluginDir,
+      CLIPROXYAPI_MEDIA_PROXY_BINARY: mediaProxyBinary,
       RELAYX_CLI_BINARY: path.join(resPath, 'cli-proxy-api.exe'),
       RELAYX_DASHBOARD_ROOT: dashboardDir,
       CLIPROXYAPI_DASHBOARD_PORT: String(DASHBOARD_PORT),

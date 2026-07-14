@@ -2075,9 +2075,6 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 					isCompatAuth = true
 				}
 			}
-			if isCompatAuth {
-				providerKey = util.OpenAICompatibleProviderKey(providerKey)
-			}
 			if cached, ok := compatCache.lookup(compatName); ok {
 				isCompatAuth = true
 				if providerKey == "" {
@@ -2132,10 +2129,8 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 				if len(models) > 0 {
 					s.registerResolvedModelsForAuth(a, providerKey, applyModelPrefixes(models, a.Prefix, s.cfg != nil && s.cfg.ForceModelPrefix))
 				} else {
-					if !s.TryRegisterModelsFromMetadata(a, providerKey, compatName) {
-						// Otherwise, drop any prior registration.
-						GlobalModelRegistry().UnregisterClient(a.ID)
-					}
+					// No matching provider found or models removed entirely; drop any prior registration.
+					GlobalModelRegistry().UnregisterClient(a.ID)
 				}
 				return
 			}
@@ -2537,15 +2532,9 @@ func buildOpenAICompatibilityConfigModels(compat *config.OpenAICompatibility) []
 	models := make([]*ModelInfo, 0, len(compat.Models))
 	for i := range compat.Models {
 		model := compat.Models[i]
-		modelID := strings.TrimSpace(model.GetAlias())
-		if modelID == "" {
-			modelID = strings.TrimSpace(model.GetName())
-		}
 		modelType := "openai-compatibility"
-		if model.Image || isImageModelName(modelID) {
+		if model.Image {
 			modelType = registry.OpenAIImageModelType
-		} else if isVideoModelName(modelID) {
-			modelType = "openai-video"
 		}
 		info := buildConfiguredModelInfo(model, compat.Name, modelType, now, strings.TrimSpace(model.Alias), false)
 		if info == nil {

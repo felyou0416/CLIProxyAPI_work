@@ -1288,18 +1288,6 @@ func executionAliasPoolModel(auth *Auth, requestedModel string, aliasResult OAut
 	return requestedModel
 }
 
-// resolveAggregateMembers returns all configured OAuth alias members for a model.
-func (m *Manager) resolveAggregateMembers(requestedModel string) []AliasChannelEntry {
-	if m == nil || strings.TrimSpace(requestedModel) == "" {
-		return nil
-	}
-	table, _ := m.oauthModelAlias.Load().(*oauthModelAliasTable)
-	if table == nil {
-		return nil
-	}
-	return table.entriesForAlias(requestedModel)
-}
-
 func (m *Manager) resolveAPIKeyModelAliasWithResult(auth *Auth, requestedModel string) OAuthModelAliasResult {
 	if m == nil || auth == nil {
 		return OAuthModelAliasResult{}
@@ -1905,10 +1893,6 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			result.RetryAfter = retryAfterFromError(errStream)
 			m.MarkResult(ctx, result)
 			if isRequestInvalidError(errStream) {
-				if len(m.resolveAggregateMembers(routeModel)) > 1 {
-					lastErr = errStream
-					continue
-				}
 				return nil, errStream
 			}
 			lastErr = errStream
@@ -1948,10 +1932,6 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 				result.RetryAfter = retryAfterFromError(bootstrapErr)
 				m.MarkResult(ctx, result)
 				discardStreamChunks(streamResult.Chunks)
-				if len(m.resolveAggregateMembers(routeModel)) > 1 {
-					lastErr = bootstrapErr
-					continue
-				}
 				return nil, bootstrapErr
 			}
 			if idx < len(execModels)-1 {
@@ -1974,10 +1954,6 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			result.RetryAfter = retryAfterFromError(bootstrapErr)
 			m.MarkResult(ctx, result)
 			discardStreamChunks(streamResult.Chunks)
-			if len(m.resolveAggregateMembers(routeModel)) > 1 {
-				lastErr = bootstrapErr
-				continue
-			}
 			return nil, newStreamBootstrapError(bootstrapErr, streamResult.Headers)
 		}
 
@@ -1986,10 +1962,6 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: false, Error: emptyErr}
 			m.MarkResult(ctx, result)
 			if idx < len(execModels)-1 {
-				lastErr = emptyErr
-				continue
-			}
-			if len(m.resolveAggregateMembers(routeModel)) > 1 {
 				lastErr = emptyErr
 				continue
 			}
@@ -2585,18 +2557,13 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 	homeAuthCount := 1
 	tried := make(map[string]struct{})
 	attempted := make(map[string]struct{})
-	aggregateMembers := m.resolveAggregateMembers(routeModel)
-	aggregateTriedModels := make(map[string]struct{})
 	var lastErr error
 	for {
 		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials {
-			if len(aggregateMembers) > 1 && len(aggregateTriedModels) < len(aggregateMembers) {
-				// Continue until every aggregate member has had an execution attempt.
-			} else if lastErr != nil {
+			if lastErr != nil {
 				return cliproxyexecutor.Response{}, lastErr
-			} else {
-				return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 			}
+			return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 		}
 		pickOpts := opts
 		if homeMode {
@@ -2650,9 +2617,6 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 			execOpts := opts
 			execReq, execOpts = applyRequestAfterAuthInterceptor(execCtx, executor, provider, execReq, execOpts, requestedModelAliasFromOptions(execOpts, routeModel))
 			resp, errExec := executor.Execute(execCtx, auth, execReq, execOpts)
-			if len(aggregateMembers) > 1 {
-				aggregateTriedModels[upstreamModel] = struct{}{}
-			}
 			if errExec != nil {
 				if errCtx := execCtx.Err(); errCtx != nil {
 					return cliproxyexecutor.Response{}, errCtx
@@ -2679,10 +2643,6 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 				}
 				m.MarkResult(execCtx, result)
 				if isRequestInvalidError(errExec) {
-					if len(aggregateMembers) > 1 {
-						authErr = errExec
-						continue
-					}
 					return cliproxyexecutor.Response{}, errExec
 				}
 				authErr = errExec
@@ -2694,10 +2654,6 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 		}
 		if authErr != nil {
 			if isRequestInvalidError(authErr) {
-				if len(aggregateMembers) > 1 {
-					lastErr = authErr
-					continue
-				}
 				return cliproxyexecutor.Response{}, authErr
 			}
 			lastErr = authErr
@@ -2720,18 +2676,13 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 	homeAuthCount := 1
 	tried := make(map[string]struct{})
 	attempted := make(map[string]struct{})
-	aggregateMembers := m.resolveAggregateMembers(routeModel)
-	aggregateTriedModels := make(map[string]struct{})
 	var lastErr error
 	for {
 		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials {
-			if len(aggregateMembers) > 1 && len(aggregateTriedModels) < len(aggregateMembers) {
-				// Continue until every aggregate member has had an execution attempt.
-			} else if lastErr != nil {
+			if lastErr != nil {
 				return cliproxyexecutor.Response{}, lastErr
-			} else {
-				return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 			}
+			return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 		}
 		pickOpts := opts
 		if homeMode {
@@ -2785,9 +2736,6 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 			execOpts := opts
 			execReq, execOpts = applyRequestAfterAuthInterceptor(execCtx, executor, provider, execReq, execOpts, requestedModelAliasFromOptions(execOpts, routeModel))
 			resp, errExec := executor.CountTokens(execCtx, auth, execReq, execOpts)
-			if len(aggregateMembers) > 1 {
-				aggregateTriedModels[upstreamModel] = struct{}{}
-			}
 			if errExec != nil {
 				if errCtx := execCtx.Err(); errCtx != nil {
 					return cliproxyexecutor.Response{}, errCtx
@@ -2814,10 +2762,6 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 				}
 				m.MarkResult(execCtx, result)
 				if isRequestInvalidError(errExec) {
-					if len(aggregateMembers) > 1 {
-						authErr = errExec
-						continue
-					}
 					return cliproxyexecutor.Response{}, errExec
 				}
 				authErr = errExec
@@ -2829,10 +2773,6 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 		}
 		if authErr != nil {
 			if isRequestInvalidError(authErr) {
-				if len(aggregateMembers) > 1 {
-					lastErr = authErr
-					continue
-				}
 				return cliproxyexecutor.Response{}, authErr
 			}
 			lastErr = authErr
@@ -2855,18 +2795,13 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 	homeAuthCount := 1
 	tried := make(map[string]struct{})
 	attempted := make(map[string]struct{})
-	aggregateMembers := m.resolveAggregateMembers(routeModel)
-	aggregateTriedModels := make(map[string]struct{})
 	var lastErr error
 	for {
 		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials {
-			if len(aggregateMembers) > 1 && len(aggregateTriedModels) < len(aggregateMembers) {
-				// Continue until every aggregate member has had an execution attempt.
-			} else if lastErr != nil {
+			if lastErr != nil {
 				return nil, lastErr
-			} else {
-				return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
 			}
+			return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
 		}
 		pickOpts := opts
 		if homeMode {
@@ -2911,21 +2846,12 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 		if restoreExecutionModel {
 			streamExecutionModel = executionModel
 		}
-		if len(aggregateMembers) > 1 {
-			for _, upstreamModel := range models {
-				aggregateTriedModels[upstreamModel] = struct{}{}
-			}
-		}
 		streamResult, errStream := m.executeStreamWithModelPool(execCtx, executor, auth, provider, execReq, opts, routeModel, streamExecutionModel, models, pooled, aliasResult)
 		if errStream != nil {
 			if errCtx := execCtx.Err(); errCtx != nil {
 				return nil, errCtx
 			}
 			if isRequestInvalidError(errStream) {
-				if len(aggregateMembers) > 1 {
-					lastErr = errStream
-					continue
-				}
 				return nil, errStream
 			}
 			lastErr = errStream

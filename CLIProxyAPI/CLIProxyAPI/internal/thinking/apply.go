@@ -209,8 +209,29 @@ func ApplyThinking(body []byte, model string, fromFormat string, toFormat string
 		return body, nil
 	}
 
-	// 4. Get config using resolved priority
-	config := resolveEffectiveConfig(body, model, fromFormat, providerFormat, suffixResult)
+	// 4. Get config: suffix priority over body
+	var config ThinkingConfig
+	if suffixResult.HasSuffix {
+		config = parseSuffixToConfig(suffixResult.RawSuffix, providerFormat, model)
+		log.WithFields(log.Fields{
+			"provider": providerFormat,
+			"model":    model,
+			"mode":     config.Mode,
+			"budget":   config.Budget,
+			"level":    config.Level,
+		}).Debug("thinking: config from model suffix |")
+	} else {
+		config = extractThinkingConfig(body, providerFormat)
+		if hasThinkingConfig(config) {
+			log.WithFields(log.Fields{
+				"provider": providerFormat,
+				"model":    modelInfo.ID,
+				"mode":     config.Mode,
+				"budget":   config.Budget,
+				"level":    config.Level,
+			}).Debug("thinking: original config from request |")
+		}
+	}
 
 	if !hasThinkingConfig(config) {
 		log.WithFields(log.Fields{
@@ -307,8 +328,32 @@ func applyUserDefinedModel(body []byte, modelInfo *registry.ModelInfo, fromForma
 		modelID = suffixResult.ModelName
 	}
 
-	// Get config using resolved priority
-	config := resolveEffectiveConfig(body, modelID, fromFormat, toFormat, suffixResult)
+	// Get config: suffix priority over body
+	var config ThinkingConfig
+	if suffixResult.HasSuffix {
+		config = parseSuffixToConfig(suffixResult.RawSuffix, toFormat, modelID)
+		log.WithFields(log.Fields{
+			"provider": toFormat,
+			"model":    modelID,
+			"mode":     config.Mode,
+			"budget":   config.Budget,
+			"level":    config.Level,
+		}).Debug("thinking: config from model suffix |")
+	} else {
+		config = extractThinkingConfig(body, fromFormat)
+		if !hasThinkingConfig(config) && fromFormat != toFormat {
+			config = extractThinkingConfig(body, toFormat)
+		}
+		if hasThinkingConfig(config) {
+			log.WithFields(log.Fields{
+				"provider": toFormat,
+				"model":    modelID,
+				"mode":     config.Mode,
+				"budget":   config.Budget,
+				"level":    config.Level,
+			}).Debug("thinking: original config from request |")
+		}
+	}
 
 	if !hasThinkingConfig(config) {
 		log.WithFields(log.Fields{

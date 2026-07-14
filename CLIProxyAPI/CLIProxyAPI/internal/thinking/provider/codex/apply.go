@@ -32,25 +32,6 @@ func init() {
 	thinking.RegisterProvider("codex", NewApplier())
 }
 
-// stripReasoningEffort removes reasoning.effort from body and cleans up
-// an empty reasoning object if no other keys remain.
-func stripReasoningEffort(body []byte) ([]byte, error) {
-	result, _ := sjson.DeleteBytes(body, "reasoning.effort")
-	if r := gjson.GetBytes(result, "reasoning"); r.Exists() && r.IsObject() && len(r.Map()) == 0 {
-		result, _ = sjson.DeleteBytes(result, "reasoning")
-	}
-	return result, nil
-}
-
-// setOrStripReasoningEffort either strips the field (for "none") or sets it.
-func setOrStripReasoningEffort(body []byte, effort string) ([]byte, error) {
-	if effort == string(thinking.LevelNone) {
-		return stripReasoningEffort(body)
-	}
-	result, _ := sjson.SetBytes(body, "reasoning.effort", effort)
-	return result, nil
-}
-
 // Apply applies thinking configuration to Codex request body.
 //
 // Expected output format:
@@ -78,7 +59,8 @@ func (a *Applier) Apply(body []byte, config thinking.ThinkingConfig, modelInfo *
 	}
 
 	if config.Mode == thinking.ModeLevel {
-		return setOrStripReasoningEffort(body, string(config.Level))
+		result, _ := sjson.SetBytes(body, "reasoning.effort", string(config.Level))
+		return result, nil
 	}
 
 	effort := ""
@@ -98,7 +80,8 @@ func (a *Applier) Apply(body []byte, config thinking.ThinkingConfig, modelInfo *
 		return body, nil
 	}
 
-	return setOrStripReasoningEffort(body, effort)
+	result, _ := sjson.SetBytes(body, "reasoning.effort", effort)
+	return result, nil
 }
 
 func applyCompatibleCodex(body []byte, config thinking.ThinkingConfig) ([]byte, error) {
@@ -132,5 +115,6 @@ func applyCompatibleCodex(body []byte, config thinking.ThinkingConfig) ([]byte, 
 		return body, nil
 	}
 
-	return setOrStripReasoningEffort(body, effort)
+	result, _ := sjson.SetBytes(body, "reasoning.effort", effort)
+	return result, nil
 }

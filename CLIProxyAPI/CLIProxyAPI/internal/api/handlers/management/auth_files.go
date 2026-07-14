@@ -1161,22 +1161,7 @@ func (h *Handler) buildAuthFromFileData(path string, data []byte) (*coreauth.Aut
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		return nil, fmt.Errorf("invalid auth file: %w", err)
 	}
-	metadata = PromoteNestedContent(metadata)
-
-	t, _ := metadata["type"].(string)
-	provider := strings.ToLower(t)
-	if provider == "oauth" || provider == "api_key" {
-		if p, ok := metadata["provider"].(string); ok && p != "" {
-			provider = strings.ToLower(strings.TrimSpace(p))
-		}
-	}
-	// Map compound provider names to short form used by executor/router.
-	switch provider {
-	case "openai-codex":
-		provider = "codex"
-	case "gemini":
-		provider = "gemini-cli"
-	}
+	provider, _ := metadata["type"].(string)
 	if provider == "" {
 		provider = "unknown"
 	}
@@ -1203,22 +1188,18 @@ func (h *Handler) buildAuthFromFileData(path string, data []byte) (*coreauth.Aut
 		}
 	}
 	if auth == nil {
-		attr := map[string]string{
-			"path":   path,
-			"source": path,
-		}
 		auth = &coreauth.Auth{
-			ID:         authID,
-			Provider:   provider,
-			Label:      label,
-			Status:     coreauth.StatusActive,
-			Attributes: attr,
-			Metadata:   metadata,
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
-		}
-		if strings.ToLower(t) == "api_key" {
-			ApplyAuthFileCustomApiKeyAttributes(auth, provider, metadata)
+			ID:       authID,
+			Provider: provider,
+			Label:    label,
+			Status:   coreauth.StatusActive,
+			Attributes: map[string]string{
+				"path":   path,
+				"source": path,
+			},
+			Metadata:  metadata,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
 		}
 	}
 	auth.ID = authID

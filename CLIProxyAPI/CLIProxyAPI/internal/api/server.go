@@ -536,11 +536,6 @@ func (s *Server) setupRoutes() {
 		v1.POST("/responses", openaiResponsesHandlers.Responses)
 		v1.POST("/responses/compact", openaiResponsesHandlers.Compact)
 		v1.POST("/alpha/search", s.codexAlphaSearch)
-
-		// Legacy dashboard and billing usage endpoints.
-		v1.GET("/dashboard/billing/subscription", openaiHandlers.BillingSubscription)
-		v1.GET("/dashboard/billing/usage", openaiHandlers.BillingUsage)
-		v1.GET("/usage", openaiHandlers.Usage)
 	}
 
 	openaiV1 := s.engine.Group("/openai/v1")

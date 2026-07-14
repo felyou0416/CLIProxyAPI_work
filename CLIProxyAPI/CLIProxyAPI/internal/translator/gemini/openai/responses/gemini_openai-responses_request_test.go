@@ -219,17 +219,11 @@ func TestConvertOpenAIResponsesRequestToGemini_ReasoningSignatureCompatibility(t
 		t.Run(tt.name, func(t *testing.T) {
 			input := []byte(`{
 				"model": "gpt-5",
-				"input": [
-					{
-						"type": "reasoning",
-						"encrypted_content": "` + tt.encrypted + `",
-						"summary": [{"type": "summary_text", "text": "reasoning summary"}]
-					},
-					{
-						"role": "user",
-						"content": "hello"
-					}
-				]
+				"input": [{
+					"type": "reasoning",
+					"encrypted_content": "` + tt.encrypted + `",
+					"summary": [{"type": "summary_text", "text": "reasoning summary"}]
+				}]
 			}`)
 
 			output := ConvertOpenAIResponsesRequestToGemini("gemini-3.5-flash", input, false)

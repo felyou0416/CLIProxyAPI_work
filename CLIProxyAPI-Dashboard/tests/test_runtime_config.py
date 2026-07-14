@@ -39,5 +39,36 @@ class RuntimeConfigRequestLogTests(unittest.TestCase):
             self.assertNotIn('request-log: false', runtime_text)
 
 
+class RuntimeConfigLocalPluginTests(unittest.TestCase):
+    def test_agnes_media_models_use_media_proxy_group(self):
+        entries = [{
+            'provider': 'agnes',
+            'base_url': 'https://example.invalid/v1',
+            'api_key': 'secret-value',
+            'models': [
+                {'name': 'agnes-2.0-flash', 'alias': 'agnes-agnes-2.0-flash'},
+                {'name': 'agnes-image-2.1-flash', 'alias': 'agnes-agnes-image-2.1-flash'},
+                {'name': 'agnes-video-v2.0', 'alias': 'agnes-agnes-video-v2.0'},
+            ],
+        }]
+        with patch.object(auth, '_group_manual_entry_models', return_value={
+            'agnes': entries[0]['models'],
+        }), patch.object(auth, '_load_model_mapping_overrides', return_value={}):
+            block = auth.build_openai_compatibility_block(entries)
+
+        self.assertIn('name: "agnes"', block)
+        self.assertIn('base-url: "https://example.invalid/v1"', block)
+        self.assertIn('name: "agnes-media"', block)
+        self.assertIn('base-url: "http://127.0.0.1:8320/v1"', block)
+        self.assertIn('alias: "agnes-agnes-image-2.1-flash"', block)
+        self.assertIn('image: true', block)
+
+    def test_plugin_config_is_written_as_top_level_block(self):
+        rendered = auth.rewrite_local_plugin_config('host: "127.0.0.1"\n')
+        self.assertIn('\nplugins:\n', rendered)
+        self.assertIn('cliproxy-local:', rendered)
+        self.assertIn('media_provider: "openai-compatible-agnes-media"', rendered)
+
+
 if __name__ == '__main__':
     unittest.main()
