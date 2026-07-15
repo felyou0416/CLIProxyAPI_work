@@ -53,6 +53,60 @@ class ProjectControlTests(unittest.TestCase):
         payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
         self.assertTrue(payload["proxy_running"])
 
+    def test_grok2api_start_route_delegates_to_dual_service_start(self):
+        handler = _FakeHandler()
+        with patch.object(
+            post_routes,
+            "start_grok2api",
+            return_value={"ok": True, "message": "Started frontend and backend.", "url": "http://127.0.0.1:5173/"},
+        ) as start_grok2api:
+            handled = post_routes.handle_post(handler, SimpleNamespace(path="/api/grok2api/start"), {})
+
+        self.assertTrue(handled)
+        self.assertEqual(handler.status, 200)
+        start_grok2api.assert_called_once()
+        payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+        self.assertEqual(payload["url"], "http://127.0.0.1:5173/")
+
+    def test_grok2api_stop_route_delegates_to_dual_service_stop(self):
+        handler = _FakeHandler()
+        with patch.object(
+            post_routes,
+            "stop_grok2api",
+            return_value={"ok": True, "message": "Stopped frontend and backend."},
+        ) as stop_grok2api:
+            handled = post_routes.handle_post(handler, SimpleNamespace(path="/api/grok2api/stop"), {})
+
+        self.assertTrue(handled)
+        self.assertEqual(handler.status, 200)
+        stop_grok2api.assert_called_once()
+
+    def test_grok2api_backend_start_route_is_independent(self):
+        handler = _FakeHandler()
+        with patch.object(
+            post_routes,
+            "start_grok2api_backend",
+            return_value={"ok": True, "message": "Started backend."},
+        ) as start_backend:
+            handled = post_routes.handle_post(handler, SimpleNamespace(path="/api/grok2api/backend/start"), {})
+
+        self.assertTrue(handled)
+        self.assertEqual(handler.status, 200)
+        start_backend.assert_called_once()
+
+    def test_grok2api_frontend_stop_route_is_independent(self):
+        handler = _FakeHandler()
+        with patch.object(
+            post_routes,
+            "stop_grok2api_frontend",
+            return_value={"ok": True, "message": "Stopped frontend."},
+        ) as stop_frontend:
+            handled = post_routes.handle_post(handler, SimpleNamespace(path="/api/grok2api/frontend/stop"), {})
+
+        self.assertTrue(handled)
+        self.assertEqual(handler.status, 200)
+        stop_frontend.assert_called_once()
+
     def test_provider_model_delete_rebuilds_runtime_config(self):
         handler = _FakeHandler()
         with patch.object(post_routes, "delete_provider_model_override", return_value={

@@ -2,7 +2,7 @@ from backend.auth import create_manual_auth_entry, create_manual_auth_bundle_ent
 from backend.model_thinking import save_model_thinking_configs
 from backend.api_keys import create_api_key, update_api_key, delete_api_key, reset_api_key_usage, reveal_api_key
 from backend.state import load_state, save_state, normalize_route_strategy
-from backend.processes import start_device_login, stop_device_login, start_proxy, stop_proxy, restart_proxy, start_project, start_oauth_manager, stop_oauth_manager, start_openclaw_gateway, stop_openclaw_gateway, restart_openclaw_gateway, start_media_proxy, stop_media_proxy, restart_media_proxy, current_status, ensure_firewall_access, ensure_custom_firewall_ports, remove_custom_firewall_ports, ensure_port_bindings, remove_port_bindings, set_ip_helper_service, stop_dashboard_panel, restart_dashboard_panel
+from backend.processes import start_device_login, stop_device_login, start_proxy, stop_proxy, restart_proxy, start_project, start_oauth_manager, stop_oauth_manager, start_openclaw_gateway, stop_openclaw_gateway, restart_openclaw_gateway, start_media_proxy, stop_media_proxy, restart_media_proxy, start_grok2api, stop_grok2api, restart_grok2api, start_grok2api_backend, stop_grok2api_backend, start_grok2api_frontend, stop_grok2api_frontend, current_status, ensure_firewall_access, ensure_custom_firewall_ports, remove_custom_firewall_ports, ensure_port_bindings, remove_port_bindings, set_ip_helper_service, stop_dashboard_panel, restart_dashboard_panel
 from backend.tools import run_tool, stop_tool, test_provider_models, test_image_models, test_auth_entry, queue_provider_model_tests, clear_provider_model_test_state, stop_provider_model_tests, run_storage_cleanup, _proxy_request
 from backend.terminals import open_terminal, open_desktop_terminal, close_terminal, list_terminals, write_terminal, resize_terminal
 from backend.routes.helpers import send_json
@@ -628,6 +628,31 @@ def handle_post(handler, parsed, data):
         return True
     if parsed.path == '/api/media-proxy/stop':
         send_json(handler, stop_media_proxy())
+        return True
+    if parsed.path == '/api/grok2api/start':
+        result = start_grok2api()
+        send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/grok2api/restart':
+        result = restart_grok2api()
+        send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/grok2api/stop':
+        send_json(handler, stop_grok2api())
+        return True
+    if parsed.path == '/api/grok2api/backend/start':
+        result = start_grok2api_backend()
+        send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/grok2api/backend/stop':
+        send_json(handler, stop_grok2api_backend())
+        return True
+    if parsed.path == '/api/grok2api/frontend/start':
+        result = start_grok2api_frontend()
+        send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/grok2api/frontend/stop':
+        send_json(handler, stop_grok2api_frontend())
         return True
     if parsed.path == '/api/tunnel/start':
         from backend.processes import start_cloudflared_tunnel

@@ -9,6 +9,7 @@ import re
 import base64
 import json
 import ipaddress
+import shutil
 from pathlib import Path
 from backend.paths import (
     CLI_EXE,
@@ -28,6 +29,11 @@ from backend.paths import (
     LOGS_DIR,
     MEDIA_PROXY_STDOUT,
     MEDIA_PROXY_STDERR,
+    GROK2API_ROOT,
+    GROK2API_STDOUT,
+    GROK2API_STDERR,
+    GROK2API_FRONTEND_STDOUT,
+    GROK2API_FRONTEND_STDERR,
     ACCESS_GATEWAY_STDOUT,
     ACCESS_GATEWAY_STDERR,
     RUNTIME_VARIANT,
@@ -45,13 +51,28 @@ def get_process_name(pid):
         return psutil.Process(pid).name()
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
         return None
-processes = {'device_login': None, 'proxy': None, 'access_gateway': None, 'media_proxy': None, 'oauth_manager': None, 'openclaw': None}
+processes = {
+    'device_login': None,
+    'proxy': None,
+    'access_gateway': None,
+    'media_proxy': None,
+    'oauth_manager': None,
+    'openclaw': None,
+    'grok2api': None,
+    'grok2api_frontend': None,
+}
 tool_processes: dict = {}
 tool_states: dict = {}
 DEFAULT_TRUSTED_REMOTE_ADDRESSES = ['fd7a:115c:a1e0::9e39:c580', '100.89.197.128']
 OAUTH_MANAGER_DIR = Path(r'E:\U_App\oauth-manager')
-OAUTH_MANAGER_STDOUT = OAUTH_MANAGER_DIR / 'dashboard.stdout.log'
-OAUTH_MANAGER_STDERR = OAUTH_MANAGER_DIR / 'dashboard.stderr.log'
+OAUTH_MANAGER_SWITCHER = OAUTH_MANAGER_DIR / 'switcher.py'
+OAUTH_MANAGER_RUN_DIR = OAUTH_MANAGER_DIR / 'run'
+OAUTH_MANAGER_PID_FILE = OAUTH_MANAGER_RUN_DIR / 'dashboard.pid'
+OAUTH_MANAGER_PORT_FILE = OAUTH_MANAGER_RUN_DIR / 'dashboard_port.txt'
+OAUTH_MANAGER_LEGACY_PORT_FILE = OAUTH_MANAGER_DIR / 'dashboard_port.txt'
+OAUTH_MANAGER_STDOUT = OAUTH_MANAGER_DIR / 'logs' / 'dashboard.stdout.log'
+OAUTH_MANAGER_STDERR = OAUTH_MANAGER_DIR / 'logs' / 'dashboard.stderr.log'
+OAUTH_MANAGER_DEFAULT_PORT = 1900
 OPENCLAW_HOME = Path.home() / '.openclaw'
 OPENCLAW_GATEWAY_CMD = OPENCLAW_HOME / 'gateway.cmd'
 OPENCLAW_CMD = Path.home() / 'AppData' / 'Roaming' / 'npm' / 'openclaw.cmd'
@@ -96,6 +117,14 @@ def core_proxy_port():
 
 def media_proxy_port():
     return 8320
+
+
+def grok2api_port():
+    return 8000
+
+
+def grok2api_frontend_port():
+    return 5173
 
 
 def wait_for_listener(port: int, proc=None, timeout_seconds: float = 30.0):
@@ -1117,26 +1146,79 @@ def find_oauth_manager_pid():
     now = time.time()
     if now - _oauth_manager_pid_cache['time'] < 3.0:
         return _oauth_manager_pid_cache['value']
-    
+
     val = _find_oauth_manager_pid_uncached()
     _oauth_manager_pid_cache['value'] = val
     _oauth_manager_pid_cache['time'] = now
     return val
 
-def _find_oauth_manager_pid_uncached():
-    if is_windows() and command_exists('powershell'):
+
+def _oauth_manager_port() -> int:
+    for path in (OAUTH_MANAGER_PORT_FILE, OAUTH_MANAGER_LEGACY_PORT_FILE):
         try:
-            command = (
-                "$needle = 'E:\\U_App\\oauth-manager'; "
-                "$p = Get-CimInstance Win32_Process | "
-                "Where-Object { $_.Name -notlike '*powershell*' -and $_.CommandLine -and $_.CommandLine -like '*switcher.py*--dashboard*' -and $_.CommandLine -like \"*$needle*\" } | "
-                "Select-Object -First 1 -ExpandProperty ProcessId; "
-                "if($null -ne $p){ Write-Output $p }"
-            )
-            output = subprocess.check_output(['powershell', '-NoProfile', '-Command', command], text=True, stderr=subprocess.DEVNULL, timeout=3).strip()
-            return int(output) if output else None
+            port = int(path.read_text(encoding='utf-8', errors='ignore').strip())
+            if 1 <= port <= 65535:
+                return port
         except Exception:
-            return None
+            continue
+    return OAUTH_MANAGER_DEFAULT_PORT
+
+
+def _pid_is_alive(pid: int | None) -> bool:
+    if not pid:
+        return False
+    try:
+        return psutil.Process(int(pid)).is_running()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, TypeError, ValueError):
+        try:
+            os.kill(int(pid), 0)
+            return True
+        except Exception:
+            return False
+
+
+def _read_oauth_manager_pid_file() -> int | None:
+    try:
+        pid = int(OAUTH_MANAGER_PID_FILE.read_text(encoding='utf-8', errors='ignore').strip())
+    except Exception:
+        return None
+    return pid if _pid_is_alive(pid) else None
+
+
+def _find_oauth_manager_pid_uncached():
+    # Prefer the PID written by switcher.py itself.
+    pid = _read_oauth_manager_pid_file()
+    if pid:
+        return pid
+
+    # Then resolve by the dashboard listen port.
+    port = _oauth_manager_port()
+    listener_pid = find_proxy_listener_pid(port)
+    if listener_pid:
+        name = (get_process_name(listener_pid) or '').lower()
+        if name in ('python.exe', 'pythonw.exe', 'python', 'pythonw', 'py.exe', 'pyw.exe'):
+            return listener_pid
+
+    # Fallback: scan process command lines for switcher.py --dashboard.
+    # Real launches often use a relative path from OAUTH_MANAGER_DIR, so do not
+    # require the absolute directory needle that previously caused permanent red status.
+    try:
+        needle = 'switcher.py'
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                cmdline = proc.info.get('cmdline') or []
+                text = ' '.join(str(part) for part in cmdline).lower()
+                name = str(proc.info.get('name') or '').lower()
+                if 'switcher.py' not in text or '--dashboard' not in text:
+                    continue
+                if 'powershell' in name or 'cmd.exe' in name:
+                    continue
+                if needle in text:
+                    return int(proc.info['pid'])
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, TypeError, ValueError, KeyError):
+                continue
+    except Exception:
+        pass
     return None
 
 
@@ -1255,60 +1337,168 @@ def restart_openclaw_gateway():
 
 
 def _oauth_manager_url():
-    port_file = OAUTH_MANAGER_DIR / 'dashboard_port.txt'
-    try:
-        port = int(port_file.read_text(encoding='utf-8', errors='ignore').strip())
-    except Exception:
-        port = 1900
-    return f'http://127.0.0.1:{port}'
+    return f'http://127.0.0.1:{_oauth_manager_port()}'
+
+
+def _oauth_manager_python_candidates() -> list[str]:
+    candidates = []
+    for name in ('pythonw', 'python', 'pyw', 'py'):
+        path = shutil.which(name)
+        if path and path not in candidates:
+            candidates.append(path)
+    return candidates
+
+
+def _oauth_manager_launch_command() -> list[str]:
+    switcher = str(OAUTH_MANAGER_SWITCHER)
+    for python_bin in _oauth_manager_python_candidates():
+        lower = python_bin.lower()
+        if lower.endswith('py.exe') or lower.endswith('pyw.exe') or Path(python_bin).name.lower() in ('py', 'pyw'):
+            return [python_bin, '-3.12', switcher, '--dashboard']
+        return [python_bin, switcher, '--dashboard']
+    return ['python', switcher, '--dashboard']
 
 
 def start_oauth_manager():
     _oauth_manager_pid_cache['time'] = 0
     if not OAUTH_MANAGER_DIR.exists():
         return {'ok': False, 'message': f'OAuth Manager directory was not found: {OAUTH_MANAGER_DIR}'}
-    start_bat = OAUTH_MANAGER_DIR / 'start.bat'
-    if not start_bat.exists():
-        return {'ok': False, 'message': f'start.bat was not found: {start_bat}'}
-    
+    if not OAUTH_MANAGER_SWITCHER.exists():
+        return {'ok': False, 'message': f'switcher.py was not found: {OAUTH_MANAGER_SWITCHER}'}
+
     with process_lock:
-        if process_alive(processes.get('oauth_manager')) or find_oauth_manager_pid():
-            return {'ok': True, 'message': f'OAuth Manager is already running at {_oauth_manager_url()}.'}
-        
+        running_pid = None
+        tracked = processes.get('oauth_manager')
+        if process_alive(tracked):
+            running_pid = tracked.pid
+        if not running_pid:
+            running_pid = find_oauth_manager_pid()
+        if running_pid:
+            _oauth_manager_pid_cache['value'] = running_pid
+            _oauth_manager_pid_cache['time'] = time.time()
+            return {
+                'ok': True,
+                'message': f'OAuth Manager is already running at {_oauth_manager_url()}.',
+                'pid': running_pid,
+                'url': _oauth_manager_url(),
+            }
+
         try:
-            subprocess.Popen(
-                ['cmd', '/c', 'start.bat'],
+            OAUTH_MANAGER_RUN_DIR.mkdir(parents=True, exist_ok=True)
+            OAUTH_MANAGER_STDOUT.parent.mkdir(parents=True, exist_ok=True)
+            command = _oauth_manager_launch_command()
+            env = os.environ.copy()
+            env['OAUTH_MANAGER_NO_BROWSER'] = '1'
+            fout = open(OAUTH_MANAGER_STDOUT, 'w', encoding='utf-8', errors='ignore')
+            ferr = open(OAUTH_MANAGER_STDERR, 'w', encoding='utf-8', errors='ignore')
+            creationflags = 0
+            if is_windows():
+                creationflags = getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+            proc = subprocess.Popen(
+                command,
                 cwd=str(OAUTH_MANAGER_DIR),
-                creationflags=subprocess.CREATE_NEW_CONSOLE if is_windows() else 0
+                stdout=fout,
+                stderr=ferr,
+                stdin=subprocess.DEVNULL,
+                env=env,
+                creationflags=creationflags,
+                close_fds=False if is_windows() else True,
             )
-            return {'ok': True, 'message': f'Started OAuth Manager via start.bat at {_oauth_manager_url()}.'}
+            processes['oauth_manager'] = proc
+            # switcher.py rewrites run/dashboard.pid; wait for TCP listen readiness.
+            ready_pid = None
+            deadline = time.time() + 12.0
+            while time.time() < deadline:
+                if not process_alive(proc) and not _read_oauth_manager_pid_file():
+                    break
+                # Invalidate short-lived PID cache while waiting for readiness.
+                _oauth_manager_pid_cache['time'] = 0
+                ready_pid = find_oauth_manager_pid() or (proc.pid if process_alive(proc) else None)
+                listener_pid = find_proxy_listener_pid(_oauth_manager_port())
+                if ready_pid and listener_pid:
+                    break
+                time.sleep(0.25)
+
+            listener_pid = find_proxy_listener_pid(_oauth_manager_port())
+            if not listener_pid and not process_alive(proc) and not find_oauth_manager_pid():
+                err_tail = ''
+                try:
+                    err_tail = OAUTH_MANAGER_STDERR.read_text(encoding='utf-8', errors='ignore')[-500:]
+                except Exception:
+                    pass
+                processes['oauth_manager'] = None
+                message = 'Failed to start OAuth Manager.'
+                if err_tail.strip():
+                    message = f'{message} {err_tail.strip()}'
+                return {'ok': False, 'message': message, 'command': command, 'url': _oauth_manager_url()}
+
+            ready_pid = listener_pid or find_oauth_manager_pid() or proc.pid
+            _oauth_manager_pid_cache['value'] = ready_pid
+            _oauth_manager_pid_cache['time'] = time.time()
+            return {
+                'ok': True,
+                'message': f'Started OAuth Manager at {_oauth_manager_url()}.',
+                'pid': ready_pid,
+                'command': command,
+                'url': _oauth_manager_url(),
+            }
         except Exception as exc:
-            return {'ok': False, 'message': f'Failed to launch start.bat: {exc}'}
+            processes['oauth_manager'] = None
+            return {'ok': False, 'message': f'Failed to start OAuth Manager: {exc}', 'url': _oauth_manager_url()}
 
 
 def stop_oauth_manager():
     _oauth_manager_pid_cache['time'] = 0
-    stop_bat = OAUTH_MANAGER_DIR / 'stop.bat'
-    if not stop_bat.exists():
-        return {'ok': False, 'message': f'stop.bat was not found: {stop_bat}'}
-    
+    stopped = False
     with process_lock:
         proc = processes.get('oauth_manager')
-        if proc:
-            kill_process(proc)
+        if process_alive(proc):
+            stopped = _kill_pid_tree(proc.pid) or kill_process(proc) or stopped
             processes['oauth_manager'] = None
-            
+
+    pid = find_oauth_manager_pid()
+    if pid:
+        stopped = _kill_pid_tree(pid) or stopped
+
+    stop_script = OAUTH_MANAGER_DIR / 'scripts' / 'stop_dashboard.py'
+    stop_bat = OAUTH_MANAGER_DIR / 'stop.bat'
     try:
-        subprocess.run(
-            ['cmd', '/c', 'stop.bat'],
-            cwd=str(OAUTH_MANAGER_DIR),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=_creationflags()
-        )
-        return {'ok': True, 'message': 'Stopped OAuth Manager via stop.bat.'}
-    except Exception as exc:
-        return {'ok': False, 'message': f'Failed to launch stop.bat: {exc}'}
+        if stop_script.exists():
+            subprocess.run(
+                [shutil.which('python') or 'python', str(stop_script)],
+                cwd=str(OAUTH_MANAGER_DIR),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=_creationflags(),
+                timeout=15,
+            )
+            stopped = True
+        elif stop_bat.exists():
+            subprocess.run(
+                ['cmd', '/c', str(stop_bat)],
+                cwd=str(OAUTH_MANAGER_DIR),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=_creationflags(),
+                timeout=15,
+            )
+            stopped = True
+    except Exception:
+        pass
+
+    try:
+        if OAUTH_MANAGER_PID_FILE.exists():
+            OAUTH_MANAGER_PID_FILE.unlink()
+    except Exception:
+        pass
+
+    _oauth_manager_pid_cache['value'] = None
+    _oauth_manager_pid_cache['time'] = time.time()
+    return {
+        'ok': True,
+        'message': 'Stopped OAuth Manager.' if stopped else 'OAuth Manager was not running.',
+        'url': _oauth_manager_url(),
+    }
 
 
 def read_tail(path, max_chars: int = 6000):
@@ -1727,6 +1917,173 @@ def restart_media_proxy():
     return start_media_proxy()
 
 
+def grok2api_config_path() -> Path:
+    return GROK2API_ROOT / 'config.yaml'
+
+
+def grok2api_binary_path() -> Path:
+    name = 'grok2api.exe' if is_windows() else 'grok2api'
+    return GROK2API_ROOT / name
+
+
+def wait_for_grok2api_ready(timeout_seconds: float = 45.0):
+    backend_ready = wait_for_listener(grok2api_port(), timeout_seconds=timeout_seconds)
+    return backend_ready and wait_for_listener(grok2api_frontend_port(), timeout_seconds=timeout_seconds)
+
+
+def _start_grok2api_process(command, cwd: Path, stdout_path: Path, stderr_path: Path, env=None):
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    stdout = open(stdout_path, 'a', encoding='utf-8', errors='ignore')
+    stderr = open(stderr_path, 'a', encoding='utf-8', errors='ignore')
+    try:
+        return subprocess.Popen(
+            command,
+            cwd=str(cwd),
+            stdout=stdout,
+            stderr=stderr,
+            stdin=subprocess.DEVNULL,
+            env=env,
+            creationflags=_creationflags(),
+        )
+    finally:
+        stdout.close()
+        stderr.close()
+
+
+def start_grok2api_backend():
+    if not GROK2API_ROOT.exists():
+        return {'ok': False, 'message': f'Grok2API directory was not found: {GROK2API_ROOT}'}
+    config_path = grok2api_config_path()
+    if not config_path.exists():
+        return {'ok': False, 'message': f'Grok2API config was not found: {config_path}'}
+    if find_proxy_listener_pid(grok2api_port()):
+        return {'ok': True, 'message': f'Grok2API backend is already running on port {grok2api_port()}.'}
+
+    binary = grok2api_binary_path()
+    if binary.exists():
+        command = [str(binary), '--config', str(config_path)]
+        backend_cwd = GROK2API_ROOT
+    elif command_exists('go'):
+        command = ['go', 'run', './cmd/grok2api', '--config', str(config_path)]
+        backend_cwd = GROK2API_ROOT / 'backend'
+    else:
+        return {
+            'ok': False,
+            'message': f'Grok2API binary was not found at {binary}, and Go runtime is unavailable.',
+        }
+
+    with process_lock:
+        try:
+            processes['grok2api'] = _start_grok2api_process(
+                command, backend_cwd, GROK2API_STDOUT, GROK2API_STDERR
+            )
+            proc = processes['grok2api']
+        except OSError as exc:
+            return {'ok': False, 'message': f'Failed to start Grok2API backend: {exc}'}
+    if wait_for_listener(grok2api_port(), proc=proc, timeout_seconds=45.0):
+        return {'ok': True, 'message': f'Started Grok2API backend on port {grok2api_port()}.'}
+    kill_process(proc)
+    processes['grok2api'] = None
+    return {'ok': False, 'message': f'Grok2API backend did not become ready on port {grok2api_port()}.'}
+
+
+def start_grok2api_frontend():
+    frontend_root = GROK2API_ROOT / 'frontend'
+    if not (frontend_root / 'package.json').exists():
+        return {'ok': False, 'message': f'Grok2API frontend was not found: {frontend_root}'}
+    if find_proxy_listener_pid(grok2api_frontend_port()):
+        return {'ok': True, 'message': f'Grok2API frontend is already running on port {grok2api_frontend_port()}.'}
+    pnpm = shutil.which('pnpm.cmd' if is_windows() else 'pnpm') or shutil.which('pnpm')
+    if not pnpm:
+        return {'ok': False, 'message': 'pnpm was not found in PATH. Install pnpm before starting the Grok2API frontend.'}
+
+    frontend_command = [pnpm, 'exec', 'vite', '--host', '127.0.0.1', '--port', str(grok2api_frontend_port()), '--strictPort']
+    if is_windows():
+        frontend_command = [os.environ.get('COMSPEC', 'cmd.exe'), '/d', '/s', '/c', subprocess.list2cmdline(frontend_command)]
+    frontend_env = os.environ.copy()
+    frontend_env['VITE_DEV_API_TARGET'] = f'http://127.0.0.1:{grok2api_port()}'
+    with process_lock:
+        try:
+            processes['grok2api_frontend'] = _start_grok2api_process(
+                frontend_command,
+                frontend_root,
+                GROK2API_FRONTEND_STDOUT,
+                GROK2API_FRONTEND_STDERR,
+                env=frontend_env,
+            )
+            proc = processes['grok2api_frontend']
+        except OSError as exc:
+            return {'ok': False, 'message': f'Failed to start Grok2API frontend: {exc}'}
+    if wait_for_listener(grok2api_frontend_port(), proc=proc, timeout_seconds=45.0):
+        return {
+            'ok': True,
+            'message': f'Started Grok2API frontend on port {grok2api_frontend_port()}.',
+            'url': f'http://127.0.0.1:{grok2api_frontend_port()}/',
+        }
+    kill_process(proc)
+    processes['grok2api_frontend'] = None
+    return {'ok': False, 'message': f'Grok2API frontend did not become ready on port {grok2api_frontend_port()}.'}
+
+
+def stop_grok2api_backend():
+    with process_lock:
+        stopped = kill_process(processes.get('grok2api'))
+        processes['grok2api'] = None
+    time.sleep(0.2)
+    listener_pid = find_proxy_listener_pid(grok2api_port())
+    if listener_pid:
+        stopped = stop_pid(listener_pid) or stopped
+    return {
+        'ok': True,
+        'message': 'Stopped Grok2API backend.' if stopped else 'Grok2API backend was not running.',
+    }
+
+
+def stop_grok2api_frontend():
+    with process_lock:
+        stopped = kill_process(processes.get('grok2api_frontend'))
+        processes['grok2api_frontend'] = None
+    time.sleep(0.2)
+    listener_pid = find_proxy_listener_pid(grok2api_frontend_port())
+    if listener_pid:
+        stopped = stop_pid(listener_pid) or stopped
+    return {
+        'ok': True,
+        'message': 'Stopped Grok2API frontend.' if stopped else 'Grok2API frontend was not running.',
+    }
+
+
+def start_grok2api():
+    backend = start_grok2api_backend()
+    if not backend.get('ok'):
+        return backend
+    frontend = start_grok2api_frontend()
+    if not frontend.get('ok'):
+        return frontend
+    return {
+        'ok': True,
+        'message': f'Started Grok2API frontend ({grok2api_frontend_port()}) and backend ({grok2api_port()}).',
+        'url': f'http://127.0.0.1:{grok2api_frontend_port()}/',
+    }
+
+
+def stop_grok2api():
+    frontend = stop_grok2api_frontend()
+    backend = stop_grok2api_backend()
+    return {
+        'ok': True,
+        'message': 'Stopped Grok2API frontend and backend.',
+        'frontend': frontend,
+        'backend': backend,
+    }
+
+
+def restart_grok2api():
+    stop_grok2api()
+    time.sleep(0.4)
+    return start_grok2api()
+
+
 def current_status(include_logs: bool = True):
     state = load_state()
     auth_files = list_auth_files()
@@ -1741,6 +2098,8 @@ def current_status(include_logs: bool = True):
 
     tracked_proxy_running = process_alive(processes.get('proxy')) and process_alive(processes.get('access_gateway'))
     tracked_media_proxy_running = process_alive(processes.get('media_proxy'))
+    tracked_grok2api_running = process_alive(processes.get('grok2api'))
+    tracked_grok2api_frontend_running = process_alive(processes.get('grok2api_frontend'))
     tracked_oauth_manager_running = process_alive(processes.get('oauth_manager'))
     tracked_openclaw_proc = processes.get('openclaw')
     tracked_openclaw_running = process_alive(tracked_openclaw_proc)
@@ -1750,6 +2109,8 @@ def current_status(include_logs: bool = True):
     openclaw_running = bool(tracked_openclaw_running or openclaw_pid)
     listener_pid = find_proxy_listener_pid()
     media_proxy_pid = processes.get('media_proxy').pid if tracked_media_proxy_running else find_proxy_listener_pid(media_proxy_port())
+    grok2api_pid = processes.get('grok2api').pid if tracked_grok2api_running else find_proxy_listener_pid(grok2api_port())
+    grok2api_frontend_pid = processes.get('grok2api_frontend').pid if tracked_grok2api_frontend_running else find_proxy_listener_pid(grok2api_frontend_port())
     listener_process_name = get_process_name(listener_pid) if listener_pid else None
     listener_is_proxy = bool(listener_pid and listener_process_name and listener_process_name.lower() in _managed_proxy_process_names())
     proxy_running = bool(tracked_proxy_running or listener_is_proxy)
@@ -1799,6 +2160,14 @@ def current_status(include_logs: bool = True):
         'media_proxy_running': bool(tracked_media_proxy_running or media_proxy_pid),
         'media_proxy_pid': media_proxy_pid,
         'media_proxy_url': f'http://127.0.0.1:{media_proxy_port()}',
+        'grok2api_running': bool((tracked_grok2api_running or grok2api_pid) and (tracked_grok2api_frontend_running or grok2api_frontend_pid)),
+        'grok2api_backend_running': bool(tracked_grok2api_running or grok2api_pid),
+        'grok2api_frontend_running': bool(tracked_grok2api_frontend_running or grok2api_frontend_pid),
+        'grok2api_pid': grok2api_pid,
+        'grok2api_frontend_pid': grok2api_frontend_pid,
+        'grok2api_url': f'http://127.0.0.1:{grok2api_frontend_port()}/',
+        'grok2api_backend_url': f'http://127.0.0.1:{grok2api_port()}/',
+        'grok2api_root': str(GROK2API_ROOT),
         'proxy_url': local_proxy_url,
         'local_proxy_url': local_proxy_url,
         'exposure_url': exposure_url,
@@ -1844,6 +2213,10 @@ def current_status(include_logs: bool = True):
             'proxy_stderr': read_tail(PROXY_STDERR),
             'media_proxy_stdout': read_tail(MEDIA_PROXY_STDOUT),
             'media_proxy_stderr': read_tail(MEDIA_PROXY_STDERR),
+            'grok2api_stdout': read_tail(GROK2API_STDOUT),
+            'grok2api_stderr': read_tail(GROK2API_STDERR),
+            'grok2api_frontend_stdout': read_tail(GROK2API_FRONTEND_STDOUT),
+            'grok2api_frontend_stderr': read_tail(GROK2API_FRONTEND_STDERR),
         })
     return status
 

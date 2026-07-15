@@ -5,8 +5,10 @@ window.oauthActionBusy = false;
 window.dashboardActionBusy = false;
 window.openclawActionBusy = false;
 window.mediaProxyActionBusy = false;
+window.grok2apiActionBusy = false;
 
-const INDICATOR_TYPES = ['proxy', 'media-proxy', 'openclaw', 'ip-helper', 'dashboard', 'oauth', 'tunnel'];
+const INDICATOR_TYPES = ['proxy', 'media-proxy', 'openclaw', 'ip-helper', 'dashboard', 'oauth', 'tunnel', 'grok2api'];
+const GROK2API_DEFAULT_URL = 'http://127.0.0.1:5173/';
 const INDICATOR_CACHE_KEY = 'cli-indicator-states';
 
 function loadIndicatorStates() {
@@ -135,6 +137,9 @@ async function refreshStatus() {
     setText('runtime-config', s.runtime_config || '', '');
     setText('proxy-local-url', s.local_proxy_url || 'http://127.0.0.1:8317', 'http://127.0.0.1:8317');
     setText('media-proxy-url', s.media_proxy_url || 'http://127.0.0.1:8320', 'http://127.0.0.1:8320');
+    const grok2apiUrl = s.grok2api_url || GROK2API_DEFAULT_URL;
+    const grok2apiTitle = document.getElementById('grok2api-title-link');
+    if (grok2apiTitle) grok2apiTitle.href = grok2apiUrl;
     setText('proxy-exposure-url', s.exposure_url || '-', '-');
     setText('proxy-api-key', s.api_key || 'cliproxyapi', 'cliproxyapi');
     setText('exposure-mode-status', s.exposure_enabled ? 'Enabled (LAN)' : 'Disabled', 'Disabled');
@@ -144,6 +149,9 @@ async function refreshStatus() {
     }
     if (!window.mediaProxyActionBusy) {
       window.updateIndicator('media-proxy', s.media_proxy_running ? 'green' : 'red');
+    }
+    if (!window.grok2apiActionBusy) {
+      window.updateIndicator('grok2api', s.grok2api_running ? 'green' : 'red');
     }
     if (!window.tunnelActionBusy) {
       window.updateIndicator('tunnel', s.tunnel_running ? 'green' : 'red');
@@ -193,6 +201,26 @@ async function refreshStatus() {
         mediaProxyStartBtn.disabled = true;
         mediaProxyRestartBtn.disabled = true;
         mediaProxyStopBtn.disabled = true;
+      }
+    }
+
+    const grok2apiControls = [
+      { type: 'frontend', running: !!s.grok2api_frontend_running },
+      { type: 'backend', running: !!s.grok2api_backend_running },
+    ];
+    for (const control of grok2apiControls) {
+      const startButton = document.getElementById(`grok2api-${control.type}-start-btn`);
+      const stopButton = document.getElementById(`grok2api-${control.type}-stop-btn`);
+      const dot = document.getElementById(`grok2api-${control.type}-dot`);
+      if (dot) dot.className = `status-indicator-dot ${control.running ? 'green' : 'red'}`;
+      if (!startButton || !stopButton) continue;
+      startButton.disabled = control.running;
+      startButton.style.opacity = control.running ? '0.5' : '1';
+      stopButton.disabled = !control.running;
+      stopButton.style.opacity = control.running ? '1' : '0.5';
+      if (window.grok2apiActionBusy) {
+        startButton.disabled = true;
+        stopButton.disabled = true;
       }
     }
 
@@ -375,11 +403,22 @@ async function stopProxy(button) {
 }
 
 async function startOAuthManager(button) {
-  return handleActionWithIndicator('oauth', button, t('runtime.startingOAuthManager', '启动中...'), '/api/start-oauth-manager', 'red');
+  return handleActionWithIndicator('oauth', button, t('runtime.startingOAuthManager', '启动中...'), '/api/start-oauth-manager', 'red', {
+    waitFor: status => !!status.oauth_manager_running,
+    timeoutMs: 20000,
+    intervalMs: 1000,
+    readyMessage: t('runtime.oauthManagerReady', 'OAuth Manager 已启动。'),
+    timeoutMessage: t('runtime.oauthManagerStartTimeout', 'OAuth Manager 启动命令已发出，但未检测到服务就绪。请查看 OAuth Manager 日志。'),
+  });
 }
 
 async function stopOAuthManager(button) {
-  return handleActionWithIndicator('oauth', button, t('runtime.stoppingOAuthManager', '停止中...'), '/api/stop-oauth-manager', 'green');
+  return handleActionWithIndicator('oauth', button, t('runtime.stoppingOAuthManager', '停止中...'), '/api/stop-oauth-manager', 'green', {
+    waitFor: status => !status.oauth_manager_running,
+    timeoutMs: 15000,
+    intervalMs: 800,
+    readyMessage: t('runtime.oauthManagerStopped', 'OAuth Manager 已停止。'),
+  });
 }
 
 async function waitForOpenClawRunning(button, label, actionApiUrl) {
@@ -414,6 +453,28 @@ async function restartMediaProxy(button) {
 
 async function stopMediaProxy(button) {
   return handleActionWithIndicator('media-proxy', button, '停止中...', '/api/media-proxy/stop', 'green');
+}
+
+async function runGrok2ApiServiceAction(button, label, endpoint, errorState) {
+  const result = await handleActionWithIndicator('grok2api', button, label, endpoint, errorState);
+  await refreshStatus();
+  return result;
+}
+
+async function startGrok2ApiFrontend(button) {
+  return runGrok2ApiServiceAction(button, '启动前端...', '/api/grok2api/frontend/start', 'red');
+}
+
+async function stopGrok2ApiFrontend(button) {
+  return runGrok2ApiServiceAction(button, '关闭前端...', '/api/grok2api/frontend/stop', 'red');
+}
+
+async function startGrok2ApiBackend(button) {
+  return runGrok2ApiServiceAction(button, '启动后端...', '/api/grok2api/backend/start', 'red');
+}
+
+async function stopGrok2ApiBackend(button) {
+  return runGrok2ApiServiceAction(button, '关闭后端...', '/api/grok2api/backend/stop', 'red');
 }
 
 async function enableExposureMode(button) {

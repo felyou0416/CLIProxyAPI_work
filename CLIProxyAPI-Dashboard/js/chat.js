@@ -326,21 +326,40 @@ function syncChatModeUI() {
   const videoOptions = document.getElementById('chat-video-options');
   if (videoOptions) videoOptions.hidden = !isVideoMode();
 
-  const settingsBar = document.querySelector('.chat-settings-bar');
-  if (settingsBar) settingsBar.hidden = isMediaMode();
+  const optionsSidebar = document.getElementById('chat-options-sidebar');
+  if (optionsSidebar) {
+    optionsSidebar.hidden = !isMediaMode();
+  }
+  const optionsTitle = document.getElementById('options-sidebar-title');
+  if (optionsTitle) {
+    optionsTitle.textContent = isImageMode() ? '画图参数' : '视频参数';
+  }
+
+  const settingsBar = document.getElementById('chat-settings-bar');
+  const systemToggle = document.getElementById('chat-system-toggle');
+  if (isMediaMode()) {
+    if (settingsBar) settingsBar.hidden = true;
+    if (systemToggle) {
+      systemToggle.hidden = true;
+      systemToggle.classList.remove('active');
+    }
+  } else if (systemToggle) {
+    systemToggle.hidden = false;
+    if (settingsBar && !settingsBar.hidden) systemToggle.classList.add('active');
+  }
 
   const input = document.getElementById('chat-input');
   if (input) {
     input.placeholder = isImageMode()
-      ? 'Describe an image to generate...'
+      ? '描述要生成的图片...'
       : isVideoMode()
-        ? 'Describe a video to generate...'
-      : 'Send a message...';
+        ? '描述要生成的视频...'
+      : '发送消息...';
   }
 
   const sendBtn = document.querySelector('.chat-send-btn');
   if (sendBtn) {
-    sendBtn.title = isImageMode() ? 'Generate image (Enter)' : isVideoMode() ? 'Generate video (Enter)' : 'Send (Enter)';
+    sendBtn.title = isImageMode() ? '生成图片 (Enter)' : isVideoMode() ? '生成视频 (Enter)' : '发送 (Enter)';
   }
 
   if (isImageMode()) selectPreferredImageModel();
@@ -350,6 +369,19 @@ function syncChatModeUI() {
   if (history && history.querySelector('.chat-welcome')) renderChatWelcome();
   renderChatHistoryList();
   updateChatSendState();
+}
+
+function toggleChatSystemPrompt() {
+  if (isMediaMode()) return;
+  const settingsBar = document.getElementById('chat-settings-bar');
+  const systemToggle = document.getElementById('chat-system-toggle');
+  if (!settingsBar) return;
+  settingsBar.hidden = !settingsBar.hidden;
+  if (systemToggle) systemToggle.classList.toggle('active', !settingsBar.hidden);
+  if (!settingsBar.hidden) {
+    const sp = document.getElementById('chat-system-prompt');
+    if (sp) sp.focus();
+  }
 }
 
 function setImagePreset(button) {
@@ -683,12 +715,13 @@ function renderChatHistoryList() {
   }
   const modeStatusEl = document.getElementById('chat-mode-status');
   if (modeStatusEl) {
-    modeStatusEl.textContent = `${modeSessions.length} ${chatMode === 'chat' ? 'chats' : 'tasks'} in this mode`;
+    const unit = chatMode === 'chat' ? '个会话' : '个任务';
+    modeStatusEl.textContent = `当前模式 ${modeSessions.length} ${unit}`;
   }
 
   if (modeSessions.length === 0) {
-    const label = isImageMode() ? 'image tasks' : isVideoMode() ? 'video tasks' : 'chat sessions';
-    container.innerHTML = `<div class="chat-session-empty">No ${label} yet</div>`;
+    const label = isImageMode() ? '图片任务' : isVideoMode() ? '视频任务' : '会话';
+    container.innerHTML = `<div class="chat-session-empty">暂无${label}</div>`;
     return;
   }
 
@@ -792,11 +825,19 @@ async function loadChatPanel() {
 function renderChatWelcome() {
   const hist = document.getElementById('chat-history');
   if (!hist) return;
-  const welcomeText = isImageMode() ? 'Describe the image you want to generate' : isVideoMode() ? 'Describe the video you want to generate' : 'Select a model and start chatting';
-  const welcomeHint = isImageMode() ? 'Enter to generate · choose size and style above' : isVideoMode() ? 'Enter to generate · video may take a minute' : 'Enter to send · Shift+Enter for newline';
+  const welcomeText = isImageMode()
+    ? '描述你想生成的图片'
+    : isVideoMode()
+      ? '描述你想生成的视频'
+      : '选择模型，开始对话';
+  const welcomeHint = isImageMode()
+    ? 'Enter 生成 · 在右侧设置尺寸与风格'
+    : isVideoMode()
+      ? 'Enter 生成 · 视频可能需要一分钟'
+      : 'Enter 发送 · Shift+Enter 换行';
   hist.innerHTML = `<div class="chat-welcome">
     <div class="chat-welcome-icon">
-      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
     </div>
     <div class="chat-welcome-text">${welcomeText}</div>
     <div class="chat-welcome-hint">${welcomeHint}</div>
@@ -1419,6 +1460,12 @@ function applyChatSkill(key) {
     sp.value = skill.prompt;
     sp.dispatchEvent(new Event('input'));
   }
+  const settingsBar = document.getElementById('chat-settings-bar');
+  const systemToggle = document.getElementById('chat-system-toggle');
+  if (settingsBar && !isMediaMode()) {
+    settingsBar.hidden = false;
+    if (systemToggle) systemToggle.classList.add('active');
+  }
   closeChatSkillModal();
   showMessage(`已应用 Skill: ${skill.name}`);
 }
@@ -1446,6 +1493,12 @@ async function handleChatSkillFileSelected(e) {
     if (sp) {
       sp.value = text;
       sp.dispatchEvent(new Event('input'));
+    }
+    const settingsBar = document.getElementById('chat-settings-bar');
+    const systemToggle = document.getElementById('chat-system-toggle');
+    if (settingsBar && !isMediaMode()) {
+      settingsBar.hidden = false;
+      if (systemToggle) systemToggle.classList.add('active');
     }
     closeChatSkillModal();
     showMessage(`已加载自定义 Skill: ${file.name}`);

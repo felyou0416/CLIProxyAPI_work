@@ -463,6 +463,22 @@
   .model-map-layout {
     grid-template-columns: 1fr;
   }
+
+  .model-map-sidebar-card,
+  .provider-model-map-list,
+  .provider-map-card {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .provider-map-card {
+    padding: 10px;
+  }
+
+  .provider-map-provider-edit {
+    min-width: 0;
+  }
 }
 .api-key-mode-switch .provider-category-btn {
   flex: 1 1 140px;

@@ -49,6 +49,21 @@ PROJECT_ROOT = PROXY_ROOT
 APP_DIR = PROXY_ROOT
 MEDIA_PROXY_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI-MediaProxy'
 ACCESS_GATEWAY_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI-AccessGateway'
+
+
+def _resolve_grok2api_root() -> Path:
+    for key in ('GROK2API_ROOT', 'RELAYX_GROK2API_ROOT'):
+        raw = os.environ.get(key, '').strip()
+        if raw:
+            return Path(raw).expanduser()
+    # Prefer sibling of the monorepo root: E:\U_App\grok2api
+    sibling = DASHBOARD_ROOT.parent.parent / 'grok2api'
+    if sibling.exists():
+        return sibling
+    return DASHBOARD_ROOT.parent / 'grok2api'
+
+
+GROK2API_ROOT = _resolve_grok2api_root()
 ACCESS_GATEWAY_BINARY = Path(os.environ.get('CLIPROXYAPI_ACCESS_GATEWAY_BINARY', '')).expanduser() if os.environ.get('CLIPROXYAPI_ACCESS_GATEWAY_BINARY', '').strip() else ACCESS_GATEWAY_ROOT / ('cli-access-gateway.exe' if os.name == 'nt' else 'cli-access-gateway')
 
 LEGACY_DEV_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI_dev'
@@ -114,6 +129,10 @@ PROXY_STDOUT = LOGS_DIR / 'proxy.stdout.log'
 PROXY_STDERR = LOGS_DIR / 'proxy.stderr.log'
 MEDIA_PROXY_STDOUT = LOGS_DIR / 'media-proxy.stdout.log'
 MEDIA_PROXY_STDERR = LOGS_DIR / 'media-proxy.stderr.log'
+GROK2API_STDOUT = LOGS_DIR / 'grok2api.stdout.log'
+GROK2API_STDERR = LOGS_DIR / 'grok2api.stderr.log'
+GROK2API_FRONTEND_STDOUT = LOGS_DIR / 'grok2api-frontend.stdout.log'
+GROK2API_FRONTEND_STDERR = LOGS_DIR / 'grok2api-frontend.stderr.log'
 ACCESS_GATEWAY_STDOUT = LOGS_DIR / 'access-gateway.stdout.log'
 ACCESS_GATEWAY_STDERR = LOGS_DIR / 'access-gateway.stderr.log'
 RUNTIME_CONFIG = RUNTIME_DIR / 'cliproxyapi-active-config.yaml'

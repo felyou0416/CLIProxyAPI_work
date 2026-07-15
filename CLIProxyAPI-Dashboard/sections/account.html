@@ -104,6 +104,32 @@
           <button class="danger runtime-action-btn" id="media-proxy-stop-btn" onclick="stopMediaProxy(this)">停止</button>
         </div>
       </div>
+
+      <!-- Group 8: Grok2API Frontend Control -->
+      <div class="control-group">
+        <div class="control-group-heading">
+          <span class="control-group-icon">🖥️</span>
+          <a href="http://127.0.0.1:5173/" target="_blank" class="control-group-title-link" id="grok2api-title-link" data-i18n="label.grok2apiFrontendGroup">Grok2API 前端</a>
+          <span id="grok2api-frontend-dot" class="status-indicator-dot red" title="Grok2API 前端状态"></span>
+        </div>
+        <div class="control-pair">
+          <button class="runtime-action-btn" type="button" id="grok2api-frontend-start-btn" onclick="startGrok2ApiFrontend(this)" data-i18n="btn.grok2apiStart">启动</button>
+          <button class="danger runtime-action-btn" type="button" id="grok2api-frontend-stop-btn" onclick="stopGrok2ApiFrontend(this)" data-i18n="btn.grok2apiStop">关闭</button>
+        </div>
+      </div>
+
+      <!-- Group 9: Grok2API Backend Control -->
+      <div class="control-group">
+        <div class="control-group-heading">
+          <span class="control-group-icon">⚙️</span>
+          <a href="http://127.0.0.1:8000/readyz" target="_blank" class="control-group-title-link" title="查看 Grok2API 后端就绪状态" data-i18n="label.grok2apiBackendGroup">Grok2API 后端</a>
+          <span id="grok2api-backend-dot" class="status-indicator-dot red" title="Grok2API 后端状态"></span>
+        </div>
+        <div class="control-pair">
+          <button class="runtime-action-btn" type="button" id="grok2api-backend-start-btn" onclick="startGrok2ApiBackend(this)" data-i18n="btn.grok2apiStart">启动</button>
+          <button class="danger runtime-action-btn" type="button" id="grok2api-backend-stop-btn" onclick="stopGrok2ApiBackend(this)" data-i18n="btn.grok2apiStop">关闭</button>
+        </div>
+      </div>
     </div>
 
     <!-- Status Grid -->

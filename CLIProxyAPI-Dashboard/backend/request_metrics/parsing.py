@@ -5,7 +5,15 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from backend.paths import AUTH_ARCHIVE_DIR, AUTH_DIR, PROXY_STDOUT, REQUEST_LOG_DIR, REQUEST_ARCHIVE_DIR, STORAGE_DIR
+from backend.paths import (
+    ACTIVE_AUTH_DIR,
+    AUTH_ARCHIVE_DIR,
+    AUTH_DIR,
+    PROXY_STDOUT,
+    REQUEST_ARCHIVE_DIR,
+    REQUEST_LOG_DIR,
+    STORAGE_DIR,
+)
 from backend.api_keys import find_key_by_masked_value, record_api_key_usage
 
 
@@ -467,10 +475,15 @@ def _tail_archived_request_events(limit: int, source: str | None = None) -> list
 
 
 def _request_log_dirs() -> list[Path]:
-    dirs = [REQUEST_LOG_DIR, AUTH_DIR / 'logs', AUTH_ARCHIVE_DIR / 'default' / 'metadata' / 'logs']
-    legacy_nested_dir = STORAGE_DIR / 'storage' / 'runtime' / 'active-auth' / 'logs'
-    if legacy_nested_dir != REQUEST_LOG_DIR:
-        dirs.append(legacy_nested_dir)
+    # Active runtime auth dir is the live request-log target written by the proxy.
+    # Keep legacy locations so older installs and archived auth trees still resolve.
+    dirs = [
+        ACTIVE_AUTH_DIR / 'logs',
+        REQUEST_LOG_DIR,
+        AUTH_DIR / 'logs',
+        AUTH_ARCHIVE_DIR / 'default' / 'metadata' / 'logs',
+        STORAGE_DIR / 'storage' / 'runtime' / 'active-auth' / 'logs',
+    ]
     result = []
     seen = set()
     for path in dirs:
