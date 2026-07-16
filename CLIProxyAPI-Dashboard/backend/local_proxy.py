@@ -14,10 +14,14 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 DEFAULT_CANDIDATE_PORTS = (
     7890, 7891, 7892, 7893, 7897,
+    10090, 9790,  # MaoMaoCloud / mihomo common mixed + control ports
     10808, 10809,
     20171, 20172,
-    10090, 6152, 6153, 2080, 8888,
+    6152, 6153, 2080, 8888,
 )
+
+# Control-panel ports sometimes listen but are not HTTP mixed-ports.
+_CONTROL_PORT_HINTS = {9090, 9091, 9790, 47890}
 
 _PROBE_URLS = (
     'http://www.gstatic.com/generate_204',
@@ -112,6 +116,8 @@ def _ports_from_app_configs() -> list[tuple[int, str]]:
         (roaming / 'MaoMaoCloud' / 'MaoMaoCloud' / 'config.yaml', 'maomao-config'),
         (roaming / 'MaoMaoCloud' / 'config.yaml', 'maomao-config'),
         (roaming / 'io.github.clash-verge-rev.clash-verge-rev' / 'clash-verge.yaml', 'clash-verge'),
+        (Path(r'C:/Program Files (x86)/MAOMAOYUNAPP/resources/extra/config.yaml'), 'maomao-install-config'),
+        (Path(r'C:/Program Files/MAOMAOYUNAPP/resources/extra/config.yaml'), 'maomao-install-config'),
     ]
     for root, label in (
         (roaming / 'com.follow' / 'clash' / 'profiles', 'flclash-profile'),
@@ -125,7 +131,11 @@ def _ports_from_app_configs() -> list[tuple[int, str]]:
     for path, label in candidates:
         if not path.is_file():
             continue
-        port = _mixed_port_from_yaml(_read_text(path))
+        # Bundled MaoMao configs may be encrypted/binary; skip non-text.
+        text = _read_text(path)
+        if not text or '\x00' in text[:200] or not re.search(r'(?m)^(mixed-port|port|socks-port):', text):
+            continue
+        port = _mixed_port_from_yaml(text)
         if port:
             found.append((port, f'{label}:{path.name}'))
 
@@ -149,6 +159,57 @@ def _ports_from_app_configs() -> list[tuple[int, str]]:
         except Exception:
             continue
 
+    return found
+
+
+def _ports_from_running_proxy_processes() -> list[tuple[int, str]]:
+    """Discover mixed-ports from currently listening FlClash / mihomo / MaoMao processes."""
+    if os.name != 'nt':
+        return []
+    try:
+        import subprocess
+
+        ps = r'''
+$names = 'FlClashCore','FlClash','mihomo-windows-386','mihomo','MaoMaoCloud','clash-meta','Clash for Windows'
+Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | ForEach-Object {
+  try {
+    $proc = Get-Process -Id $_.OwningProcess -ErrorAction Stop
+    $n = [string]$proc.ProcessName
+    $match = $false
+    foreach ($name in $names) { if ($n -like ("*" + $name + "*") -or $n -match 'mihomo|FlClash|MaoMao|clash') { $match = $true; break } }
+    if (-not $match) { return }
+    $port = [int]$_.LocalPort
+    if ($port -lt 1024) { return }
+    '{0}|{1}' -f $port, $n
+  } catch {}
+}
+'''
+        completed = subprocess.run(
+            ['powershell', '-NoProfile', '-Command', ps],
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            timeout=4,
+        )
+    except Exception:
+        return []
+
+    found: list[tuple[int, str]] = []
+    for line in (completed.stdout or '').splitlines():
+        line = line.strip()
+        if '|' not in line:
+            continue
+        port_text, name = line.split('|', 1)
+        try:
+            port = int(port_text)
+        except Exception:
+            continue
+        if port in _CONTROL_PORT_HINTS:
+            # Still record, but mark as control so weight stays low later.
+            found.append((port, f'proc-control:{name}'))
+        else:
+            found.append((port, f'proc:{name}'))
     return found
 
 
@@ -247,23 +308,39 @@ def collect_candidate_ports(extra_ports: list[int] | None = None) -> list[dict]:
         add(port, 'default', 1)
     for port in extra_ports or []:
         add(port, 'extra', 5)
-    for port in _ports_from_system_proxy():
-        add(port, 'system-proxy', 4)
+
+    # Live process listeners beat stale config / system-proxy leftovers.
+    for port, source in _ports_from_running_proxy_processes():
+        if str(source).startswith('proc-control:'):
+            add(port, source, 2)
+        else:
+            add(port, source, 20)
+
     for port, source in _ports_from_app_configs():
         add(port, source, 6)
 
-    # Only probe listening for non-default candidates first (fast path).
-    # Default ports are checked later only if needed during detect.
+    # System proxy only counts when that port is actually listening.
+    for port in _ports_from_system_proxy():
+        if _port_is_listening(port):
+            add(port, 'system-proxy', 8)
+        else:
+            add(port, 'system-proxy-stale', 0)
+
     for port, item in list(scored.items()):
         sources = item.get('sources') or []
         if sources == ['default']:
             item['listening'] = None
             continue
         if _port_is_listening(port):
-            item['weight'] += 10
+            item['weight'] += 12
             item['listening'] = True
+            # Prefer real mixed-ports over known control ports.
+            if port in _CONTROL_PORT_HINTS:
+                item['weight'] -= 15
         else:
             item['listening'] = False
+            # Dead ports from old FlClash/system-proxy must not outrank a live MaoMao port.
+            item['weight'] = min(int(item['weight']), 3)
 
     return sorted(scored.values(), key=lambda item: (-int(item['weight']), int(item['port'])))
 
@@ -292,9 +369,13 @@ def detect_local_http_proxy(
     probes: list[dict] = []
 
     ordered_ports: list[int] = []
+    # Only honor prefer_port when it is currently listening; otherwise fall through
+    # to the live FlClash/MaoMao port (this is what breaks after switching clients).
     if prefer_port:
         try:
-            ordered_ports.append(int(prefer_port))
+            prefer_port_i = int(prefer_port)
+            if _port_is_listening(prefer_port_i):
+                ordered_ports.append(prefer_port_i)
         except Exception:
             pass
     for item in candidates:
@@ -307,8 +388,8 @@ def detect_local_http_proxy(
         meta = next((item for item in candidates if int(item['port']) == int(port)), {})
         sources = list(meta.get('sources') or [])
         weight = int(meta.get('weight') or 0)
-        # Skip closed ports quickly unless preferred.
-        if not _port_is_listening(port) and not (prefer_port and int(port) == int(prefer_port)):
+        # Skip closed ports quickly.
+        if not _port_is_listening(port):
             probes.append({
                 'port': int(port),
                 'proxy_url': f'http://127.0.0.1:{int(port)}',
@@ -326,6 +407,10 @@ def detect_local_http_proxy(
         probe['weight'] = weight
         probes.append(probe)
         if not probe.get('works'):
+            continue
+        # Skip pure control ports if we already have no mixed-port success yet —
+        # but only accept them as last resort (weight already demoted).
+        if port in _CONTROL_PORT_HINTS and not probe.get('proxy_like'):
             continue
         # Candidates are ordered by weight desc, so the first working port is best.
         best = probe

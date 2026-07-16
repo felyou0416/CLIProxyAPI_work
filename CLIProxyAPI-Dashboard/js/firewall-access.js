@@ -251,7 +251,7 @@ async function setIpHelperService(action, button) {
     showMessage('无效的 IP Helper 操作。', true);
     return null;
   }
-  const labelMap = { start: '启动中...', stop: '关闭中...', restart: '重启中...' };
+  const labelMap = { start: '启动', stop: '关闭', restart: '重启' };
   const titleMap = { start: '正在启动 IP Helper...', stop: '正在关闭 IP Helper...', restart: '正在重启 IP Helper...' };
   const msgMap = { start: '正在启动 IP Helper...', stop: '正在关闭 IP Helper...', restart: '正在重启 IP Helper...' };
   const label = labelMap[nextAction];

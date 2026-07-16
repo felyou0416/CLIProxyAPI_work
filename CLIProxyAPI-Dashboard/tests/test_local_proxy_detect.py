@@ -51,6 +51,25 @@ class LocalProxyDetectTests(unittest.TestCase):
         self.assertEqual(result['port'], 7892)
         self.assertEqual(result['proxy_url'], 'http://127.0.0.1:7892')
 
+    def test_detect_ignores_dead_prefer_port(self):
+        # Stale base-config proxy-url:7890 must not pin CPA after switching to MaoMao 10090.
+        with patch.object(local_proxy, 'collect_candidate_ports', return_value=[
+            {'port': 10090, 'sources': ['proc:mihomo-windows-386'], 'weight': 32, 'listening': True},
+            {'port': 7890, 'sources': ['system-proxy-stale'], 'weight': 1, 'listening': False},
+        ]):
+            with patch.object(local_proxy, '_port_is_listening', side_effect=lambda port, **kwargs: int(port) == 10090):
+                with patch.object(local_proxy, '_probe_http_proxy', side_effect=lambda port, **kwargs: {
+                    'port': int(port),
+                    'proxy_url': f'http://127.0.0.1:{int(port)}',
+                    'listening': int(port) == 10090,
+                    'works': int(port) == 10090,
+                    'proxy_like': int(port) == 10090,
+                    'error': '' if int(port) == 10090 else 'not_listening',
+                }):
+                    result = local_proxy.detect_local_http_proxy(prefer_port=7890, use_cache=False)
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['port'], 10090)
+
     def test_parse_clash_uses_detected_port_when_enabled(self):
         with patch.object(auth, '_detect_active_local_proxy', return_value={
             'ok': True,

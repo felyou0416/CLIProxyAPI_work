@@ -6,6 +6,7 @@ from backend.processes import start_device_login, stop_device_login, start_proxy
 from backend.tools import run_tool, stop_tool, test_provider_models, test_image_models, test_auth_entry, queue_provider_model_tests, clear_provider_model_test_state, stop_provider_model_tests, run_storage_cleanup, _proxy_request
 from backend.terminals import open_terminal, open_desktop_terminal, close_terminal, list_terminals, write_terminal, resize_terminal
 from backend.routes.helpers import send_json
+from backend.system_proxy import configure_system_proxy, toggle_system_proxy, restore_system_proxy_default, set_system_proxy_port
 
 
 def handle_post(handler, parsed, data):
@@ -1201,5 +1202,30 @@ def handle_post(handler, parsed, data):
                     return True
         result = set_access_password(str(new_password or ''))
         send_json(handler, result, status=200 if result.get('ok') else 500)
+        return True
+    if parsed.path == '/api/system-proxy/configure':
+        try:
+            send_json(handler, configure_system_proxy())
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': str(e)}, status=500)
+        return True
+    if parsed.path == '/api/system-proxy/toggle':
+        try:
+            send_json(handler, toggle_system_proxy())
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': str(e)}, status=500)
+        return True
+    if parsed.path == '/api/system-proxy/default':
+        try:
+            send_json(handler, restore_system_proxy_default())
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': str(e)}, status=500)
+        return True
+    if parsed.path == '/api/system-proxy/set-port':
+        try:
+            port = (data or {}).get('port') if isinstance(data, dict) else None
+            send_json(handler, set_system_proxy_port(port))
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': str(e)}, status=500)
         return True
     return False

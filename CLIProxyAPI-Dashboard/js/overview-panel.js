@@ -1,4 +1,5 @@
 let overviewPanelLoaded = false;
+let proxyStatus = { enabled: false, port: null, availablePorts: [] };
 
 function overviewApiWithTimeout(path, timeoutMs = 2500) {
   return Promise.race([
@@ -118,7 +119,196 @@ async function loadOverviewPanel(force = false) {
 
     if (wrap) wrap.innerHTML = cards;
     overviewPanelLoaded = true;
+    loadProxyStatus();
   } catch (error) {
     if (wrap) wrap.innerHTML = `<div class="metric-empty">${error.message || 'load failed'}</div>`;
+  }
+}
+
+function applyProxyStatus(item = {}) {
+  proxyStatus.enabled = !!(item.proxy_enabled);
+  proxyStatus.port = item.current_port || item.port || null;
+  proxyStatus.availablePorts = Array.isArray(item.available_ports) ? item.available_ports : [];
+  updateProxyStatusDisplay();
+}
+
+const SYSTEM_PROXY_PORT_BUTTONS = [7890, 10090, 7897];
+
+function updateProxyStatusDisplay() {
+  const statusDiv = document.getElementById('proxy-status');
+  const toggleBtn = document.getElementById('proxy-toggle-btn');
+  const indicator = document.getElementById('system-proxy-status-indicator');
+  const currentPort = Number(proxyStatus.port || 0) || null;
+  const available = new Set((proxyStatus.availablePorts || []).map((p) => Number(p)));
+
+  if (toggleBtn) {
+    if (proxyStatus.enabled) {
+      toggleBtn.textContent = '停用';
+      toggleBtn.title = '停止系统代理并清除代理环境变量';
+      toggleBtn.classList.remove('primary');
+      toggleBtn.classList.add('secondary');
+    } else {
+      toggleBtn.textContent = '启动';
+      toggleBtn.title = '检测可用端口并启动系统代理';
+      toggleBtn.classList.remove('secondary');
+      toggleBtn.classList.add('primary');
+    }
+  }
+
+  for (const port of SYSTEM_PROXY_PORT_BUTTONS) {
+    const btn = document.getElementById(`proxy-port-${port}-btn`);
+    if (!btn) continue;
+    const isActive = !!(proxyStatus.enabled && currentPort === port);
+    const isLive = available.has(port);
+    btn.classList.toggle('primary', isActive);
+    btn.classList.toggle('secondary', !isActive);
+    btn.title = isActive
+      ? `当前系统代理: 127.0.0.1:${port}`
+      : `切换系统代理到 127.0.0.1:${port}${isLive ? '（端口在线）' : '（端口未监听）'}`;
+  }
+
+  if (indicator) {
+    indicator.classList.remove('red', 'green', 'yellow');
+    if (proxyStatus.enabled) {
+      indicator.classList.add('green');
+      indicator.title = `系统代理已启用${currentPort ? ` (端口 ${currentPort})` : ''}`;
+    } else {
+      indicator.classList.add('red');
+      indicator.title = '系统代理未启用';
+    }
+  }
+
+  if (!statusDiv) return;
+
+  let html = proxyStatus.enabled
+    ? `代理状态: <span style="color: var(--success, #00aa00);">已启用</span>${currentPort ? ` (端口 ${currentPort})` : ''}`
+    : `代理状态: <span style="color: var(--danger, #aa0000);">未启用</span>`;
+
+  if (proxyStatus.availablePorts && proxyStatus.availablePorts.length > 0) {
+    html += ` · 可用端口: ${proxyStatus.availablePorts.join(', ')}`;
+  }
+  statusDiv.innerHTML = html;
+}
+
+async function loadProxyStatus() {
+  try {
+    const resp = await api('/api/system-proxy');
+    if (resp && resp.ok) {
+      applyProxyStatus(resp.item || resp);
+    }
+  } catch (e) {
+    console.error('Failed to load proxy status:', e);
+    const statusDiv = document.getElementById('proxy-status');
+    if (statusDiv) statusDiv.textContent = `读取失败: ${e.message || e}`;
+  }
+}
+
+function setProxyButtonsBusy(busy, activeBtn) {
+  const ids = [
+    'proxy-configure-btn',
+    'proxy-toggle-btn',
+    'proxy-default-btn',
+    ...SYSTEM_PROXY_PORT_BUTTONS.map((port) => `proxy-port-${port}-btn`),
+  ];
+  ids.forEach((id) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = !!busy;
+  });
+  if (activeBtn) activeBtn.disabled = !!busy;
+}
+
+async function proxySetPort(port, btn) {
+  const portNum = Number(port);
+  if (!portNum) return;
+  setProxyButtonsBusy(true, btn);
+  try {
+    const resp = await api('/api/system-proxy/set-port', 'POST', { port: portNum });
+    if (resp.ok) {
+      proxyStatus.enabled = true;
+      proxyStatus.port = resp.port || portNum;
+      updateProxyStatusDisplay();
+      if (typeof showMessage === 'function') showMessage(resp.message || `已切换到 ${portNum}`);
+      else alert(resp.message || `已切换到 ${portNum}`);
+      await loadProxyStatus();
+    } else if (typeof showMessage === 'function') {
+      showMessage(resp.message || '切换失败', true);
+    } else {
+      alert('切换失败: ' + (resp.message || '未知错误'));
+    }
+  } catch (e) {
+    if (typeof showMessage === 'function') showMessage('切换失败: ' + e.message, true);
+    else alert('切换失败: ' + e.message);
+  } finally {
+    setProxyButtonsBusy(false, btn);
+  }
+}
+
+async function proxyConfigure(btn) {
+  if (!confirm('将自动检测可用本地代理端口，并写入系统代理与环境变量。继续？')) return;
+  setProxyButtonsBusy(true, btn);
+  try {
+    const resp = await api('/api/system-proxy/configure', 'POST', {});
+    if (resp.ok) {
+      if (typeof showMessage === 'function') showMessage(resp.message || '配置成功');
+      else alert(resp.message || '配置成功');
+      await loadProxyStatus();
+    } else {
+      if (typeof showMessage === 'function') showMessage(resp.message || '配置失败', true);
+      else alert('配置失败: ' + (resp.message || '未知错误'));
+    }
+  } catch (e) {
+    if (typeof showMessage === 'function') showMessage('配置失败: ' + e.message, true);
+    else alert('配置失败: ' + e.message);
+  } finally {
+    setProxyButtonsBusy(false, btn);
+  }
+}
+
+async function proxyToggle(btn) {
+  const stopping = !!proxyStatus.enabled;
+  if (stopping && !confirm('确定要停止系统代理并清除代理环境变量吗？')) return;
+  setProxyButtonsBusy(true, btn);
+  try {
+    const resp = await api('/api/system-proxy/toggle', 'POST', {});
+    if (resp.ok) {
+      proxyStatus.enabled = !!resp.proxy_enabled;
+      proxyStatus.port = resp.port || null;
+      updateProxyStatusDisplay();
+      if (typeof showMessage === 'function') showMessage(resp.message || '操作成功');
+      else alert(resp.message || '操作成功');
+      await loadProxyStatus();
+    } else {
+      if (typeof showMessage === 'function') showMessage(resp.message || '操作失败', true);
+      else alert('操作失败: ' + (resp.message || '未知错误'));
+    }
+  } catch (e) {
+    if (typeof showMessage === 'function') showMessage('操作失败: ' + e.message, true);
+    else alert('操作失败: ' + e.message);
+  } finally {
+    setProxyButtonsBusy(false, btn);
+  }
+}
+
+async function proxyDefault(btn) {
+  if (!confirm('确定要恢复默认状态吗？\n这将关闭系统代理并清除所有代理环境变量。')) return;
+  setProxyButtonsBusy(true, btn);
+  try {
+    const resp = await api('/api/system-proxy/default', 'POST', {});
+    if (resp.ok) {
+      proxyStatus.enabled = false;
+      proxyStatus.port = null;
+      updateProxyStatusDisplay();
+      if (typeof showMessage === 'function') showMessage(resp.message || '已恢复默认状态');
+      else alert(resp.message || '已恢复默认状态');
+      await loadProxyStatus();
+    } else {
+      if (typeof showMessage === 'function') showMessage(resp.message || '操作失败', true);
+      else alert('操作失败: ' + (resp.message || '未知错误'));
+    }
+  } catch (e) {
+    if (typeof showMessage === 'function') showMessage('操作失败: ' + e.message, true);
+    else alert('操作失败: ' + e.message);
+  } finally {
+    setProxyButtonsBusy(false, btn);
   }
 }

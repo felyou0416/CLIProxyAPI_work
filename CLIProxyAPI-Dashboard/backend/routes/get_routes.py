@@ -10,6 +10,7 @@ from backend.model_thinking import load_model_thinking_configs, collect_thinking
 from backend.terminals import list_terminals, read_terminal
 from backend.request_metrics import parse_proxy_requests, parse_precise_request_events, parse_error_logs, merge_request_events, summarize_clients, summarize_models, summarize_model_test_stats, summarize_auth_health, ensure_observability_cache, refresh_observability_cache, get_cumulative_stats
 from backend.routes.helpers import send_json, send_file
+from backend.system_proxy import get_system_proxy_status
 import time
 import mimetypes
 
@@ -704,5 +705,11 @@ def handle_get(handler, parsed):
         token = extract_token_from_handler(handler)
         authenticated = bool(token and validate_token(token))
         send_json(handler, {'ok': True, 'password_set': is_set, 'authenticated': authenticated})
+        return True
+    if parsed.path == '/api/system-proxy':
+        try:
+            send_json(handler, get_system_proxy_status())
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': str(e)}, status=500)
         return True
     return False

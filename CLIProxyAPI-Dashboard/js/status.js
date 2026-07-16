@@ -344,10 +344,49 @@ async function stopDeviceLogin() {
   }
 }
 
-let runtimeActionBusy = false;
+function shortRuntimeLabel(label) {
+  const raw = String(label || '').trim();
+  if (!raw) return '处理';
+  // Keep button busy text at 2 Chinese chars / short English word so pills never overflow.
+  const compact = raw
+    .replace(/\.{2,}$/g, '')
+    .replace(/中$/g, '')
+    .replace(/(前端|后端|Tunnel|OAuth|Manager|Proxy|服务|代理)/gi, '')
+    .trim();
+  const map = {
+    '启动': '启动',
+    '重启': '重启',
+    '停止': '停止',
+    '关闭': '关闭',
+    '开启': '开启',
+    '检测': '检测',
+    '停用': '停用',
+    '恢复': '恢复',
+    'Starting': '启动',
+    'Restarting': '重启',
+    'Stopping': '停止',
+    'Disabling': '关闭',
+    'Enabling': '开启',
+  };
+  if (map[compact]) return map[compact];
+  if (map[raw]) return map[raw];
+  if (/start/i.test(raw)) return '启动';
+  if (/restart/i.test(raw)) return '重启';
+  if (/stop|close|disable/i.test(raw)) return '停止';
+  if (/enable/i.test(raw)) return '开启';
+  // Prefer first 2 CJK chars; otherwise leave short English words alone.
+  const cjk = raw.match(/[一-鿿]{1,2}/);
+  if (cjk) return cjk[0];
+  return compact.slice(0, 4) || '处理';
+}
 
-function getRuntimeActionButtons() {
-  return Array.from(document.querySelectorAll('.runtime-action-btn'));
+function getRuntimeActionGroupButtons(button) {
+  if (!button) return [];
+  // Only lock siblings in the same control group / pair so other services stay clickable.
+  const group = button.closest('.control-group, .control-pair') || button.parentElement;
+  if (!group) return [button];
+  const buttons = Array.from(group.querySelectorAll('.runtime-action-btn, button'));
+  return buttons.length ? buttons : [button];
 }
 
 function setRuntimeActionState(button, label) {
@@ -357,7 +396,7 @@ function setRuntimeActionState(button, label) {
   button.setAttribute('aria-busy', 'true');
   button.innerHTML = '<span class="runtime-action-spinner" aria-hidden="true"></span><span class="runtime-action-text"></span><span class="runtime-action-progress" aria-hidden="true"></span>';
   const text = button.querySelector('.runtime-action-text');
-  if (text) text.textContent = label;
+  if (text) text.textContent = shortRuntimeLabel(label);
 }
 
 function clearRuntimeActionState(button) {
@@ -372,9 +411,14 @@ function clearRuntimeActionState(button) {
 
 async function withRuntimeAction(button, label, task) {
   if (!button) return task();
-  if (runtimeActionBusy) return null;
-  runtimeActionBusy = true;
-  const buttons = getRuntimeActionButtons();
+  // Prevent double-click on the same group, but never freeze the whole control station.
+  if (button.dataset.runtimeBusy === '1' || button.closest('.control-group')?.dataset.runtimeBusy === '1') {
+    return null;
+  }
+  const group = button.closest('.control-group');
+  const buttons = getRuntimeActionGroupButtons(button);
+  if (group) group.dataset.runtimeBusy = '1';
+  button.dataset.runtimeBusy = '1';
   buttons.forEach(btn => {
     btn.dataset.prevDisabled = btn.disabled ? '1' : '0';
     btn.disabled = true;
@@ -388,7 +432,8 @@ async function withRuntimeAction(button, label, task) {
       btn.disabled = btn.dataset.prevDisabled === '1';
       delete btn.dataset.prevDisabled;
     });
-    runtimeActionBusy = false;
+    delete button.dataset.runtimeBusy;
+    if (group) delete group.dataset.runtimeBusy;
   }
 }
 
@@ -455,19 +500,19 @@ async function handleActionWithIndicator(type, button, label, actionApiUrl, erro
 }
 
 async function startProxy(button) {
-  return handleActionWithIndicator('proxy', button, t('runtime.startingProxy', '启动中...'), '/api/start-project', 'red');
+  return handleActionWithIndicator('proxy', button, t('runtime.startingProxy', '启动'), '/api/start-project', 'red');
 }
 
 async function restartProxy(button) {
-  return handleActionWithIndicator('proxy', button, t('runtime.restartingProxy', '重启中...'), '/api/restart-proxy');
+  return handleActionWithIndicator('proxy', button, t('runtime.restartingProxy', '重启'), '/api/restart-proxy');
 }
 
 async function stopProxy(button) {
-  return handleActionWithIndicator('proxy', button, t('runtime.stoppingProxy', '停止中...'), '/api/stop-proxy', 'green');
+  return handleActionWithIndicator('proxy', button, t('runtime.stoppingProxy', '停止'), '/api/stop-proxy', 'green');
 }
 
 async function startOAuthManager(button) {
-  return handleActionWithIndicator('oauth', button, t('runtime.startingOAuthManager', '启动中...'), '/api/start-oauth-manager', 'red', {
+  return handleActionWithIndicator('oauth', button, t('runtime.startingOAuthManager', '启动'), '/api/start-oauth-manager', 'red', {
     waitFor: status => !!status.oauth_manager_running,
     timeoutMs: 20000,
     intervalMs: 1000,
@@ -477,7 +522,7 @@ async function startOAuthManager(button) {
 }
 
 async function stopOAuthManager(button) {
-  return handleActionWithIndicator('oauth', button, t('runtime.stoppingOAuthManager', '停止中...'), '/api/stop-oauth-manager', 'green', {
+  return handleActionWithIndicator('oauth', button, t('runtime.stoppingOAuthManager', '停止'), '/api/stop-oauth-manager', 'green', {
     waitFor: status => !status.oauth_manager_running,
     timeoutMs: 15000,
     intervalMs: 800,
@@ -486,7 +531,7 @@ async function stopOAuthManager(button) {
 }
 
 async function restartOAuthManager(button) {
-  return handleActionWithIndicator('oauth', button, t('runtime.restartingOAuthManager', '重启中...'), '/api/restart-oauth-manager', 'red', {
+  return handleActionWithIndicator('oauth', button, t('runtime.restartingOAuthManager', '重启'), '/api/restart-oauth-manager', 'red', {
     waitFor: status => !!status.oauth_manager_running,
     timeoutMs: 25000,
     intervalMs: 1000,
@@ -506,27 +551,27 @@ async function waitForOpenClawRunning(button, label, actionApiUrl) {
 }
 
 async function startOpenClaw(button) {
-  return waitForOpenClawRunning(button, '启动中...', '/api/openclaw/start');
+  return waitForOpenClawRunning(button, '启动', '/api/openclaw/start');
 }
 
 async function restartOpenClaw(button) {
-  return waitForOpenClawRunning(button, '重启中...', '/api/openclaw/restart');
+  return waitForOpenClawRunning(button, '重启', '/api/openclaw/restart');
 }
 
 async function stopOpenClaw(button) {
-  return handleActionWithIndicator('openclaw', button, '停止中...', '/api/openclaw/stop', 'green');
+  return handleActionWithIndicator('openclaw', button, '停止', '/api/openclaw/stop', 'green');
 }
 
 async function startMediaProxy(button) {
-  return handleActionWithIndicator('media-proxy', button, '启动中...', '/api/media-proxy/start', 'red');
+  return handleActionWithIndicator('media-proxy', button, '启动', '/api/media-proxy/start', 'red');
 }
 
 async function restartMediaProxy(button) {
-  return handleActionWithIndicator('media-proxy', button, '重启中...', '/api/media-proxy/restart', 'red');
+  return handleActionWithIndicator('media-proxy', button, '重启', '/api/media-proxy/restart', 'red');
 }
 
 async function stopMediaProxy(button) {
-  return handleActionWithIndicator('media-proxy', button, '停止中...', '/api/media-proxy/stop', 'green');
+  return handleActionWithIndicator('media-proxy', button, '停止', '/api/media-proxy/stop', 'green');
 }
 
 // type must be 'grok2api-frontend' or 'grok2api-backend' so the correct traffic light is cached.
@@ -537,31 +582,31 @@ async function runGrok2ApiServiceAction(type, button, label, endpoint, errorStat
 }
 
 async function startGrok2ApiFrontend(button) {
-  return runGrok2ApiServiceAction('grok2api-frontend', button, '启动前端...', '/api/grok2api/frontend/start', 'red');
+  return runGrok2ApiServiceAction('grok2api-frontend', button, '启动', '/api/grok2api/frontend/start', 'red');
 }
 
 async function stopGrok2ApiFrontend(button) {
-  return runGrok2ApiServiceAction('grok2api-frontend', button, '关闭前端...', '/api/grok2api/frontend/stop', 'red');
+  return runGrok2ApiServiceAction('grok2api-frontend', button, '关闭', '/api/grok2api/frontend/stop', 'red');
 }
 
 async function restartGrok2ApiFrontend(button) {
-  return runGrok2ApiServiceAction('grok2api-frontend', button, '重启前端...', '/api/grok2api/frontend/restart', 'red');
+  return runGrok2ApiServiceAction('grok2api-frontend', button, '重启', '/api/grok2api/frontend/restart', 'red');
 }
 
 async function startGrok2ApiBackend(button) {
-  return runGrok2ApiServiceAction('grok2api-backend', button, '启动后端...', '/api/grok2api/backend/start', 'red');
+  return runGrok2ApiServiceAction('grok2api-backend', button, '启动', '/api/grok2api/backend/start', 'red');
 }
 
 async function stopGrok2ApiBackend(button) {
-  return runGrok2ApiServiceAction('grok2api-backend', button, '关闭后端...', '/api/grok2api/backend/stop', 'red');
+  return runGrok2ApiServiceAction('grok2api-backend', button, '关闭', '/api/grok2api/backend/stop', 'red');
 }
 
 async function restartGrok2ApiBackend(button) {
-  return runGrok2ApiServiceAction('grok2api-backend', button, '重启后端...', '/api/grok2api/backend/restart', 'red');
+  return runGrok2ApiServiceAction('grok2api-backend', button, '重启', '/api/grok2api/backend/restart', 'red');
 }
 
 async function enableExposureMode(button) {
-  return withRuntimeAction(button, t('runtime.enablingExposure', '开启中...'), async () => {
+  return withRuntimeAction(button, t('runtime.enablingExposure', '开启'), async () => {
     try {
       const r = await api('/api/enable-exposure', 'POST');
       showMessage(r.message);
@@ -576,7 +621,7 @@ async function enableExposureMode(button) {
 }
 
 async function disableExposureMode(button) {
-  return withRuntimeAction(button, t('runtime.disablingExposure', '关闭中...'), async () => {
+  return withRuntimeAction(button, t('runtime.disablingExposure', '关闭'), async () => {
     try {
       const r = await api('/api/disable-exposure', 'POST');
       showMessage(r.message);
@@ -591,13 +636,13 @@ async function disableExposureMode(button) {
 }
 
 async function startTunnel(button) {
-  return handleActionWithIndicator('tunnel', button, t('runtime.startingTunnel', '启动中...'), '/api/tunnel/start', 'red');
+  return handleActionWithIndicator('tunnel', button, t('runtime.startingTunnel', '启动'), '/api/tunnel/start', 'red');
 }
 
 async function stopTunnel(button) {
-  return handleActionWithIndicator('tunnel', button, t('runtime.stoppingTunnel', '关闭中...'), '/api/tunnel/stop', 'green');
+  return handleActionWithIndicator('tunnel', button, t('runtime.stoppingTunnel', '关闭'), '/api/tunnel/stop', 'green');
 }
 
 async function restartTunnel(button) {
-  return handleActionWithIndicator('tunnel', button, t('runtime.restartingTunnel', '重启中...'), '/api/tunnel/restart', 'red');
+  return handleActionWithIndicator('tunnel', button, t('runtime.restartingTunnel', '重启'), '/api/tunnel/restart', 'red');
 }

@@ -639,8 +639,13 @@ async function showSection(name, options = {}) {
   if (name === 'network-access' && typeof loadNetworkAccessPanel === 'function') {
     loadNetworkAccessPanel();
   }
-  if (name === 'account' && typeof loadIpHelperStatus === 'function') {
-    loadIpHelperStatus(true);
+  if (name === 'account') {
+    if (typeof loadIpHelperStatus === 'function') {
+      loadIpHelperStatus(true);
+    }
+    if (typeof loadProxyStatus === 'function') {
+      loadProxyStatus();
+    }
   }
   if (name === 'firewall-access' && typeof loadFirewallAccessPanel === 'function') {
     loadFirewallAccessPanel();
