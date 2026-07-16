@@ -1,6 +1,6 @@
 {
   "name": "cliproxyapi-dashboard",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "CLIProxyAPI Dashboard - Desktop Application",
   "main": "main.js",
   "scripts": {

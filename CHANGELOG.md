@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-07-16
+### Added
+- Auto-detect local mixed-port proxy (FlClash / MaoMao / Clash Verge) into runtime `proxy-url`.
+- Force loopback providers to `proxy-url: direct` to avoid global proxy hijacking.
+- Unified restart controls for OAuth manager, Cloudflare tunnel, Grok2API frontend/backend, and IP Helper.
+- Split Grok2API frontend/backend status indicators with localStorage cache.
+
+### Fixed
+- OAuth manager start via PID/port detect and status polling.
+- Auto-start media proxy with relay; prefer local MediaProxy `config.json`.
+- xAI account profile export recognition and OAuth model exposure through dashboard.
+- Provider mapping deletion, including default model mappings.
+- Dashboard control-station indicator/button state sync during concurrent actions.
+
+### Changed
+- Chat UI redesigned with Chat/Image/Video mode pills and slide-out sessions.
+- Ignore local `CLIProxyAPI-MediaProxy/config.json`; keep example tracked.
+
 ## [1.0.3] - 2026-07-02
 ### Added
 - Added geometric minimalist app icon (`icon.png`, `icon.ico`) for Windows installer and desktop shortcut.
