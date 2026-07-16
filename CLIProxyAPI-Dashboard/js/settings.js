@@ -194,10 +194,20 @@ async function removeAccessPassword() {
 
 async function saveSetting(key, value) {
   try {
-    await api('/api/settings', 'POST', { key, value });
-    currentSettings[key] = value;
-    showMessage(`Setting '${key}' saved successfully`);
-    
+    const res = await api('/api/settings', 'POST', { key, value });
+    const savedValue = (res && Object.prototype.hasOwnProperty.call(res, 'value')) ? res.value : value;
+    currentSettings[key] = savedValue;
+
+    if (key === 'autostart') {
+      const autostartEl = document.getElementById('setting-autostart');
+      if (autostartEl) autostartEl.checked = !!savedValue;
+      showMessage(res?.message || (savedValue
+        ? (t('settings.msg.autostartOn', '已开启开机自启动') || '已开启开机自启动')
+        : (t('settings.msg.autostartOff', '已关闭开机自启动') || '已关闭开机自启动')));
+    } else {
+      showMessage(res?.message || `Setting '${key}' saved successfully`);
+    }
+
     // Apply immediate local changes
     if (key === 'language') {
       localStorage.setItem('dashboard_lang', value);
@@ -208,6 +218,10 @@ async function saveSetting(key, value) {
     }
   } catch (error) {
     console.error('Failed to save setting:', error);
+    if (key === 'autostart') {
+      const autostartEl = document.getElementById('setting-autostart');
+      if (autostartEl) autostartEl.checked = !!currentSettings.autostart;
+    }
     showMessage(`Failed to save setting: ${error.message}`, true);
   }
 }

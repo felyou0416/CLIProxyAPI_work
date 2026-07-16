@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 from backend.paths import CLI_EXE, BASE_CONFIG, SOURCE_AUTH_DIR, RUNTIME_DIR, PROXY_ROOT, DASHBOARD_ROOT, STORAGE_DIR, RUNTIME_VARIANT
@@ -105,6 +106,19 @@ class Handler(BaseHTTPRequestHandler):
         send_json(self, {'ok': False, 'message': 'Not found'}, status=404)
 
 
+def _auto_start_proxy_async():
+    """Start RelayX after HTTP is already accepting connections.
+
+    Cold boot used to block serve_forever() on start_proxy(), so health checks
+    timed out and the panel looked like it failed to launch.
+    """
+    try:
+        result = start_proxy()
+        print(f'Auto start RelayX: {result.get("message", "")}')
+    except Exception as exc:
+        print(f'Auto start RelayX failed: {exc}')
+
+
 def main():
     host = (os.environ.get('CLIPROXYAPI_DASHBOARD_HOST', DEFAULT_DASHBOARD_HOST) or DEFAULT_DASHBOARD_HOST).strip() or DEFAULT_DASHBOARD_HOST
     port = int((os.environ.get('CLIPROXYAPI_DASHBOARD_PORT', '8765') or '8765').strip() or '8765')
@@ -119,16 +133,15 @@ def main():
     print(f'Base config: {BASE_CONFIG}')
     print(f'Source auth dir: {SOURCE_AUTH_DIR}')
     print(f'Runtime dir: {RUNTIME_DIR}')
-    if dashboard_auto_start_enabled():
-        try:
-            result = start_proxy()
-            print(f'Auto start RelayX: {result.get("message", "")}')
-        except Exception as exc:
-            print(f'Auto start RelayX failed: {exc}')
-    else:
-        print('Auto start RelayX skipped because CLIPROXYAPI_AUTO_START is disabled.')
+    # Accept HTTP immediately so launcher health checks and the UI do not wait
+    # on RelayX / MediaProxy startup (which can take tens of seconds at boot).
     start_observability_refresh_thread()
     print('Observability cache refresher started')
+    if dashboard_auto_start_enabled():
+        print('Auto start RelayX scheduled in background')
+        threading.Thread(target=_auto_start_proxy_async, name='auto-start-proxy', daemon=True).start()
+    else:
+        print('Auto start RelayX skipped because CLIPROXYAPI_AUTO_START is disabled.')
     try:
         server.serve_forever()
     except KeyboardInterrupt:

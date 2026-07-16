@@ -37,13 +37,44 @@ def _load_settings():
 
 
 def get_settings():
-    """Get all settings."""
-    return {'ok': True, 'item': _load_settings()}
+    """Get all settings. Reflect real Windows autostart install state."""
+    item = _load_settings()
+    if os.name == 'nt':
+        try:
+            from backend.autostart import get_autostart_status
+            status = get_autostart_status()
+            item['autostart'] = bool(status.get('installed'))
+            item['autostart_path'] = status.get('path') or ''
+        except Exception:
+            item.setdefault('autostart_path', '')
+    return {'ok': True, 'item': item}
 
 
 def save_setting(key, value):
-    """Save a single setting."""
+    """Save a single setting. autostart also installs/removes Startup launcher."""
     state = _load_settings()
+    key = str(key or '').strip()
+    if not key:
+        return {'ok': False, 'message': 'Missing setting key'}
+
+    applied = None
+    if key == 'autostart':
+        enabled = value in (True, 1, '1', 'true', 'True', 'yes', 'on')
+        value = enabled
+        try:
+            from backend.autostart import apply_autostart
+            applied = apply_autostart(enabled)
+            if not applied.get('ok'):
+                return {
+                    'ok': False,
+                    'message': applied.get('message') or 'Failed to update Windows autostart',
+                    'autostart': applied,
+                }
+            # Trust the real install state after apply.
+            value = bool(applied.get('installed')) if enabled else False
+        except Exception as exc:
+            return {'ok': False, 'message': f'Failed to update Windows autostart: {exc}'}
+
     state[key] = value
 
     # Save back to state file
@@ -51,7 +82,11 @@ def save_setting(key, value):
         temp_path = STATE_FILE.with_suffix('.tmp')
         temp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
         temp_path.replace(STATE_FILE)
-        return {'ok': True, 'message': f'Setting {key} saved'}
+        result = {'ok': True, 'message': f'Setting {key} saved', 'value': value}
+        if applied is not None:
+            result['autostart'] = applied
+            result['message'] = applied.get('message') or result['message']
+        return result
     except Exception as e:
         return {'ok': False, 'message': str(e)}
 

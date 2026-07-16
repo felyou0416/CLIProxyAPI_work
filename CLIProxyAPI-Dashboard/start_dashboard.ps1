@@ -136,14 +136,38 @@ function Test-LocalHttpReady {
 
 Import-DashboardEnv
 
-$python = Get-Command python -ErrorAction SilentlyContinue
-if (-not $python) {
-    $python = Get-Command py -ErrorAction SilentlyContinue
+function Resolve-PythonExecutable {
+    $cmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source -and (Test-Path -LiteralPath $cmd.Source)) {
+        return $cmd
+    }
+    $cmd = Get-Command py -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source -and (Test-Path -LiteralPath $cmd.Source)) {
+        return $cmd
+    }
+
+    # Login-time PATH can be incomplete. Probe common install locations.
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python312\python.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python311\python.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python310\python.exe'),
+        'C:\Python312\python.exe',
+        'C:\Python311\python.exe'
+    )
+    foreach ($path in $candidates) {
+        if ($path -and (Test-Path -LiteralPath $path)) {
+            return [pscustomobject]@{ Source = $path }
+        }
+    }
+    return $null
 }
+
+$python = Resolve-PythonExecutable
 if (-not $python) {
     Write-Error "python/py was not found. Install Python or make sure it is available on PATH."
     exit 1
 }
+Write-Host "Python: $($python.Source)" -ForegroundColor DarkCyan
 
 $dashboardHost = if ($env:CLIPROXYAPI_DASHBOARD_HOST) { $env:CLIPROXYAPI_DASHBOARD_HOST.Trim() } else { '127.0.0.1' }
 $dashboardPort = if ($env:CLIPROXYAPI_DASHBOARD_PORT) { $env:CLIPROXYAPI_DASHBOARD_PORT.Trim() } else { '8765' }
@@ -252,8 +276,10 @@ try {
 Write-Host "Dashboard backend launching. PID: $($proc.Id)" -ForegroundColor Green
 Write-Host "Logs: $stdoutLog" -ForegroundColor DarkCyan
 
+# Cold boot can be slower: disk spin-up, antivirus, PATH settle.
 $ready = $false
-$deadline = (Get-Date).AddSeconds(25)
+$waitSeconds = 45
+$deadline = (Get-Date).AddSeconds($waitSeconds)
 while ((Get-Date) -lt $deadline) {
     if ($proc.HasExited) {
         break
