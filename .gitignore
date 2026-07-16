@@ -56,6 +56,9 @@ Thumbs.db
 .claude/settings.local.json
 .claude/*.local/
 
+# --- Local runtime configs (examples stay tracked) ---
+CLIProxyAPI-MediaProxy/config.json
+
 # --- 临时文件 ---
 *.tmp
 *.bak
