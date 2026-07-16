@@ -521,11 +521,16 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			s.bindings.setWithUpstreamID(videoID, route.Model.Alias, route.Key, videoID, 3*time.Hour)
 			videoURL, err = s.pollVideo(r.Context(), route, videoID)
 			if err != nil {
-				writeJSONError(w, http.StatusBadGateway, "upstream_error", err.Error())
+				// Keep chat clients from hanging forever: return a usable task handle.
+				writeChat(w, modelName, videoPendingChatContent(videoID, err))
 				return
 			}
 		}
 		if videoURL == "" {
+			if videoID != "" {
+				writeChat(w, modelName, videoPendingChatContent(videoID, nil))
+				return
+			}
 			writeRawChat(w, modelName, upstream)
 			return
 		}
@@ -652,6 +657,17 @@ func buildMediaPayload(model ModelConfig, chat map[string]any, prompt string) ([
 	delete(req, "stream")
 	req["model"] = model.Name
 	req["prompt"] = prompt
+	if images := imagesFromChat(chat); len(images) > 0 {
+		if _, ok := req["image"]; !ok {
+			if _, ok := req["images"]; !ok {
+				if len(images) == 1 {
+					req["image"] = images[0]
+				} else {
+					req["images"] = images
+				}
+			}
+		}
+	}
 	return buildDirectPayload(model, req)
 }
 
@@ -674,6 +690,12 @@ func buildDirectPayload(model ModelConfig, req map[string]any) ([]byte, error) {
 		applyDefaultSize(out, model.DefaultSize)
 		if _, ok := out["response_format"]; !ok {
 			out["response_format"] = "url"
+		}
+		normalizeOpenAIImageInputs(out)
+		if isImageEditEndpoint(model.Endpoint) {
+			if !hasOpenAIImageInput(out) {
+				return nil, errors.New("image or images is required for image edits")
+			}
 		}
 		return json.Marshal(out)
 	case "agnes-image":
@@ -866,6 +888,22 @@ func promptFromChat(req map[string]any) string {
 	return ""
 }
 
+func imagesFromChat(req map[string]any) []map[string]any {
+	if images := normalizeImageRefs(req["images"]); len(images) > 0 {
+		return images
+	}
+	if images := normalizeImageRefs(req["image"]); len(images) > 0 {
+		return images
+	}
+	messages, _ := req["messages"].([]any)
+	var out []map[string]any
+	for _, item := range messages {
+		msg, _ := item.(map[string]any)
+		out = append(out, contentImages(msg["content"])...)
+	}
+	return uniqueImageRefs(out)
+}
+
 func contentText(content any) string {
 	switch v := content.(type) {
 	case string:
@@ -884,6 +922,153 @@ func contentText(content any) string {
 	default:
 		return ""
 	}
+}
+
+func contentImages(content any) []map[string]any {
+	switch v := content.(type) {
+	case []any:
+		var out []map[string]any
+		for _, item := range v {
+			obj, _ := item.(map[string]any)
+			if obj == nil {
+				continue
+			}
+			typeName := strings.ToLower(stringField(obj, "type"))
+			switch typeName {
+			case "image_url", "input_image", "image":
+				if ref := imageRefFromAny(obj); len(ref) > 0 {
+					out = append(out, ref)
+				}
+			}
+			if nested := obj["image_url"]; nested != nil {
+				if ref := imageRefFromAny(nested); len(ref) > 0 {
+					out = append(out, ref)
+				}
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func imageRefFromAny(value any) map[string]any {
+	switch v := value.(type) {
+	case string:
+		url := strings.TrimSpace(v)
+		if url == "" {
+			return nil
+		}
+		return map[string]any{"url": url}
+	case map[string]any:
+		if url := stringField(v, "url"); url != "" {
+			return map[string]any{"url": url}
+		}
+		if imageURL := v["image_url"]; imageURL != nil {
+			return imageRefFromAny(imageURL)
+		}
+		if fileID := stringField(v, "file_id"); fileID != "" {
+			return map[string]any{"file_id": fileID}
+		}
+	}
+	return nil
+}
+
+func normalizeImageRefs(value any) []map[string]any {
+	if value == nil {
+		return nil
+	}
+	switch v := value.(type) {
+	case []any:
+		var out []map[string]any
+		for _, item := range v {
+			if ref := imageRefFromAny(item); len(ref) > 0 {
+				out = append(out, ref)
+			}
+		}
+		return uniqueImageRefs(out)
+	case []string:
+		var out []map[string]any
+		for _, item := range v {
+			if ref := imageRefFromAny(item); len(ref) > 0 {
+				out = append(out, ref)
+			}
+		}
+		return uniqueImageRefs(out)
+	default:
+		if ref := imageRefFromAny(value); len(ref) > 0 {
+			return []map[string]any{ref}
+		}
+		return nil
+	}
+}
+
+func uniqueImageRefs(values []map[string]any) []map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]map[string]any, 0, len(values))
+	for _, value := range values {
+		key := stringField(value, "url")
+		if key == "" {
+			key = "file:" + stringField(value, "file_id")
+		}
+		if key == "" || key == "file:" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func normalizeOpenAIImageInputs(req map[string]any) {
+	if images := normalizeImageRefs(req["images"]); len(images) > 0 {
+		if len(images) == 1 {
+			req["image"] = images[0]
+			delete(req, "images")
+		} else {
+			req["images"] = images
+			delete(req, "image")
+		}
+		return
+	}
+	if images := normalizeImageRefs(req["image"]); len(images) > 0 {
+		if len(images) == 1 {
+			req["image"] = images[0]
+		} else {
+			req["images"] = images
+			delete(req, "image")
+		}
+	}
+}
+
+func hasOpenAIImageInput(req map[string]any) bool {
+	return len(normalizeImageRefs(req["image"])) > 0 || len(normalizeImageRefs(req["images"])) > 0
+}
+
+func isImageEditEndpoint(endpoint string) bool {
+	lower := strings.ToLower(strings.TrimSpace(endpoint))
+	return strings.Contains(lower, "/images/edits") || strings.Contains(lower, "image-edit") || strings.HasSuffix(lower, "/edits")
+}
+
+func videoPendingChatContent(videoID string, err error) string {
+	videoID = strings.TrimSpace(videoID)
+	if videoID == "" {
+		if err != nil {
+			return "video generation is still pending: " + err.Error()
+		}
+		return "video generation is still pending"
+	}
+	msg := "video task created: " + videoID + "\nstatus: pending\npoll: GET /v1/videos/" + videoID
+	if err != nil {
+		msg += "\nnote: " + err.Error()
+	}
+	return msg
 }
 
 func applyDefaultSize(req map[string]any, defaultSize string) {

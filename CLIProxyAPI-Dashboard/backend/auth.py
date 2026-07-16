@@ -5,6 +5,7 @@ import shutil
 import time
 import hashlib
 import base64
+import ipaddress
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1551,45 +1552,77 @@ def _default_clash_profile_path():
     return None
 
 
-def _parse_clash_proxy_names(profile_path: Path | None):
-    if not profile_path or not profile_path.exists():
-        return {'profile_path': '', 'mixed_port': 0, 'proxy_names': []}
+def _detect_active_local_proxy(prefer_port: int | None = None) -> dict:
+    """Detect whichever local mixed-port is currently usable (FlClash / MaoMao / etc.)."""
     try:
-        text = profile_path.read_text(encoding='utf-8', errors='ignore')
-    except Exception:
-        return {'profile_path': str(profile_path), 'mixed_port': 0, 'proxy_names': []}
+        from backend.local_proxy import detect_local_http_proxy
+        return detect_local_http_proxy(prefer_port=prefer_port)
+    except Exception as exc:
+        return {
+            'ok': False,
+            'proxy_url': '',
+            'port': 0,
+            'source': '',
+            'message': f'detect failed: {exc}',
+            'candidates': [],
+        }
 
-    mixed_port = 0
-    mixed_match = re.search(r'(?m)^mixed-port:\s*(\d+)\s*$', text)
-    if mixed_match:
+
+def _parse_clash_proxy_names(profile_path: Path | None, detect_active: bool = False):
+    """Parse a Clash profile file. Network detect is opt-in to avoid UI lag."""
+    if not profile_path or not profile_path.exists():
+        profile_port = 0
+        proxy_names = []
+        profile_path_value = str(profile_path or '')
+    else:
         try:
-            mixed_port = int(mixed_match.group(1))
+            text = profile_path.read_text(encoding='utf-8', errors='ignore')
         except Exception:
-            mixed_port = 0
+            text = ''
+        profile_port = 0
+        mixed_match = re.search(r'(?m)^mixed-port:\s*(\d+)\s*$', text)
+        if mixed_match:
+            try:
+                profile_port = int(mixed_match.group(1))
+            except Exception:
+                profile_port = 0
 
-    proxy_names = []
-    in_proxies = False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not in_proxies and stripped == 'proxies:':
-            in_proxies = True
-            continue
-        if in_proxies and re.match(r'^[A-Za-z0-9_-]+:\s*$', stripped):
-            break
-        if not in_proxies:
-            continue
-        name_match = re.search(r'name:\s*(?:"([^"]+)"|\'([^\']+)\'|([^,}]+))', line)
-        if not name_match:
-            continue
-        value = next((group for group in name_match.groups() if group), '')
-        value = str(value or '').strip()
-        if value and value not in proxy_names:
-            proxy_names.append(value)
+        proxy_names = []
+        in_proxies = False
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not in_proxies and stripped == 'proxies:':
+                in_proxies = True
+                continue
+            if in_proxies and re.match(r'^[A-Za-z0-9_-]+:\s*$', stripped):
+                break
+            if not in_proxies:
+                continue
+            name_match = re.search(r'name:\s*(?:"([^"]+)"|\'([^\']+)\'|([^,}]+))', line)
+            if not name_match:
+                continue
+            value = next((group for group in name_match.groups() if group), '')
+            value = str(value or '').strip()
+            if value and value not in proxy_names:
+                proxy_names.append(value)
+        profile_path_value = str(profile_path)
+
+    mixed_port = profile_port
+    detected_proxy_url = ''
+    detected_source = ''
+    if detect_active:
+        detected = _detect_active_local_proxy(prefer_port=profile_port or None)
+        if detected.get('ok') and int(detected.get('port') or 0) > 0:
+            mixed_port = int(detected['port'])
+            detected_proxy_url = str(detected.get('proxy_url') or '')
+            detected_source = str(detected.get('source') or '')
 
     return {
-        'profile_path': str(profile_path),
+        'profile_path': profile_path_value,
         'mixed_port': mixed_port,
         'proxy_names': proxy_names,
+        'detected_proxy_url': detected_proxy_url,
+        'detected_source': detected_source,
     }
 
 
@@ -1663,9 +1696,46 @@ def _normalize_model_proxy_rules(value):
     return normalized
 
 
+def _remap_model_proxy_settings_to_active(settings: dict) -> dict:
+    """Rewrite local mixed-port URLs in presets/rules to the currently active proxy."""
+    if not isinstance(settings, dict):
+        return settings
+    detected = _detect_active_local_proxy(prefer_port=int(settings.get('mixed_port') or 0) or None)
+    if not detected.get('ok') or not detected.get('proxy_url'):
+        return settings
+    try:
+        from backend.local_proxy import remap_local_proxy_url
+    except Exception:
+        return settings
+
+    detected_url = str(detected.get('proxy_url') or '').strip()
+    detected_port = int(detected.get('port') or 0)
+    if detected_port > 0:
+        settings['mixed_port'] = detected_port
+
+    presets = settings.get('presets')
+    if isinstance(presets, list):
+        for item in presets:
+            if not isinstance(item, dict):
+                continue
+            item['proxy_url'] = remap_local_proxy_url(item.get('proxy_url'), detected_url)
+
+    rules = settings.get('rules')
+    if isinstance(rules, dict):
+        for item in rules.values():
+            if not isinstance(item, dict):
+                continue
+            item['proxy_url'] = remap_local_proxy_url(item.get('proxy_url'), detected_url)
+
+    settings['detected_proxy_url'] = detected_url
+    settings['detected_source'] = str(detected.get('source') or '')
+    return settings
+
+
 def get_model_proxy_settings():
     profile_path = _default_clash_profile_path()
-    profile_info = _parse_clash_proxy_names(profile_path)
+    # File parse only here — avoid network on every settings read.
+    profile_info = _parse_clash_proxy_names(profile_path, detect_active=False)
     defaults = {
         'profile_path': profile_info.get('profile_path') or '',
         'mixed_port': int(profile_info.get('mixed_port') or 0),
@@ -1673,13 +1743,13 @@ def get_model_proxy_settings():
         'rules': {},
     }
     if not MODEL_PROXY_SETTINGS_FILE.exists():
-        return defaults
+        return _remap_model_proxy_settings_to_active(defaults)
     try:
         payload = json.loads(MODEL_PROXY_SETTINGS_FILE.read_text(encoding='utf-8'))
     except Exception:
-        return defaults
+        return _remap_model_proxy_settings_to_active(defaults)
     if not isinstance(payload, dict):
-        return defaults
+        return _remap_model_proxy_settings_to_active(defaults)
     presets = payload.get('presets')
     normalized_presets = []
     if isinstance(presets, list):
@@ -1701,7 +1771,7 @@ def get_model_proxy_settings():
     if normalized_presets:
         merged['presets'] = normalized_presets
     merged['rules'] = _normalize_model_proxy_rules(payload.get('rules'))
-    return merged
+    return _remap_model_proxy_settings_to_active(merged)
 
 
 def _save_model_proxy_settings(settings: dict):
@@ -1751,6 +1821,34 @@ def _model_proxy_url_for_provider(provider: str):
     if not item or not bool(item.get('enabled', True)):
         return ''
     return str(item.get('proxy_url') or '').strip()
+
+
+def _is_loopback_base_url(base_url: str | None) -> bool:
+    """True when the provider base URL points at this machine."""
+    raw = str(base_url or '').strip()
+    if not raw:
+        return False
+    try:
+        parsed = urlparse(raw if '://' in raw else f'http://{raw}')
+    except Exception:
+        return False
+    host = (parsed.hostname or '').strip().lower()
+    if not host:
+        return False
+    if host in {'localhost', 'localhost.'}:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _effective_model_proxy_url(provider: str, base_url: str | None = None) -> str:
+    """Force direct for loopback providers; remap local mixed-port to the active one."""
+    if _is_loopback_base_url(base_url):
+        return 'direct'
+    # get_model_proxy_settings() already remaps local mixed-port URLs to the active proxy.
+    return _model_proxy_url_for_provider(provider)
 
 
 def _provider_model_override_deleted(overrides: dict, provider: str, upstream_id: str):
@@ -3076,6 +3174,15 @@ def rewrite_port(config_text: str, port: int):
     return '\n'.join(output) + '\n'
 
 
+def rewrite_proxy_url(config_text: str, proxy_url: str | None):
+    """Rewrite top-level proxy-url. Empty value removes the key."""
+    value = str(proxy_url or '').strip()
+    cleaned = _strip_top_level_block(config_text, 'proxy-url')
+    if not value:
+        return cleaned
+    return cleaned.rstrip() + f'\n\nproxy-url: "{value}"\n'
+
+
 def _strip_top_level_block(config_text: str, key_name: str):
     lines = config_text.splitlines()
     output = []
@@ -3452,7 +3559,7 @@ def build_openai_compatibility_block(entries):
         grouped_models = _group_manual_entry_models(entry, overrides=overrides)
         for provider, models in grouped_models.items():
             headers = entry.get('headers') or {}
-            model_proxy_url = _model_proxy_url_for_provider(provider)
+            model_proxy_url = _effective_model_proxy_url(provider, str(entry.get('base_url') or ''))
             for model in models:
                 model_name = str(model.get('name') or '').strip()
                 alias_name = str(model.get('alias') or '').strip()
@@ -3526,7 +3633,7 @@ def build_claude_api_key_block(entries):
     for entry in entries:
         grouped_models = _group_manual_entry_models(entry, overrides=overrides)
         for provider, models in grouped_models.items():
-            proxy_url = _model_proxy_url_for_provider(provider)
+            proxy_url = _effective_model_proxy_url(provider, str(entry.get('base_url') or ''))
             lines.extend([
                 f'  - api-key: "{entry["api_key"]}"',
                 f'    base-url: "{entry["base_url"]}"',
@@ -4500,6 +4607,27 @@ def build_runtime_config(
     runtime_text = rewrite_host(config_text, bind_host)
     runtime_text = rewrite_port(runtime_text, listen_port)
     runtime_text = rewrite_auth_dir(runtime_text, ACTIVE_AUTH_DIR)
+
+    # Auto-pick the currently usable local mixed-port (FlClash / MaoMao / etc.).
+    # Keep the previous proxy-url as preference when it is already local and working.
+    previous_proxy_url = ''
+    for line in config_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('proxy-url:'):
+            previous_proxy_url = stripped.split(':', 1)[1].strip().strip('"').strip("'")
+            break
+    prefer_port = None
+    try:
+        from backend.local_proxy import is_local_proxy_url
+        if is_local_proxy_url(previous_proxy_url):
+            prefer_port = urlparse(previous_proxy_url if '://' in previous_proxy_url else f'http://{previous_proxy_url}').port
+    except Exception:
+        prefer_port = None
+    detected_proxy = _detect_active_local_proxy(prefer_port=prefer_port)
+    if detected_proxy.get('ok') and detected_proxy.get('proxy_url'):
+        runtime_text = rewrite_proxy_url(runtime_text, detected_proxy['proxy_url'])
+    elif previous_proxy_url:
+        runtime_text = rewrite_proxy_url(runtime_text, previous_proxy_url)
 
     # Merge admin access keys with all active virtual API keys
     all_api_keys = list(access_api_keys or ['cliproxyapi'])

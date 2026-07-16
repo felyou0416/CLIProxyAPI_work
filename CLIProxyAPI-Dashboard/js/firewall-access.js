@@ -147,18 +147,31 @@ function renderIpHelperStatus(item) {
     root.className = `na-mini-pill ${running ? 'ok' : 'warn'}`;
     root.textContent = statusText;
   }
-  const indicator = document.getElementById('ip-helper-status-indicator');
-  if (indicator) {
-    indicator.className = `status-indicator-dot ${running ? 'green' : 'red'}`;
-    indicator.title = statusText;
+  // Prefer shared traffic-light helper so IP Helper is included in cli-indicator-states cache.
+  if (typeof window.updateIndicator === 'function') {
+    window.updateIndicator('ip-helper', running ? 'green' : 'red');
+  } else {
+    const indicator = document.getElementById('ip-helper-status-indicator');
+    if (indicator) {
+      indicator.className = `status-indicator-dot ${running ? 'green' : 'red'}`;
+      indicator.title = statusText;
+    }
   }
+  const indicator = document.getElementById('ip-helper-status-indicator');
+  if (indicator) indicator.title = statusText;
   const startBtn = document.getElementById('ip-helper-start-btn');
   const stopBtn = document.getElementById('ip-helper-stop-btn');
+  const restartBtn = document.getElementById('ip-helper-restart-btn');
   if (startBtn && stopBtn) {
     startBtn.disabled = running;
     startBtn.style.opacity = running ? '0.5' : '1';
     stopBtn.disabled = !running;
     stopBtn.style.opacity = running ? '1' : '0.5';
+  }
+  // Restart only makes sense when the service is currently running.
+  if (restartBtn) {
+    restartBtn.disabled = !running;
+    restartBtn.style.opacity = running ? '1' : '0.5';
   }
 }
 
@@ -234,19 +247,23 @@ async function loadIpHelperStatus(force = false) {
 
 async function setIpHelperService(action, button) {
   const nextAction = String(action || '').toLowerCase();
-  if (nextAction !== 'start' && nextAction !== 'stop') {
+  if (nextAction !== 'start' && nextAction !== 'stop' && nextAction !== 'restart') {
     showMessage('无效的 IP Helper 操作。', true);
     return null;
   }
-  const label = nextAction === 'start' ? '启动中...' : '关闭中...';
+  const labelMap = { start: '启动中...', stop: '关闭中...', restart: '重启中...' };
+  const titleMap = { start: '正在启动 IP Helper...', stop: '正在关闭 IP Helper...', restart: '正在重启 IP Helper...' };
+  const msgMap = { start: '正在启动 IP Helper...', stop: '正在关闭 IP Helper...', restart: '正在重启 IP Helper...' };
+  const label = labelMap[nextAction];
   const run = async () => {
     try {
-      const indicator = document.getElementById('ip-helper-status-indicator');
-      if (indicator) {
-        indicator.className = 'status-indicator-dot yellow';
-        indicator.title = nextAction === 'start' ? '正在启动 IP Helper...' : '正在关闭 IP Helper...';
+      // Yellow working state goes through the same cache path as other control groups.
+      if (typeof window.updateIndicator === 'function') {
+        window.updateIndicator('ip-helper', 'yellow');
       }
-      showMessage(nextAction === 'start' ? '正在启动 IP Helper...' : '正在关闭 IP Helper...');
+      const indicator = document.getElementById('ip-helper-status-indicator');
+      if (indicator) indicator.title = titleMap[nextAction];
+      showMessage(msgMap[nextAction]);
       const res = await api('/api/ip-helper', 'POST', { action: nextAction, elevated: true });
       if (res?.message) showMessage(res.message);
       renderIpHelperStatus(res.ip_helper || {});

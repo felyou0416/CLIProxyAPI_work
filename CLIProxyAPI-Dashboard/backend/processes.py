@@ -881,12 +881,20 @@ $ErrorActionPreference = 'Stop'
 Stop-Service iphlpsvc -Force
 Set-Service iphlpsvc -StartupType Manual
 """
+    if action == 'restart':
+        return """
+$ErrorActionPreference = 'Stop'
+Stop-Service iphlpsvc -Force
+Start-Sleep -Seconds 1
+Set-Service iphlpsvc -StartupType Manual
+Start-Service iphlpsvc
+"""
     raise ValueError('Invalid IP Helper action.')
 
 
 def set_ip_helper_service(action, elevated: bool = True):
     action = str(action or '').strip().lower()
-    if action not in ('start', 'stop'):
+    if action not in ('start', 'stop', 'restart'):
         raise ValueError('Invalid IP Helper action.')
     current = {'ip_helper': ip_helper_status(), 'port_bindings': port_binding_status()}
     if not is_windows() or not command_exists('powershell'):
@@ -904,7 +912,11 @@ def set_ip_helper_service(action, elevated: bool = True):
         )
         return {
             'ok': True,
-            'message': 'IP Helper service is running.' if action == 'start' else 'IP Helper service is stopped.',
+            'message': {
+                'start': 'IP Helper service is running.',
+                'stop': 'IP Helper service is stopped.',
+                'restart': 'IP Helper service was restarted.',
+            }[action],
             'ip_helper': ip_helper_status(),
             'port_bindings': port_binding_status(),
         }
@@ -1501,6 +1513,12 @@ def stop_oauth_manager():
     }
 
 
+def restart_oauth_manager():
+    stop_oauth_manager()
+    time.sleep(0.4)
+    return start_oauth_manager()
+
+
 def read_tail(path, max_chars: int = 6000):
     if not path.exists():
         return ''
@@ -1850,6 +1868,9 @@ def restart_proxy():
 
 
 def media_proxy_config_path():
+    preferred = MEDIA_PROXY_ROOT / 'config.json'
+    if preferred.exists():
+        return preferred
     return MEDIA_PROXY_ROOT / 'config.example.json'
 
 
@@ -2051,6 +2072,18 @@ def stop_grok2api_frontend():
         'ok': True,
         'message': 'Stopped Grok2API frontend.' if stopped else 'Grok2API frontend was not running.',
     }
+
+
+def restart_grok2api_backend():
+    stop_grok2api_backend()
+    time.sleep(0.4)
+    return start_grok2api_backend()
+
+
+def restart_grok2api_frontend():
+    stop_grok2api_frontend()
+    time.sleep(0.4)
+    return start_grok2api_frontend()
 
 
 def start_grok2api():
@@ -2334,3 +2367,11 @@ Stop-Process -Name cloudflared -Force
         return {'ok': True, 'message': 'Cloudflared tunnel stop command sent with Admin rights.'}
     except Exception as exc:
         return {'ok': False, 'message': f'Failed to launch stop command: {exc}'}
+
+
+def restart_cloudflared_tunnel():
+    stop_result = stop_cloudflared_tunnel()
+    if not stop_result.get('ok'):
+        return stop_result
+    time.sleep(0.6)
+    return start_cloudflared_tunnel()

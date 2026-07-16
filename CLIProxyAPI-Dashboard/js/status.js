@@ -5,20 +5,68 @@ window.oauthActionBusy = false;
 window.dashboardActionBusy = false;
 window.openclawActionBusy = false;
 window.mediaProxyActionBusy = false;
+// Frontend/backend share one busy flag so concurrent grok2api actions don't race the dots.
 window.grok2apiActionBusy = false;
 
-const INDICATOR_TYPES = ['proxy', 'media-proxy', 'openclaw', 'ip-helper', 'dashboard', 'oauth', 'tunnel', 'grok2api'];
+// Traffic-light cache covers every control-station group, including the split Grok2API dots.
+// Keys are logical service names; DOM ids are resolved by indicatorElementId().
+const INDICATOR_TYPES = [
+  'proxy',
+  'media-proxy',
+  'openclaw',
+  'ip-helper',
+  'dashboard',
+  'oauth',
+  'tunnel',
+  // Split indicators (new). Kept separate so front/back can show independent colors.
+  'grok2api-frontend',
+  'grok2api-backend',
+  // Legacy combined key from older builds; still read for migration, no longer written.
+  'grok2api',
+];
 const GROK2API_DEFAULT_URL = 'http://127.0.0.1:5173/';
 const INDICATOR_CACHE_KEY = 'cli-indicator-states';
+// Non-standard element ids (HTML historically used *-dot for Grok2API).
+const INDICATOR_ELEMENT_IDS = {
+  'grok2api-frontend': 'grok2api-frontend-status-indicator',
+  'grok2api-backend': 'grok2api-backend-status-indicator',
+  // Older cache entries / callers may still pass "grok2api"; prefer frontend as fallback target.
+  'grok2api': 'grok2api-frontend-status-indicator',
+};
+
+function indicatorElementId(type) {
+  if (INDICATOR_ELEMENT_IDS[type]) return INDICATOR_ELEMENT_IDS[type];
+  return `${type}-status-indicator`;
+}
+
+// Map logical indicator type -> window.*ActionBusy flag used by refreshStatus.
+function indicatorBusyKey(type) {
+  if (type === 'media-proxy') return 'mediaProxyActionBusy';
+  // Both Grok2API rows share one lock.
+  if (type === 'grok2api' || type === 'grok2api-frontend' || type === 'grok2api-backend') {
+    return 'grok2apiActionBusy';
+  }
+  return `${type}ActionBusy`;
+}
 
 function loadIndicatorStates() {
   try {
     const raw = localStorage.getItem(INDICATOR_CACHE_KEY);
     if (!raw) return;
     const states = JSON.parse(raw);
+    // Restore last known colors before /api/status returns, so new buttons don't flash red.
     for (const [type, color] of Object.entries(states)) {
       if (typeof window.updateIndicator === 'function') {
-        window.updateIndicator(type, color);
+        window.updateIndicator(type, color, { persist: false });
+      }
+    }
+    // Migrate legacy combined "grok2api" into the split keys when they are missing.
+    if (states.grok2api) {
+      if (!states['grok2api-frontend']) {
+        window.updateIndicator('grok2api-frontend', states.grok2api, { persist: false });
+      }
+      if (!states['grok2api-backend']) {
+        window.updateIndicator('grok2api-backend', states.grok2api, { persist: false });
       }
     }
   } catch (e) { /* ignore */ }
@@ -28,7 +76,9 @@ window.loadIndicatorStates = loadIndicatorStates;
 function saveIndicatorStates() {
   const states = {};
   for (const type of INDICATOR_TYPES) {
-    const el = document.getElementById(`${type}-status-indicator`);
+    // Skip legacy combined key when writing so cache stays on the split indicators.
+    if (type === 'grok2api') continue;
+    const el = document.getElementById(indicatorElementId(type));
     if (!el) continue;
     const match = el.className.match(/status-indicator-dot\s+(\w+)/);
     if (match) states[type] = match[1];
@@ -39,11 +89,16 @@ function saveIndicatorStates() {
     }
   } catch (e) { /* ignore */ }
 }
+window.saveIndicatorStates = saveIndicatorStates;
 
-window.updateIndicator = function(type, state) {
-  const el = document.getElementById(`${type}-status-indicator`);
+// options.persist=false is used by load/refresh internals to avoid write thrash.
+window.updateIndicator = function(type, state, options = {}) {
+  const el = document.getElementById(indicatorElementId(type));
   if (el) {
     el.className = `status-indicator-dot ${state}`;
+  }
+  if (options.persist !== false) {
+    saveIndicatorStates();
   }
 };
 
@@ -144,28 +199,32 @@ async function refreshStatus() {
     setText('proxy-api-key', s.api_key || 'cliproxyapi', 'cliproxyapi');
     setText('exposure-mode-status', s.exposure_enabled ? 'Enabled (LAN)' : 'Disabled', 'Disabled');
 
+    // Skip live updates while that group is mid-action so yellow "working" is not overwritten.
     if (!window.proxyActionBusy) {
-      window.updateIndicator('proxy', s.proxy_running ? 'green' : 'red');
+      window.updateIndicator('proxy', s.proxy_running ? 'green' : 'red', { persist: false });
     }
     if (!window.mediaProxyActionBusy) {
-      window.updateIndicator('media-proxy', s.media_proxy_running ? 'green' : 'red');
-    }
-    if (!window.grok2apiActionBusy) {
-      window.updateIndicator('grok2api', s.grok2api_running ? 'green' : 'red');
+      window.updateIndicator('media-proxy', s.media_proxy_running ? 'green' : 'red', { persist: false });
     }
     if (!window.tunnelActionBusy) {
-      window.updateIndicator('tunnel', s.tunnel_running ? 'green' : 'red');
+      window.updateIndicator('tunnel', s.tunnel_running ? 'green' : 'red', { persist: false });
     }
     if (!window.oauthActionBusy) {
-      window.updateIndicator('oauth', s.oauth_manager_running ? 'green' : 'red');
+      window.updateIndicator('oauth', s.oauth_manager_running ? 'green' : 'red', { persist: false });
     }
     if (!window.openclawActionBusy) {
-      window.updateIndicator('openclaw', s.openclaw_running ? 'green' : 'red');
+      window.updateIndicator('openclaw', s.openclaw_running ? 'green' : 'red', { persist: false });
     }
     if (!window.dashboardActionBusy) {
-      window.updateIndicator('dashboard', 'green');
+      window.updateIndicator('dashboard', 'green', { persist: false });
+    }
+    // Split Grok2API dots must be cached independently (restart/start buttons are per-row).
+    if (!window.grok2apiActionBusy) {
+      window.updateIndicator('grok2api-frontend', s.grok2api_frontend_running ? 'green' : 'red', { persist: false });
+      window.updateIndicator('grok2api-backend', s.grok2api_backend_running ? 'green' : 'red', { persist: false });
     }
 
+    // One write after batch updates (persist:false above).
     saveIndicatorStates();
 
     const openClawStartBtn = document.getElementById('openclaw-start-btn');
@@ -204,43 +263,47 @@ async function refreshStatus() {
       }
     }
 
+    // Button enable/disable only here; colors already went through updateIndicator above.
     const grok2apiControls = [
       { type: 'frontend', running: !!s.grok2api_frontend_running },
       { type: 'backend', running: !!s.grok2api_backend_running },
     ];
     for (const control of grok2apiControls) {
       const startButton = document.getElementById(`grok2api-${control.type}-start-btn`);
+      const restartButton = document.getElementById(`grok2api-${control.type}-restart-btn`);
       const stopButton = document.getElementById(`grok2api-${control.type}-stop-btn`);
-      const dot = document.getElementById(`grok2api-${control.type}-dot`);
-      if (dot) dot.className = `status-indicator-dot ${control.running ? 'green' : 'red'}`;
       if (!startButton || !stopButton) continue;
       startButton.disabled = control.running;
       startButton.style.opacity = control.running ? '0.5' : '1';
+      if (restartButton) {
+        restartButton.disabled = !control.running;
+        restartButton.style.opacity = control.running ? '1' : '0.5';
+      }
       stopButton.disabled = !control.running;
       stopButton.style.opacity = control.running ? '1' : '0.5';
       if (window.grok2apiActionBusy) {
         startButton.disabled = true;
+        if (restartButton) restartButton.disabled = true;
         stopButton.disabled = true;
       }
     }
 
     const startBtn = document.getElementById('tunnel-start-btn');
+    const restartBtn = document.getElementById('tunnel-restart-btn');
     const stopBtn = document.getElementById('tunnel-stop-btn');
     if (startBtn && stopBtn) {
       const isRunning = !!s.tunnel_running;
-      if (isRunning) {
-        startBtn.disabled = true;
-        startBtn.style.opacity = '0.5';
-        stopBtn.disabled = false;
-        stopBtn.style.opacity = '1';
-      } else {
-        startBtn.disabled = false;
-        startBtn.style.opacity = '1';
-        stopBtn.disabled = true;
-        stopBtn.style.opacity = '0.5';
+      startBtn.disabled = isRunning;
+      startBtn.style.opacity = isRunning ? '0.5' : '1';
+      if (restartBtn) {
+        restartBtn.disabled = !isRunning;
+        restartBtn.style.opacity = isRunning ? '1' : '0.5';
       }
+      stopBtn.disabled = !isRunning;
+      stopBtn.style.opacity = isRunning ? '1' : '0.5';
       if (window.tunnelActionBusy) {
         startBtn.disabled = true;
+        if (restartBtn) restartBtn.disabled = true;
         stopBtn.disabled = true;
       }
     }
@@ -353,8 +416,10 @@ async function waitForRuntimeStatus(predicate, timeoutMs = 150000, intervalMs = 
 }
 
 async function handleActionWithIndicator(type, button, label, actionApiUrl, errorIndicatorState, options = {}) {
-  const busyKey = type === 'media-proxy' ? 'mediaProxyActionBusy' : `${type}ActionBusy`;
+  // Resolve busy flag via shared helper so split types (grok2api-*) share one lock.
+  const busyKey = indicatorBusyKey(type);
   window[busyKey] = true;
+  // Yellow = action in progress; persist so reload mid-action still shows working state briefly.
   if (typeof window.updateIndicator === 'function') {
     window.updateIndicator(type, 'yellow');
   }
@@ -370,8 +435,8 @@ async function handleActionWithIndicator(type, button, label, actionApiUrl, erro
           } else if (options.timeoutMessage) {
             showMessage(options.timeoutMessage, true);
             if (errorIndicatorState && typeof window.updateIndicator === 'function') {
+              // updateIndicator persists by default.
               window.updateIndicator(type, errorIndicatorState);
-              saveIndicatorStates();
             }
           }
         } else {
@@ -381,7 +446,6 @@ async function handleActionWithIndicator(type, button, label, actionApiUrl, erro
         showMessage(e.message, true);
         if (errorIndicatorState && typeof window.updateIndicator === 'function') {
           window.updateIndicator(type, errorIndicatorState);
-          saveIndicatorStates();
         }
       }
     });
@@ -421,6 +485,16 @@ async function stopOAuthManager(button) {
   });
 }
 
+async function restartOAuthManager(button) {
+  return handleActionWithIndicator('oauth', button, t('runtime.restartingOAuthManager', '重启中...'), '/api/restart-oauth-manager', 'red', {
+    waitFor: status => !!status.oauth_manager_running,
+    timeoutMs: 25000,
+    intervalMs: 1000,
+    readyMessage: t('runtime.oauthManagerReady', 'OAuth Manager 已启动。'),
+    timeoutMessage: t('runtime.oauthManagerStartTimeout', 'OAuth Manager 重启命令已发出，但未检测到服务就绪。请查看 OAuth Manager 日志。'),
+  });
+}
+
 async function waitForOpenClawRunning(button, label, actionApiUrl) {
   return handleActionWithIndicator('openclaw', button, label, actionApiUrl, 'red', {
     waitFor: status => !!status.openclaw_running,
@@ -455,26 +529,35 @@ async function stopMediaProxy(button) {
   return handleActionWithIndicator('media-proxy', button, '停止中...', '/api/media-proxy/stop', 'green');
 }
 
-async function runGrok2ApiServiceAction(button, label, endpoint, errorState) {
-  const result = await handleActionWithIndicator('grok2api', button, label, endpoint, errorState);
+// type must be 'grok2api-frontend' or 'grok2api-backend' so the correct traffic light is cached.
+async function runGrok2ApiServiceAction(type, button, label, endpoint, errorState) {
+  const result = await handleActionWithIndicator(type, button, label, endpoint, errorState);
   await refreshStatus();
   return result;
 }
 
 async function startGrok2ApiFrontend(button) {
-  return runGrok2ApiServiceAction(button, '启动前端...', '/api/grok2api/frontend/start', 'red');
+  return runGrok2ApiServiceAction('grok2api-frontend', button, '启动前端...', '/api/grok2api/frontend/start', 'red');
 }
 
 async function stopGrok2ApiFrontend(button) {
-  return runGrok2ApiServiceAction(button, '关闭前端...', '/api/grok2api/frontend/stop', 'red');
+  return runGrok2ApiServiceAction('grok2api-frontend', button, '关闭前端...', '/api/grok2api/frontend/stop', 'red');
+}
+
+async function restartGrok2ApiFrontend(button) {
+  return runGrok2ApiServiceAction('grok2api-frontend', button, '重启前端...', '/api/grok2api/frontend/restart', 'red');
 }
 
 async function startGrok2ApiBackend(button) {
-  return runGrok2ApiServiceAction(button, '启动后端...', '/api/grok2api/backend/start', 'red');
+  return runGrok2ApiServiceAction('grok2api-backend', button, '启动后端...', '/api/grok2api/backend/start', 'red');
 }
 
 async function stopGrok2ApiBackend(button) {
-  return runGrok2ApiServiceAction(button, '关闭后端...', '/api/grok2api/backend/stop', 'red');
+  return runGrok2ApiServiceAction('grok2api-backend', button, '关闭后端...', '/api/grok2api/backend/stop', 'red');
+}
+
+async function restartGrok2ApiBackend(button) {
+  return runGrok2ApiServiceAction('grok2api-backend', button, '重启后端...', '/api/grok2api/backend/restart', 'red');
 }
 
 async function enableExposureMode(button) {
@@ -513,4 +596,8 @@ async function startTunnel(button) {
 
 async function stopTunnel(button) {
   return handleActionWithIndicator('tunnel', button, t('runtime.stoppingTunnel', '关闭中...'), '/api/tunnel/stop', 'green');
+}
+
+async function restartTunnel(button) {
+  return handleActionWithIndicator('tunnel', button, t('runtime.restartingTunnel', '重启中...'), '/api/tunnel/restart', 'red');
 }

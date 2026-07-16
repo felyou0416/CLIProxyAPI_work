@@ -47,6 +47,7 @@
         </div>
         <div class="control-pair">
           <button class="runtime-action-btn" id="ip-helper-start-btn" onclick="setIpHelperService('start', this)">启动</button>
+          <button class="secondary runtime-action-btn" id="ip-helper-restart-btn" onclick="setIpHelperService('restart', this)">重启</button>
           <button class="danger runtime-action-btn" id="ip-helper-stop-btn" onclick="setIpHelperService('stop', this)">关闭</button>
         </div>
       </div>
@@ -74,6 +75,7 @@
         </div>
         <div class="control-pair">
           <button class="runtime-action-btn" onclick="startOAuthManager(this)" data-i18n="btn.startOAuthManager">启动</button>
+          <button class="secondary runtime-action-btn" onclick="restartOAuthManager(this)" data-i18n="btn.restartOAuthManager">重启</button>
           <button class="danger runtime-action-btn" onclick="stopOAuthManager(this)" data-i18n="btn.stopOAuthManager">停止</button>
         </div>
       </div>
@@ -87,6 +89,7 @@
         </div>
         <div class="control-pair">
           <button class="runtime-action-btn" id="tunnel-start-btn" onclick="startTunnel(this)" data-i18n="btn.startTunnel">启动</button>
+          <button class="secondary runtime-action-btn" id="tunnel-restart-btn" onclick="restartTunnel(this)" data-i18n="btn.restartTunnel">重启</button>
           <button class="danger runtime-action-btn" id="tunnel-stop-btn" onclick="stopTunnel(this)" data-i18n="btn.stopTunnel">停止</button>
         </div>
       </div>
@@ -110,10 +113,11 @@
         <div class="control-group-heading">
           <span class="control-group-icon">🖥️</span>
           <a href="http://127.0.0.1:5173/" target="_blank" class="control-group-title-link" id="grok2api-title-link" data-i18n="label.grok2apiFrontendGroup">Grok2API 前端</a>
-          <span id="grok2api-frontend-dot" class="status-indicator-dot red" title="Grok2API 前端状态"></span>
+          <span id="grok2api-frontend-status-indicator" class="status-indicator-dot red" title="Grok2API 前端状态"></span>
         </div>
         <div class="control-pair">
           <button class="runtime-action-btn" type="button" id="grok2api-frontend-start-btn" onclick="startGrok2ApiFrontend(this)" data-i18n="btn.grok2apiStart">启动</button>
+          <button class="secondary runtime-action-btn" type="button" id="grok2api-frontend-restart-btn" onclick="restartGrok2ApiFrontend(this)" data-i18n="btn.grok2apiRestart">重启</button>
           <button class="danger runtime-action-btn" type="button" id="grok2api-frontend-stop-btn" onclick="stopGrok2ApiFrontend(this)" data-i18n="btn.grok2apiStop">关闭</button>
         </div>
       </div>
@@ -123,10 +127,11 @@
         <div class="control-group-heading">
           <span class="control-group-icon">⚙️</span>
           <a href="http://127.0.0.1:8000/readyz" target="_blank" class="control-group-title-link" title="查看 Grok2API 后端就绪状态" data-i18n="label.grok2apiBackendGroup">Grok2API 后端</a>
-          <span id="grok2api-backend-dot" class="status-indicator-dot red" title="Grok2API 后端状态"></span>
+          <span id="grok2api-backend-status-indicator" class="status-indicator-dot red" title="Grok2API 后端状态"></span>
         </div>
         <div class="control-pair">
           <button class="runtime-action-btn" type="button" id="grok2api-backend-start-btn" onclick="startGrok2ApiBackend(this)" data-i18n="btn.grok2apiStart">启动</button>
+          <button class="secondary runtime-action-btn" type="button" id="grok2api-backend-restart-btn" onclick="restartGrok2ApiBackend(this)" data-i18n="btn.grok2apiRestart">重启</button>
           <button class="danger runtime-action-btn" type="button" id="grok2api-backend-stop-btn" onclick="stopGrok2ApiBackend(this)" data-i18n="btn.grok2apiStop">关闭</button>
         </div>
       </div>

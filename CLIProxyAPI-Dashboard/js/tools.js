@@ -205,6 +205,7 @@ async function loadRoutePreview() {
 }
 
 async function runDashboardScript(mode = 'ps') {
+  // Dashboard traffic light also uses cli-indicator-states via updateIndicator().
   if (typeof window.updateIndicator === 'function') {
     window.updateIndicator('dashboard', 'yellow');
   }

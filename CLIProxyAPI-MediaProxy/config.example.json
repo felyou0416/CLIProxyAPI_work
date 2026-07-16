@@ -33,6 +33,41 @@
           "poll_timeout_seconds": 180
         }
       ]
+    },
+    {
+      "provider": "grok2api",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "model_rules": [
+        {
+          "match_contains": "image-edit",
+          "type": "image",
+          "endpoint": "/images/edits",
+          "method": "POST",
+          "request_format": "openai-image",
+          "response_format": "url"
+        },
+        {
+          "match_contains": "image",
+          "type": "image",
+          "endpoint": "/images/generations",
+          "method": "POST",
+          "request_format": "openai-image",
+          "response_format": "url"
+        },
+        {
+          "match_contains": "video",
+          "type": "video",
+          "endpoint": "/videos/generations",
+          "retrieve_endpoint": "{base_url}/videos/{request_id}",
+          "method": "POST",
+          "request_format": "openai-video",
+          "response_format": "auto",
+          "poll_interval_ms": 3000,
+          "poll_timeout_seconds": 45
+        }
+      ]
     }
   ],
   "providers": []

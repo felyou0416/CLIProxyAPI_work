@@ -548,3 +548,155 @@ func testAgnesAuthProviderConfig() AuthProviderConfig {
 		},
 	}
 }
+
+
+func TestImagesFromChatExtractsOpenAIParts(t *testing.T) {
+	images := imagesFromChat(map[string]any{
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "text", "text": "make it blue"},
+					map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.com/in.png"}},
+				},
+			},
+		},
+	})
+	if len(images) != 1 || images[0]["url"] != "https://example.com/in.png" {
+		t.Fatalf("images = %#v", images)
+	}
+}
+
+func TestBuildMediaPayloadRoutesEditImages(t *testing.T) {
+	payload, err := buildMediaPayload(ModelConfig{
+		Name:          "grok-imagine-image-edit",
+		Type:          "image",
+		Endpoint:      "/images/edits",
+		RequestFormat: "openai-image",
+	}, map[string]any{
+		"model": "grok-imagine-image-edit",
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "text", "text": "make it blue"},
+					map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.com/in.png"}},
+				},
+			},
+		},
+	}, "make it blue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["prompt"] != "make it blue" {
+		t.Fatalf("prompt = %#v", got["prompt"])
+	}
+	image, ok := got["image"].(map[string]any)
+	if !ok || image["url"] != "https://example.com/in.png" {
+		t.Fatalf("image = %#v", got["image"])
+	}
+}
+
+func TestBuildDirectPayloadImageEditRequiresImage(t *testing.T) {
+	_, err := buildDirectPayload(ModelConfig{
+		Name:          "grok-imagine-image-edit",
+		Type:          "image",
+		Endpoint:      "/images/edits",
+		RequestFormat: "openai-image",
+	}, map[string]any{
+		"prompt": "make it blue",
+	})
+	if err == nil || err.Error() != "image or images is required for image edits" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestGrok2APIAuthProviderRulesPreferImageEdit(t *testing.T) {
+	rules := []AuthProviderConfig{{
+		Provider: "grok2api",
+		ModelRules: []AuthModelRule{
+			{MatchContains: "image-edit", Type: "image", Endpoint: "/images/edits", RequestFormat: "openai-image"},
+			{MatchContains: "image", Type: "image", Endpoint: "/images/generations", RequestFormat: "openai-image"},
+			{MatchContains: "video", Type: "video", Endpoint: "/videos/generations", RetrieveEndpoint: "{base_url}/videos/{request_id}", RequestFormat: "openai-video"},
+		},
+	}}
+	models := mediaModelsFromAuthContent("grok2api", "http://127.0.0.1:8000/v1", map[string]any{
+		"models": []any{"grok-imagine-image", "grok-imagine-image-edit", "grok-imagine-video"},
+	}, rules)
+	byName := map[string]ModelConfig{}
+	for _, model := range models {
+		byName[model.Name] = model
+	}
+	if byName["grok-imagine-image"].Endpoint != "/images/generations" {
+		t.Fatalf("image endpoint = %#v", byName["grok-imagine-image"])
+	}
+	if byName["grok-imagine-image-edit"].Endpoint != "/images/edits" {
+		t.Fatalf("edit endpoint = %#v", byName["grok-imagine-image-edit"])
+	}
+	if byName["grok-imagine-video"].Endpoint != "/videos/generations" {
+		t.Fatalf("video endpoint = %#v", byName["grok-imagine-video"])
+	}
+}
+
+func TestVideoPendingChatContentIncludesPollHint(t *testing.T) {
+	got := videoPendingChatContent("video_123", nil)
+	if got == "" || !bytes.Contains([]byte(got), []byte("GET /v1/videos/video_123")) {
+		t.Fatalf("content = %q", got)
+	}
+}
+
+func TestChatVideoTimeoutReturnsPendingHandle(t *testing.T) {
+	var createHits, pollHits int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/videos/generations":
+			createHits++
+			_, _ = w.Write([]byte(`{"request_id":"video_123","status":"pending"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/videos/video_123":
+			pollHits++
+			_, _ = w.Write([]byte(`{"request_id":"video_123","status":"pending","progress":10}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	srv, err := NewServer(Config{Providers: []Provider{{
+		Name:    "grok2api",
+		BaseURL: upstream.URL,
+		Models: []ModelConfig{{
+			Name:               "grok-imagine-video",
+			Alias:              "grok-imagine-video",
+			Type:               "video",
+			Endpoint:           "/videos/generations",
+			RetrieveEndpoint:   "/videos/{request_id}",
+			RequestFormat:      "openai-video",
+			PollIntervalMillis: 50,
+			PollTimeoutSeconds: 1,
+		}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := bytes.NewBufferString(`{"model":"grok-imagine-video","messages":[{"role":"user","content":"a cat walking"}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", body)
+	rr := httptest.NewRecorder()
+	srv.handleChatCompletions(rr, req.WithContext(context.Background()))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if createHits != 1 {
+		t.Fatalf("createHits = %d", createHits)
+	}
+	if pollHits == 0 {
+		t.Fatal("expected polling")
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte("video_123")) {
+		t.Fatalf("body = %s", rr.Body.String())
+	}
+}
