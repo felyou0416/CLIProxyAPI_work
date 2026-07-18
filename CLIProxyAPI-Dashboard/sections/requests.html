@@ -1,12 +1,11 @@
 <section id="section-requests" class="panel panel-scroll section-view request-bubbles-panel" hidden>
   <div class="panel-head request-head">
     <div>
-      <div class="section-kicker" data-i18n="section.requestsKicker">可观测性</div>
       <h2 class="section-title" data-i18n="section.requestsTitle">请求记录</h2>
     </div>
-    <div class="action-row">
+    <div class="action-row toolbar-scroll">
       <button class="secondary" type="button" onclick="loadRequestEventsPanel(true)" data-i18n="btn.refresh">刷新</button>
-      <button class="secondary" type="button" onclick="loadMoreRequestEvents()" data-i18n="btn.loadMore">加载更多</button>
+      <button class="secondary" type="button" onclick="loadMoreRequestEvents()" data-i18n="btn.loadMore">更多</button>
       <button class="secondary icon-btn" type="button" onclick="showRequestSettingsModal()" title="筛选与设置">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"></circle>
@@ -16,7 +15,6 @@
       <span class="auth-chip" id="request-events-meta">-</span>
     </div>
   </div>
-  <div class="request-quick-note" data-i18n="section.requestsDesc">最近请求按时间倒序显示，默认隐藏 /v1/models。点击齿轮按钮进行高级筛选与配置。</div>
   <div class="metric-table-wrap request-table-wrap">
     <table class="metric-table request-table">
       <thead>

@@ -4,94 +4,62 @@
 
 .system-hub {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .system-hub-head {
-  align-items: flex-start;
+  align-items: center;
+  padding-bottom: 4px;
 }
 
 .system-hub-subtitle {
-  max-width: 720px;
-  margin: 6px 0 0;
-  color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1.45;
+  display: none;
 }
 
 .system-hub-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .system-hub-card {
   min-width: 0;
-  padding: 14px;
+  padding: 12px;
   border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--panel);
   display: grid;
   gap: 8px;
+  box-shadow: none;
 }
 
 .system-hub-card.primary-card {
-  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
-  background: color-mix(in srgb, var(--accent-soft) 18%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 12%, var(--panel));
 }
 
-.system-card-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.system-card-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  background: #2563eb;
-}
-
-.system-card-dot.route {
-  background: #059669;
-}
-
-.system-card-dot.deploy {
-  background: #d97706;
-}
-
-.system-card-dot.advanced {
-  background: #7c3aed;
-}
-
+.system-card-top,
+.system-card-dot,
 .system-card-kicker {
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 850;
-  letter-spacing: 0;
-  text-transform: uppercase;
+  display: none;
 }
 
 .system-hub-card h3 {
   margin: 0;
   color: var(--text);
-  font-size: 16px;
-  font-weight: 780;
+  font-size: 13px;
+  font-weight: 750;
 }
 
 .system-hub-card p {
-  margin: 0;
-  color: var(--text-soft);
-  font-size: 12px;
-  line-height: 1.4;
+  display: none;
 }
 
 .system-link-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .system-link-grid button {

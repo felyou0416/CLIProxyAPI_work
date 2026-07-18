@@ -4,6 +4,8 @@ async function boot() {
   applySidebarCollapsed();
   applySidebarNavOrder();
   applyNavGroupCollapsed();
+  bindMobileNavChrome();
+  closeMobileNav();
   setLanguageToggleLabel();
   // 在挂载控制台之前先恢复指示灯缓存，避免账号页首屏先红后绿
   if (typeof loadIndicatorStates === 'function') {
@@ -18,6 +20,9 @@ async function boot() {
     await showSection(hashSection);
   } else {
     await showSection(getActiveSection());
+  }
+  if (typeof ensureFilterRailToggles === 'function') {
+    ensureFilterRailToggles();
   }
   if (typeof loadIndicatorStates === 'function') {
     loadIndicatorStates();

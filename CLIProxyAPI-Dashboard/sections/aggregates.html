@@ -12,8 +12,8 @@
   </div>
 
   <div class="aggregate-layout">
-    <div class="aggregate-panel-card aggregate-sidebar-card">
-      <div class="aggregate-panel-head">
+    <div class="aggregate-panel-card aggregate-sidebar-card filter-rail" data-filter-rail="aggregates-list">
+      <div class="aggregate-panel-head filter-rail-head" data-filter-rail-head>
         <div class="aggregate-list-sort-bar" style="margin: 0; padding: 0;">
           <span style="font-size: 11px; color: var(--text-muted); font-weight: 800; text-transform: uppercase;">排序:</span>
           <button type="button" class="secondary is-active" id="btn-sort-name" onclick="changeAggregateSort('name')">按名称</button>
@@ -24,7 +24,7 @@
           <button type="button" class="secondary" style="min-width: 28px; width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; border-radius: 50%; cursor: pointer;" onclick="showCreateAggregateModal()" title="新建聚合 ID">+</button>
         </div>
       </div>
-      <div id="aggregate-alias-list" class="aggregate-alias-list"></div>
+      <div id="aggregate-alias-list" class="aggregate-alias-list filter-rail-body"></div>
     </div>
 
     <div class="aggregate-panel-card aggregate-detail-card">
@@ -49,13 +49,13 @@
   <!-- Step 4: Add members section, restructured to two-column left-right layout -->
   <div class="aggregate-source-layout">
     <!-- Left Column: Provider Sidebar -->
-    <div class="aggregate-panel-card aggregate-source-sidebar-card">
-      <div class="aggregate-panel-head" style="margin-bottom: 12px;">
+    <div class="aggregate-panel-card aggregate-source-sidebar-card filter-rail" data-filter-rail="aggregates-source">
+      <div class="aggregate-panel-head filter-rail-head" data-filter-rail-head style="margin-bottom: 12px;">
         <div>
           <h3 data-i18n="section.aggregatesAddTitle">可选渠道来源</h3>
         </div>
       </div>
-      <div id="aggregate-provider-filters" class="provider-model-map-tabs-vertical"></div>
+      <div id="aggregate-provider-filters" class="provider-model-map-tabs-vertical filter-rail-body"></div>
     </div>
 
     <!-- Right Column: Filters + Action Dock + Model List -->

@@ -1,14 +1,14 @@
 <section id="section-model-map" class="panel panel-scroll section-view" hidden>
   <div class="model-map-layout">
     <!-- Left Column: Providers Sidebar List -->
-    <div class="aggregate-panel-card model-map-sidebar-card" style="padding: 12px; margin: 0; background: var(--panel);">
-      <div class="aggregate-panel-head" style="margin-bottom: 12px;">
+    <div class="aggregate-panel-card model-map-sidebar-card filter-rail" data-filter-rail="model-map" style="padding: 12px; margin: 0; background: var(--panel);">
+      <div class="aggregate-panel-head filter-rail-head" data-filter-rail-head style="margin-bottom: 12px;">
         <div>
           <div class="aggregate-step-label">Workspace</div>
           <h3 data-i18n="section.modelMapProvidersTitle" style="margin: 0; font-size: 15px; font-weight: 800;">服务商列表</h3>
         </div>
       </div>
-      <div id="provider-model-map-tabs" class="provider-model-map-tabs-vertical"></div>
+      <div id="provider-model-map-tabs" class="provider-model-map-tabs-vertical filter-rail-body"></div>
     </div>
 
     <!-- Right Column: Active Mapping Details -->

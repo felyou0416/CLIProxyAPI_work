@@ -4,12 +4,18 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CLIProxyAPI Codex Dashboard</title>
-  <link rel="stylesheet" href="/dashboard.css?v=20260718-hide-sidebar-scroll" />
+  <link rel="stylesheet" href="/dashboard.css?v=20260718-chat-drawer-fix" />
   <link rel="stylesheet" href="/css/atom-one-dark.min.css" />
   <link rel="stylesheet" href="/css/xterm.min.css" />
 </head>
 <body>
 <div class="app-shell">
+  <button class="mobile-nav-toggle" id="mobile-nav-toggle" type="button" onclick="toggleMobileNav()" aria-expanded="false" aria-controls="app-sidebar" title="打开导航">
+    <span class="mobile-nav-toggle-bars" aria-hidden="true"></span>
+    <span class="mobile-nav-toggle-label">菜单</span>
+  </button>
+  <div class="mobile-nav-scrim" id="mobile-nav-scrim" onclick="closeMobileNav()" hidden></div>
+
   <aside class="sidebar" id="app-sidebar">
     <div class="sidebar-block brand-block">
       <button class="sidebar-collapse-toggle" id="sidebar-collapse-toggle" type="button" onclick="toggleSidebarCollapsed()" aria-expanded="true" title="折叠侧栏">
@@ -24,6 +30,7 @@
         <div class="brand-title">CLIProxyAPI</div>
         <div class="brand-sub" data-i18n="hero.title">CLIProxyAPI Codex Dashboard</div>
       </div>
+      <button class="mobile-nav-close" type="button" onclick="closeMobileNav()" title="关闭导航" aria-label="关闭导航">×</button>
     </div>
 
     <div class="sidebar-block nav-block" id="sidebar-nav-list">
@@ -63,18 +70,18 @@
           </div></div>
         </div>
 
-        <!-- 接入 -->
+        <!-- 接入：只留高频入口；终端/工具/放行/文档走系统中心 -->
         <div class="nav-group" id="navgroup-access" data-group="access">
           <button class="nav-group-header" onclick="toggleNavGroup('access')" type="button">
             <span class="nav-group-icon">▾</span>
             <span class="nav-group-label" data-i18n="nav.group.access">接入</span>
           </button>
           <div class="nav-group-items-wrap"><div class="nav-group-items">
-            <button class="nav-pill top-nav-btn" id="tab-firewall-access" data-group="access" onclick="showSection('firewall-access')"><span data-i18n="nav.firewallAccess">端口放行</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-terminals" data-group="access" onclick="showSection('terminals')"><span data-i18n="nav.terminals">终端</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-tools" data-group="access" onclick="showSection('tools')"><span data-i18n="nav.tools">工具</span></button>
             <button class="nav-pill top-nav-btn" id="tab-virtual-keys" data-group="access" onclick="showSection('virtual-keys')"><span data-i18n="nav.virtualKeys">密钥管理</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-doc" data-group="access" onclick="showSection('doc')"><span data-i18n="nav.doc">文档</span></button>
+            <button class="nav-pill top-nav-btn nav-hidden" id="tab-firewall-access" data-group="system" onclick="showSection('firewall-access')"><span data-i18n="nav.firewallAccess">端口放行</span></button>
+            <button class="nav-pill top-nav-btn nav-hidden" id="tab-terminals" data-group="system" onclick="showSection('terminals')"><span data-i18n="nav.terminals">终端</span></button>
+            <button class="nav-pill top-nav-btn nav-hidden" id="tab-tools" data-group="system" onclick="showSection('tools')"><span data-i18n="nav.tools">工具</span></button>
+            <button class="nav-pill top-nav-btn nav-hidden" id="tab-doc" data-group="system" onclick="showSection('doc')"><span data-i18n="nav.doc">文档</span></button>
           </div></div>
         </div>
 
@@ -107,14 +114,14 @@
 </div>
 
 <script src="/js/i18n.js?v=20260718-grok2api-labels"></script>
-<script src="/js/core.js?v=20260718-settext-noop"></script>
+<script src="/js/core.js?v=20260718-nav-slim"></script>
 <script src="/js/availability.js?v=20260718-model-cache-authority"></script>
 <script src="/js/status.js?v=20260718-refresh-cheap"></script>
 <script src="/js/control-station-config.js?v=20260718-1"></script>
 <script src="/js/control-station.js?v=20260718-indicator-memory"></script>
 <script src="/js/overview-panel.js?v=20260718-indicator-memory"></script>
 <script src="/js/auth.js?v=20260718-model-queue-lights"></script>
-<script src="/js/providers.js?v=20260718-availability-shared"></script>
+<script src="/js/providers.js?v=20260718-overflow-fix"></script>
 <script src="/js/media-models.js"></script>
 <script src="/js/api-key-intake.js?v=20260608-provider-sync"></script>
 <script src="/js/aggregates.js?v=20260718-availability-shared"></script>
@@ -141,10 +148,10 @@
 <script src="/js/docker-deploy.js?v=20260522-1"></script>
 <script src="/js/data-transfer.js?v=20260705-2"></script>
 <script src="/js/settings.js"></script>
-<script src="/js/boot.js?v=20260718-refresh-cheap"></script>
+<script src="/js/boot.js?v=20260718-mobile-collapse"></script>
 <script src="/js/marked.min.js"></script>
 <script src="/js/highlight.min.js"></script>
-<script src="/js/chat.js?v=20260715-clean-chat-13"></script>
+<script src="/js/chat.js?v=20260718-chat-mobile"></script>
 
 <!-- INCLUDE: sections/modals.html -->
 

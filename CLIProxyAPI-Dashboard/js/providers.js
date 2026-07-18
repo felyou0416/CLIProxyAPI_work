@@ -906,12 +906,12 @@ function providerModelMapCardHtml(item) {
     <article class="provider-map-card">
       <div class="provider-map-head">
         <div class="provider-model-name">${targetProvider || lookupProvider || '-'}</div>
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <div class="provider-map-provider-edit" style="min-width: 140px;">
+        <div class="provider-map-head-actions">
+          <div class="provider-map-provider-edit">
             <span class="provider-map-label">Provider ID</span>
-            <input class="provider-map-input" type="text" value="${targetProvider}" data-current-target-provider="${targetProvider}" data-provider-map-group-provider="${lookupProvider}" style="height: 26px;" />
+            <input class="provider-map-input" type="text" value="${targetProvider}" data-current-target-provider="${targetProvider}" data-provider-map-group-provider="${lookupProvider}" />
           </div>
-          <button type="button" class="secondary" style="min-width: 26px; width: 26px; height: 26px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 15px; border-radius: 50%; margin-top: 14px; cursor: pointer;" onclick="showAddMappingModal('${lookupProvider}', '${targetProvider}')" title="新增模型映射">+</button>
+          <button type="button" class="secondary provider-map-add-btn" onclick="showAddMappingModal('${lookupProvider}', '${targetProvider}')" title="新增模型映射">+</button>
         </div>
       </div>
       <div class="provider-map-list">

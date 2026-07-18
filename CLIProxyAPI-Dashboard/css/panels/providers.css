@@ -79,6 +79,9 @@
   .provider-layout {
     grid-template-columns: 1fr;
   }
+  .provider-sidebar-card {
+    position: static;
+  }
 }
 .provider-action-dock {
   display: flex;
@@ -340,6 +343,9 @@
   padding: 8px 10px;
   display: grid;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 .provider-map-head {
   display: flex;
@@ -347,6 +353,35 @@
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 2px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.provider-map-head .provider-model-name {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.provider-map-head-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 180px;
+  flex-wrap: wrap;
+}
+.provider-map-add-btn {
+  min-width: 26px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  border-radius: 50%;
+  cursor: pointer;
+  flex: 0 0 auto;
 }
 .provider-map-add-row {
   display: grid;
@@ -354,22 +389,26 @@
   gap: 8px;
   padding: 4px 0 2px;
   border-top: 1px dashed var(--border);
+  min-width: 0;
 }
 .provider-map-provider-edit {
   display: grid;
   gap: 2px;
-  min-width: 220px;
+  min-width: 0;
+  flex: 1 1 140px;
 }
 .provider-map-list {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 .provider-map-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(300px, 1.2fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
   gap: 8px;
   padding: 4px 0;
   border-top: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  min-width: 0;
 }
 .provider-map-row:first-child {
   border-top: 0;
@@ -395,12 +434,15 @@
   background: var(--panel-2);
   font-size: 11px;
   word-break: break-all;
+  overflow-wrap: anywhere;
+  max-width: 100%;
 }
 .provider-map-actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
   align-items: center;
+  min-width: 0;
 }
 .provider-map-actions-inline {
   grid-template-columns: minmax(0, 1fr) auto;
@@ -410,6 +452,8 @@
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
 }
 .provider-map-input {
   min-height: 26px;
@@ -420,6 +464,10 @@
   color: var(--text);
   padding: 0 8px;
   font-size: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .provider-map-save {
   min-width: 48px;
@@ -441,23 +489,44 @@
   grid-template-columns: 200px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
+  min-width: 0;
+  max-width: 100%;
+}
+#section-model-map {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+}
+.provider-model-map-list {
+  min-width: 0;
+  max-width: 100%;
+}
+.model-map-sidebar-card {
+  min-width: 0;
+  max-width: 100%;
 }
 .provider-model-map-tabs-vertical {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 .provider-model-map-tabs-vertical .provider-map-tab {
   width: 100%;
   text-align: left;
   justify-content: flex-start;
   min-height: 30px;
-  height: 30px;
-  padding: 0 10px;
+  height: auto;
+  padding: 6px 10px;
   border-radius: 6px;
   display: flex;
   align-items: center;
   font-size: 12px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 @media (max-width: 900px) {
   .model-map-layout {
@@ -468,6 +537,26 @@
   .provider-model-map-list,
   .provider-map-card {
     min-width: 0;
+    max-width: 100%;
+  }
+
+  .provider-map-row,
+  .provider-map-add-row,
+  .provider-map-actions,
+  .provider-map-actions-inline {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .provider-map-btns {
+    justify-content: flex-start;
+  }
+
+  .provider-map-head-actions {
+    width: 100%;
+  }
+
+  .provider-map-provider-edit {
+    flex: 1 1 100%;
   }
 }
 
@@ -478,6 +567,15 @@
 
   .provider-map-provider-edit {
     min-width: 0;
+  }
+
+  .provider-map-btns {
+    width: 100%;
+  }
+
+  .provider-map-save,
+  .provider-map-delete {
+    flex: 1 1 auto;
   }
 }
 .api-key-mode-switch .provider-category-btn {

@@ -136,17 +136,269 @@ function applySidebarCollapsed() {
 }
 
 function toggleSidebarCollapsed() {
+  // 手机端图标按钮负责抽屉开合，不改桌面折叠状态
+  if (isMobileLayout()) {
+    toggleMobileNav();
+    return;
+  }
   localStorage.setItem(DASHBOARD_SIDEBAR_COLLAPSED_KEY, isSidebarCollapsed() ? '0' : '1');
   applySidebarCollapsed();
   window.requestAnimationFrame(layoutBubbleNav);
+}
+
+const MOBILE_LAYOUT_MQ = '(max-width: 980px)';
+
+function isMobileLayout() {
+  return window.matchMedia(MOBILE_LAYOUT_MQ).matches;
+}
+
+function isMobileNavOpen() {
+  return document.body.classList.contains('mobile-nav-open');
+}
+
+function setMobileNavOpen(open) {
+  const next = !!open && isMobileLayout();
+  if (next) closeFilterRail();
+  document.body.classList.toggle('mobile-nav-open', next);
+  const toggle = document.getElementById('mobile-nav-toggle');
+  const scrim = document.getElementById('mobile-nav-scrim');
+  if (toggle) {
+    toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
+    toggle.setAttribute('title', next ? '关闭导航' : '打开导航');
+  }
+  if (scrim) scrim.hidden = !next;
+  if (!isFilterRailOpen()) {
+    document.body.style.overflow = next ? 'hidden' : '';
+  }
+}
+
+function openMobileNav() {
+  setMobileNavOpen(true);
+}
+
+function closeMobileNav() {
+  setMobileNavOpen(false);
+}
+
+function toggleMobileNav() {
+  setMobileNavOpen(!isMobileNavOpen());
+}
+
+// 页内筛选栏：手机端做成与主导航一致的侧滑抽屉
+const FILTER_RAIL_LABELS = {
+  providers: '可调用模型 ID',
+  'media-models': '可调用多媒体',
+  'model-map': '服务商列表',
+  'aggregates-list': '聚合列表',
+  'aggregates-source': '可选渠道来源',
+  'auth-selected': '提供方筛选',
+  'auth-available': '提供方筛选',
+};
+
+function getFilterRailLabel(rail, key) {
+  const fromAttr = rail?.getAttribute('data-filter-rail-label');
+  if (fromAttr) return fromAttr;
+  if (FILTER_RAIL_LABELS[key]) return FILTER_RAIL_LABELS[key];
+  const titleEl = rail?.querySelector('h3, .filter-rail-title, .section-title');
+  const text = String(titleEl?.textContent || '').trim();
+  return text || '筛选';
+}
+
+function getFilterRailScrim() {
+  let scrim = document.getElementById('filter-rail-scrim');
+  if (scrim) return scrim;
+  scrim = document.createElement('div');
+  scrim.id = 'filter-rail-scrim';
+  scrim.className = 'filter-rail-scrim';
+  scrim.hidden = true;
+  scrim.onclick = () => closeFilterRail();
+  document.body.appendChild(scrim);
+  return scrim;
+}
+
+function getOpenFilterRail() {
+  return document.querySelector('[data-filter-rail].is-open');
+}
+
+function isFilterRailOpen() {
+  return !!getOpenFilterRail();
+}
+
+function syncFilterRailChrome() {
+  const openRail = getOpenFilterRail();
+  const open = !!openRail && isMobileLayout();
+  const scrim = getFilterRailScrim();
+  document.body.classList.toggle('filter-rail-open', open);
+  scrim.hidden = !open;
+  if (!isMobileNavOpen()) {
+    document.body.style.overflow = open ? 'hidden' : '';
+  }
+  document.querySelectorAll('[data-filter-rail-open]').forEach((btn) => {
+    const key = btn.getAttribute('data-filter-rail-open') || '';
+    const active = open && openRail?.getAttribute('data-filter-rail') === key;
+    btn.setAttribute('aria-expanded', active ? 'true' : 'false');
+    btn.classList.toggle('is-active', active);
+  });
+}
+
+function closeFilterRail() {
+  document.querySelectorAll('[data-filter-rail].is-open').forEach((rail) => {
+    rail.classList.remove('is-open');
+  });
+  syncFilterRailChrome();
+}
+
+function openFilterRail(keyOrRail) {
+  if (!isMobileLayout()) return;
+  const rail = typeof keyOrRail === 'string'
+    ? document.querySelector(`[data-filter-rail="${keyOrRail}"]`)
+    : keyOrRail;
+  if (!rail) return;
+  closeMobileNav();
+  document.querySelectorAll('[data-filter-rail].is-open').forEach((item) => {
+    if (item !== rail) item.classList.remove('is-open');
+  });
+  rail.classList.add('is-open');
+  syncFilterRailChrome();
+}
+
+function toggleFilterRail(keyOrBtn) {
+  if (!isMobileLayout()) return;
+  let key = '';
+  let rail = null;
+  if (typeof keyOrBtn === 'string') {
+    key = keyOrBtn;
+    rail = document.querySelector(`[data-filter-rail="${key}"]`);
+  } else if (keyOrBtn?.getAttribute?.('data-filter-rail-open')) {
+    key = keyOrBtn.getAttribute('data-filter-rail-open') || '';
+    rail = document.querySelector(`[data-filter-rail="${key}"]`);
+  } else if (keyOrBtn?.closest) {
+    rail = keyOrBtn.closest('[data-filter-rail]');
+    key = rail?.getAttribute('data-filter-rail') || '';
+  }
+  if (!rail) return;
+  if (rail.classList.contains('is-open')) closeFilterRail();
+  else openFilterRail(rail);
+}
+
+function applyFilterRailState(rail) {
+  if (!rail) return;
+  if (!isMobileLayout()) {
+    rail.classList.remove('is-open', 'is-collapsed');
+  }
+  const key = rail.getAttribute('data-filter-rail') || '';
+  const openBtn = document.querySelector(`[data-filter-rail-open="${key}"]`);
+  if (openBtn) openBtn.hidden = !isMobileLayout();
+}
+
+function applyAllFilterRails() {
+  if (!isMobileLayout()) closeFilterRail();
+  document.querySelectorAll('[data-filter-rail]').forEach(applyFilterRailState);
+  syncFilterRailChrome();
+}
+
+function ensureFilterRailToggles() {
+  getFilterRailScrim();
+
+  document.querySelectorAll('[data-filter-rail]').forEach((rail) => {
+    const key = rail.getAttribute('data-filter-rail') || '';
+    if (!key) return;
+    const label = getFilterRailLabel(rail, key);
+    const head = rail.querySelector('[data-filter-rail-head]')
+      || rail.querySelector('.aggregate-panel-head')
+      || rail.querySelector('.filter-rail-head');
+
+    // 清理旧版折叠/关闭按钮
+    head?.querySelectorAll('[data-filter-rail-toggle], [data-filter-rail-close]').forEach((btn) => btn.remove());
+
+    // 外部打开按钮（侧滑触发器）
+    let openBtn = document.querySelector(`[data-filter-rail-open="${key}"]`);
+    if (!openBtn) {
+      openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className = 'filter-rail-open-btn';
+      openBtn.setAttribute('data-filter-rail-open', key);
+      openBtn.setAttribute('aria-controls', key);
+      openBtn.innerHTML = `<span class="filter-rail-open-icon" aria-hidden="true"></span><span data-filter-rail-open-label></span>`;
+      openBtn.onclick = (event) => {
+        event.preventDefault();
+        toggleFilterRail(key);
+      };
+      rail.parentNode?.insertBefore(openBtn, rail);
+    }
+    const openLabel = openBtn.querySelector('[data-filter-rail-open-label]');
+    if (openLabel) openLabel.textContent = label;
+    openBtn.setAttribute('title', `打开${label}`);
+    openBtn.setAttribute('aria-label', `打开${label}`);
+  });
+
+  applyAllFilterRails();
+}
+
+function bindMobileNavChrome() {
+  if (window.__mobileNavChromeBound) return;
+  window.__mobileNavChromeBound = true;
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    if (isFilterRailOpen()) {
+      closeFilterRail();
+      return;
+    }
+    if (isMobileNavOpen()) closeMobileNav();
+  });
+
+  // 选中筛选项后自动收回抽屉
+  document.addEventListener('click', (event) => {
+    if (!isMobileLayout() || !isFilterRailOpen()) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (!target.closest('[data-filter-rail].is-open')) return;
+    if (
+      target.closest('.provider-map-tab')
+      || target.closest('.auth-provider-filter-btn')
+      || target.closest('.aggregate-alias-chip')
+      || target.closest('[data-provider-group]')
+      || target.closest('[data-media-group]')
+      || target.closest('[data-provider-map-tab]')
+      || target.closest('[data-aggregate-alias]')
+    ) {
+      window.setTimeout(() => closeFilterRail(), 0);
+    }
+  });
+
+  window.matchMedia(MOBILE_LAYOUT_MQ).addEventListener('change', (event) => {
+    if (!event.matches) {
+      closeMobileNav();
+      closeFilterRail();
+    }
+    applyAllFilterRails();
+  });
 }
 
 function getNavGroups() {
   return {
     runtime: ['account', 'chat', 'requests', 'token-usage', 'model-stats', 'clients', 'settings'],
     config: ['providers', 'media-models', 'aggregates', 'model-thinking', 'model-map', 'api-key-intake', 'auths'],
-    access: ['firewall-access', 'terminals', 'tools', 'virtual-keys', 'doc'],
-    system: ['system', 'network-access', 'model-proxy', 'cooldown', 'storage-config', 'home-config', 'docker-deploy', 'advanced-config', 'cloaking-config', 'amp-config', 'data-transfer'],
+    access: ['virtual-keys'],
+    // 低频页不进侧栏，统一归系统中心入口
+    system: [
+      'system',
+      'network-access',
+      'firewall-access',
+      'model-proxy',
+      'cooldown',
+      'storage-config',
+      'home-config',
+      'docker-deploy',
+      'advanced-config',
+      'cloaking-config',
+      'amp-config',
+      'data-transfer',
+      'tools',
+      'terminals',
+      'doc',
+    ],
   };
 }
 
@@ -186,7 +438,11 @@ function persistActiveGroup(group) {
 }
 
 function getDefaultSidebarNavOrder() {
-  return ['account', 'chat', 'requests', 'token-usage', 'model-stats', 'clients', 'settings', 'providers', 'media-models', 'aggregates', 'model-thinking', 'model-map', 'api-key-intake', 'auths', 'firewall-access', 'terminals', 'tools', 'virtual-keys', 'doc', 'system'];
+  return [
+    'account', 'chat', 'requests', 'token-usage', 'model-stats', 'clients', 'settings',
+    'providers', 'media-models', 'aggregates', 'model-thinking', 'model-map', 'api-key-inplace', 'auths',
+    'virtual-keys', 'system',
+  ];
 }
 
 function getSidebarNavOrder() {
@@ -547,6 +803,9 @@ async function showSection(name, options = {}) {
     document.querySelectorAll('.top-nav-btn').forEach(el => el.classList.remove('active'));
     const currentTabId = getNavTabForSection(name, requestedGroup);
     if (currentTabId) document.getElementById(currentTabId)?.classList.add('active');
+    closeMobileNav();
+    closeFilterRail();
+    window.requestAnimationFrame(() => ensureFilterRailToggles());
     return;
   }
 
@@ -583,6 +842,11 @@ async function showSection(name, options = {}) {
   if (activeTabId) document.getElementById(activeTabId)?.classList.add('active');
   persistActiveSection(name);
   persistActiveGroup(activeGroup);
+  closeMobileNav();
+  closeFilterRail();
+  window.requestAnimationFrame(() => {
+    ensureFilterRailToggles();
+  });
   if (name === 'aggregates' && typeof loadAggregateModels === 'function') {
     loadAggregateModels();
   }

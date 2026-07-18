@@ -316,6 +316,61 @@ function selectPreferredVideoModel() {
   }
 }
 
+function isChatMobileLayout() {
+  return window.matchMedia('(max-width: 820px)').matches;
+}
+
+function getChatLayoutEl() {
+  return document.querySelector('#section-chat .chat-layout') || document.querySelector('.chat-layout');
+}
+
+function syncChatDrawerChrome() {
+  const layout = getChatLayoutEl();
+  const scrim = document.getElementById('chat-drawer-scrim');
+  const sessionsToggle = document.getElementById('chat-sessions-toggle');
+  const optionsToggle = document.getElementById('chat-options-toggle');
+  const sessionsOpen = Boolean(layout?.classList.contains('chat-sessions-open'));
+  const optionsOpen = Boolean(layout?.classList.contains('chat-options-open'));
+  if (scrim) scrim.hidden = !(sessionsOpen || optionsOpen);
+  if (sessionsToggle) {
+    sessionsToggle.classList.toggle('active', sessionsOpen);
+    sessionsToggle.setAttribute('aria-expanded', sessionsOpen ? 'true' : 'false');
+  }
+  if (optionsToggle) {
+    optionsToggle.classList.toggle('active', optionsOpen);
+    optionsToggle.setAttribute('aria-expanded', optionsOpen ? 'true' : 'false');
+  }
+}
+
+function closeChatDrawers() {
+  const layout = getChatLayoutEl();
+  if (!layout) return;
+  layout.classList.remove('chat-sessions-open', 'chat-options-open');
+  syncChatDrawerChrome();
+}
+
+function toggleChatSessions() {
+  const layout = getChatLayoutEl();
+  if (!layout) return;
+  const next = !layout.classList.contains('chat-sessions-open');
+  layout.classList.toggle('chat-sessions-open', next);
+  if (next) layout.classList.remove('chat-options-open');
+  syncChatDrawerChrome();
+}
+
+function toggleChatOptions() {
+  if (!isMediaMode()) return;
+  const layout = getChatLayoutEl();
+  const optionsSidebar = document.getElementById('chat-options-sidebar');
+  if (!layout || !optionsSidebar || optionsSidebar.hidden) return;
+  // 桌面宽屏参数侧栏已可见，不必再开抽屉
+  if (!isChatMobileLayout()) return;
+  const next = !layout.classList.contains('chat-options-open');
+  layout.classList.toggle('chat-options-open', next);
+  if (next) layout.classList.remove('chat-sessions-open');
+  syncChatDrawerChrome();
+}
+
 function syncChatModeUI() {
   document.querySelectorAll('[data-chat-mode]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.chatMode === chatMode);
@@ -333,6 +388,16 @@ function syncChatModeUI() {
   const optionsTitle = document.getElementById('options-sidebar-title');
   if (optionsTitle) {
     optionsTitle.textContent = isImageMode() ? '画图参数' : '视频参数';
+  }
+  const optionsToggle = document.getElementById('chat-options-toggle');
+  if (optionsToggle) {
+    optionsToggle.hidden = !isMediaMode();
+    if (!isMediaMode()) optionsToggle.classList.remove('active');
+  }
+  // 切到非媒体模式时关掉参数抽屉；媒体模式默认收起，点按钮再开
+  const layout = getChatLayoutEl();
+  if (layout && (!isMediaMode() || !isChatMobileLayout())) {
+    layout.classList.remove('chat-options-open');
   }
 
   const settingsBar = document.getElementById('chat-settings-bar');
@@ -369,10 +434,12 @@ function syncChatModeUI() {
   if (history && history.querySelector('.chat-welcome')) renderChatWelcome();
   renderChatHistoryList();
   updateChatSendState();
+  syncChatDrawerChrome();
 }
 
 function toggleChatSystemPrompt() {
   if (isMediaMode()) return;
+  closeChatDrawers();
   const settingsBar = document.getElementById('chat-settings-bar');
   const systemToggle = document.getElementById('chat-system-toggle');
   if (!settingsBar) return;
@@ -587,6 +654,7 @@ function createNewSession(silent) {
     if (sp) sp.value = '';
     renderChatHistoryList();
     clearChatView();
+    closeChatDrawers();
   }
   return session;
 }
@@ -730,7 +798,7 @@ function renderChatHistoryList() {
     const active = s.id === activeSessionId ? 'active' : '';
     const msgCount = s.messages.filter(m => m.role !== 'system').length;
     const timeStr = new Date(s.ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-    return `<div class="chat-session-item ${active}" data-id="${s.id}" onclick="switchToSession('${s.id}')">
+    return `<div class="chat-session-item ${active}" data-id="${s.id}" onclick="switchToSession('${s.id}'); closeChatDrawers()">
       <div class="chat-session-info">
         <div class="chat-session-title">${escapeHtml(s.title)}${isSessionRunning(s) ? ' · …' : ''}</div>
         <div class="chat-session-meta">${s.model ? escapeHtml(s.model).split('-').slice(0,3).join('-') : 'No model'} · ${msgCount} msg${isSessionRunning(s) ? ' · running' : ''} · ${timeStr}</div>
@@ -1091,6 +1159,22 @@ function bindChatControls() {
         session.ts = Date.now();
         saveChatSessions();
       }
+    });
+  }
+
+  if (!window.__chatMobileChromeBound) {
+    window.__chatMobileChromeBound = true;
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      const layout = getChatLayoutEl();
+      if (!layout) return;
+      if (layout.classList.contains('chat-sessions-open') || layout.classList.contains('chat-options-open')) {
+        closeChatDrawers();
+      }
+    });
+    window.matchMedia('(max-width: 820px)').addEventListener('change', (event) => {
+      if (!event.matches) closeChatDrawers();
+      else syncChatDrawerChrome();
     });
   }
 

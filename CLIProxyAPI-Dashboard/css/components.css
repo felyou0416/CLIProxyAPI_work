@@ -1032,14 +1032,96 @@ h1 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
+.tools-action-list {
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+.tools-action-list .tool-card {
+  padding: 0;
+  overflow: hidden;
+}
+.tools-action-list .tool-card > summary.tool-top {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.tools-action-list .tool-card > summary.tool-top::-webkit-details-marker {
+  display: none;
+}
+.tools-action-list .tool-card > summary.tool-top::after {
+  content: '▸';
+  color: var(--text-muted);
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+.tools-action-list .tool-card[open] > summary.tool-top::after {
+  content: '▾';
+}
+.tools-action-list .tool-card > :not(summary) {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.tools-action-list .tool-card > .action-row,
+.tools-action-list .tool-card > .config-grid,
+.tools-action-list .tool-card > .config-row,
+.tools-action-list .tool-card > .tool-cmd-details,
+.tools-action-list .tool-card > .log-output {
+  margin-bottom: 10px;
+}
+.tools-action-list .tool-heading h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+.tools-action-list .tool-desc-zh {
+  display: none;
+}
 .tool-heading {
   display: grid;
-  gap: 4px;
+  gap: 2px;
+  min-width: 0;
 }
 .tool-desc-zh {
   font-size: 12px;
   color: var(--text-soft);
   line-height: 1.35;
+}
+
+/* 全站轻量工具栏：横滑不换行 */
+.toolbar-scroll {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.toolbar-scroll::-webkit-scrollbar {
+  display: none;
+}
+.toolbar-scroll > button,
+.toolbar-scroll > .chip,
+.toolbar-scroll > .auth-chip,
+.toolbar-scroll > .settings-tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* 页头说明：默认一行，窄屏可藏 */
+.page-note,
+.request-quick-note {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 @keyframes bubble-float {
   0%, 100% { translate: 0 0; }
@@ -1112,19 +1194,13 @@ pre,
 @media (max-width: 980px) {
   body { overflow-x: hidden; overflow-y: auto; }
   .app-shell { grid-template-columns: 1fr; height: auto; }
-  .sidebar {
-    position: relative;
-    height: auto;
-    max-height: min(42vh, 280px);
-    min-width: 0;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
+  /* 侧栏改为抽屉：布局细节见 layout.css，这里只保留壳层覆盖 */
   .workspace {
     height: auto;
     min-width: 0;
     overflow: visible;
     padding: 0; /* 与全局 full-bleed 一致，边距由 .panel 承担 */
+    padding-top: 52px;
   }
   .top-strip { display: grid; }
   .top-strip-items,
@@ -1144,8 +1220,55 @@ pre,
     align-items: stretch;
   }
   .auth-bulk-toolbar .action-row,
-  .provider-action-dock {
+  .provider-action-dock,
+  .panel-head .action-row {
     justify-content: flex-start;
+  }
+  .panel-head {
+    gap: 8px;
+  }
+  .panel-head .action-row {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    max-width: 100%;
+  }
+  .panel-head .action-row::-webkit-scrollbar {
+    display: none;
+  }
+  .panel-head .action-row > button,
+  .panel-head .action-row > .chip,
+  .panel-head .action-row > .auth-chip {
+    flex: 0 0 auto;
+    width: auto;
+    white-space: nowrap;
+  }
+  .section-kicker,
+  .page-note,
+  .request-quick-note {
+    display: none;
+  }
+  .setting-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .setting-info {
+    max-width: 100%;
+  }
+  .setting-control {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .metric-table-wrap {
+    border-radius: 10px;
+  }
+  .metric-table th,
+  .metric-table td {
+    padding: 8px 10px;
+    font-size: 12px;
   }
   .provider-map-head {
     flex-direction: column;
@@ -1444,19 +1567,6 @@ pre,
   background: var(--bg-color);
   border-bottom-left-radius: var(--border-radius);
   border-bottom-right-radius: var(--border-radius);
-}
-@media (max-width: 768px) {
-  .chat-layout {
-    flex-direction: column;
-    height: auto;
-    min-height: 800px;
-  }
-  .chat-sidebar {
-    width: 100%;
-    height: 200px;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
 }
 @keyframes messageSlideIn {
   to { opacity: 1; transform: translateY(0); }
