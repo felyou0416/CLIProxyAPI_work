@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] - 2026-07-18
+### Added
+- Windows logon autostart via Startup folder `.cmd` launcher, wired from Settings.
+- System proxy controls on the account control station (port presets, detect, toggle, reset).
+- Mobile navigation drawer, filter-rail drawers, and chat session/media drawers for narrow screens.
+- Config-driven control-station layers with per-group busy locks and short action labels.
+
+### Fixed
+- Boot autostart reliability: resolve Python at logon, wait for PATH settle, write autostart logs.
+- Non-blocking cold start: accept HTTP first, start RelayX in background so health checks do not time out.
+- Electron close/tray UX: close-to-tray without dialog, single-instance guard, window state restore.
+- Chat mobile session drawer height crush and Thinking/provider overflow on small viewports.
+
+### Changed
+- Slim dashboard shell: full-bleed panels, sidebar retune, hide low-frequency access entries behind system center.
+- Package build includes `backend.settings` hiddenimport for packaged Settings endpoints.
+
 ## [1.0.4] - 2026-07-16
 ### Added
 - Auto-detect local mixed-port proxy (FlClash / MaoMao / Clash Verge) into runtime `proxy-url`.
