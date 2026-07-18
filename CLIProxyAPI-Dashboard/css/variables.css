@@ -46,8 +46,9 @@
 [data-theme="dark"] .group-pill-bar .group-pill.active {
   box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 20%, transparent);
 }
+/* 全局 full-bleed 后 panel 不再使用卡片阴影 */
 [data-theme="dark"] .panel {
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+  box-shadow: none;
 }
 [data-theme="dark"] .auth-btn.secondary { background: #25364f; border-color: #39557a; color: #c8dcff; }
 [data-theme="dark"] .auth-group-head {

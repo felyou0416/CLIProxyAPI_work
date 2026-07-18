@@ -500,8 +500,20 @@ function updateAggregateWorkbenchStats() {
   setAggregateText('aggregate-selected-count', getLanguage() === 'zh' ? `已选 ${selected}` : `${selected} selected`);
 }
 
+function _aggregateAvail() {
+  return (typeof Availability !== 'undefined' && Availability) ? Availability : null;
+}
+
 async function syncAggregateModelTestState() {
   try {
+    const A = _aggregateAvail();
+    if (A) {
+      const state = await A.fetchAvailabilityState();
+      aggregateModelsRunningSet = new Set([...(state.runningSet || []), ...(state.queueSet || [])]);
+      aggregateModelStatuses = { ...(state.statuses || {}) };
+      aggregateModelStatusMeta = { ...(state.meta || {}) };
+      return;
+    }
     const data = await api('/api/provider-model-test-state');
     const results = data.results || {};
     aggregateModelsRunningSet = new Set(Array.isArray(data.running) ? data.running : []);
@@ -1829,34 +1841,66 @@ async function testCurrentAggregateMembers() {
     return;
   }
   const members = getAggregateVersionMembers(current);
-  const ids = [...new Set(members.map((member) => String(member.call_id || '').trim()).filter(Boolean))];
+  const A = _aggregateAvail();
+  const ids = A
+    ? A.normalizeModelIds(members.map((member) => member.call_id))
+    : [...new Set(members.map((member) => String(member.call_id || '').trim()).filter(Boolean))];
   if (!ids.length) {
     showMessage('This aggregate has no callable model IDs.', true);
     return;
   }
 
   try {
-    await api('/api/provider-model-tests', 'POST', { model_ids: ids });
-  } catch {
-    const fallback = await api('/api/test-provider-models', 'POST', { model_ids: ids });
-    const items = Array.isArray(fallback.items) ? fallback.items : [];
-    items.forEach((item) => {
-      const model = String(item.model || '').trim();
-      if (!model) return;
-      aggregateModelStatuses[model] = item.available ? 'ok' : 'bad';
-      aggregateModelStatusMeta[model] = {
-        elapsed_ms: item.elapsed_ms,
-        retry_after_seconds: item.retry_after_seconds,
-        tested_at: item.tested_at,
-        status_code: item.status_code,
-        failure_kind: item.failure_kind,
-        message: item.message,
-      };
-      aggregateModelsRunningSet.delete(model);
-    });
-    renderAggregateActiveDetails();
-    renderAggregateProviderSourceList();
-    showMessage(`Detection done: ${items.filter((item) => item.available).length}/${items.length} available.`);
+    if (A) {
+      const queued = await A.queueModelTests(ids, { clearFirst: false });
+      if (queued.mode === 'sync' && Array.isArray(queued.items)) {
+        queued.items.forEach((item) => {
+          const model = String(item.model || '').trim();
+          if (!model) return;
+          aggregateModelStatuses[model] = item.available ? 'ok' : 'bad';
+          aggregateModelStatusMeta[model] = {
+            elapsed_ms: item.elapsed_ms,
+            retry_after_seconds: item.retry_after_seconds,
+            tested_at: item.tested_at,
+            status_code: item.status_code,
+            failure_kind: item.failure_kind,
+            message: item.message,
+          };
+          aggregateModelsRunningSet.delete(model);
+        });
+        renderAggregateActiveDetails();
+        renderAggregateProviderSourceList();
+        showMessage(`Detection done: ${queued.items.filter((item) => item.available).length}/${queued.items.length} available.`);
+        return;
+      }
+    } else {
+      try {
+        await api('/api/provider-model-tests', 'POST', { model_ids: ids });
+      } catch {
+        const fallback = await api('/api/test-provider-models', 'POST', { model_ids: ids });
+        const items = Array.isArray(fallback.items) ? fallback.items : [];
+        items.forEach((item) => {
+          const model = String(item.model || '').trim();
+          if (!model) return;
+          aggregateModelStatuses[model] = item.available ? 'ok' : 'bad';
+          aggregateModelStatusMeta[model] = {
+            elapsed_ms: item.elapsed_ms,
+            retry_after_seconds: item.retry_after_seconds,
+            tested_at: item.tested_at,
+            status_code: item.status_code,
+            failure_kind: item.failure_kind,
+            message: item.message,
+          };
+          aggregateModelsRunningSet.delete(model);
+        });
+        renderAggregateActiveDetails();
+        renderAggregateProviderSourceList();
+        showMessage(`Detection done: ${items.filter((item) => item.available).length}/${items.length} available.`);
+        return;
+      }
+    }
+  } catch (err) {
+    showMessage(err.message || String(err), true);
     return;
   }
 

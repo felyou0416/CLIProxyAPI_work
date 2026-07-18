@@ -323,56 +323,46 @@
   white-space: nowrap;
   line-height: 1.05;
 }
-.auth-test-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 26px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text-soft);
-  font-size: 11px;
-  font-weight: 700;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-}
-.auth-test-status.status-ok {
-  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
-}
-.auth-test-status.status-bad {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
-}
-.auth-test-status.status-testing {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-}
-.auth-test-status-dot {
-  width: 8px;
-  height: 8px;
+/* OAuth 折叠态三色灯：绿可用 / 红不可用 / 黄检测中或待检测 */
+.auth-status-light {
+  width: 10px;
+  height: 10px;
   border-radius: 999px;
   flex: 0 0 auto;
-  background: color-mix(in srgb, var(--text-muted) 45%, transparent);
+  background: #f0b429;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #f0b429 18%, transparent);
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
-.auth-test-status-dot.status-ok {
-  background: var(--ok);
+.auth-status-light.is-green {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #22c55e 20%, transparent);
 }
-.auth-test-status-dot.status-bad {
-  background: var(--danger);
+.auth-status-light.is-red {
+  background: #ef4444;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #ef4444 20%, transparent);
 }
-.auth-test-status-dot.status-testing {
-  background: var(--accent);
-  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  border-top-color: var(--accent);
-  border-right-color: transparent;
-  animation: provider-spin .8s linear infinite;
+.auth-status-light.is-yellow {
+  background: #f0b429;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #f0b429 20%, transparent);
 }
-.auth-test-status > span:last-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.auth-status-light.is-busy {
+  animation: auth-status-pulse 1s ease-in-out infinite;
+}
+@keyframes auth-status-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.18); opacity: 0.72; }
+}
+[data-theme="dark"] .auth-status-light.is-green {
+  background: #4ade80;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #4ade80 22%, transparent);
+}
+[data-theme="dark"] .auth-status-light.is-red {
+  background: #f87171;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #f87171 22%, transparent);
+}
+[data-theme="dark"] .auth-status-light.is-yellow {
+  background: #fbbf24;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #fbbf24 22%, transparent);
 }
 .api-key-action-bar .auth-chip {
   margin-right: auto;

@@ -1,161 +1,16 @@
-<section id="section-account" class="panel panel-scroll panel-account section-view">
+<!-- panel-account + account.css：full-bleed，与聊天页同级铺满主区域 -->
+<section id="section-account" class="panel panel-account section-view">
   <div class="panel-sub">
-    <!-- Runtime Control Station (layered) -->
-    <div class="control-station">
-      <section class="control-station-layer">
-        <div class="control-station-layer-grid">
-          <div class="control-group">
-            <div class="control-group-heading">
-              <span class="control-group-icon">⚡</span>
-              <a href="http://127.0.0.1:8317/" target="_blank" class="control-group-title-link" data-i18n="label.proxyGroup">代理服务</a>
-              <span id="proxy-status-indicator" class="status-indicator-dot red"></span>
-            </div>
-            <div class="control-pair">
-              <button class="runtime-action-btn" onclick="startProxy(this)" data-i18n="btn.startProxy">启动</button>
-              <button class="secondary runtime-action-btn" onclick="restartProxy(this)" data-i18n="btn.restartProxy">重启</button>
-              <button class="danger runtime-action-btn" onclick="stopProxy(this)" data-i18n="btn.stopProxy">停止</button>
-            </div>
-          </div>
+    <!--
+      运行控制台挂载点：
+      - 布局数据：js/control-station-config.js（CONTROL_STATION_LAYERS）
+      - 渲染/点击：js/control-station.js → mountControlStation()
+      - 在 showSection('account') 时挂载（core.js）
+      下方 status-grid 仍为静态，不参与配置驱动。
+    -->
+    <div id="control-station-root" class="control-station"></div>
 
-          <div class="control-group">
-            <div class="control-group-heading">
-              <span class="control-group-icon">📊</span>
-              <a href="http://127.0.0.1:8765/" target="_blank" class="control-group-title-link" data-i18n="label.dashboardGroup">面板服务</a>
-              <span id="dashboard-status-indicator" class="status-indicator-dot green"></span>
-            </div>
-            <div class="control-pair">
-              <button class="runtime-action-btn secondary" onclick="runDashboardScript('ps')">启动</button>
-              <button class="secondary runtime-action-btn" onclick="restartDashboardPanel()">重启</button>
-              <button class="danger runtime-action-btn" onclick="stopDashboardPanel()">停止</button>
-            </div>
-          </div>
-
-          <div class="control-group">
-            <div class="control-group-heading">
-              <span class="control-group-icon">🎬</span>
-              <a href="http://127.0.0.1:8320/" target="_blank" class="control-group-title-link">媒体代理</a>
-              <span id="media-proxy-status-indicator" class="status-indicator-dot red"></span>
-            </div>
-            <div class="control-pair">
-              <button class="runtime-action-btn" id="media-proxy-start-btn" onclick="startMediaProxy(this)">启动</button>
-              <button class="secondary runtime-action-btn" id="media-proxy-restart-btn" onclick="restartMediaProxy(this)">重启</button>
-              <button class="danger runtime-action-btn" id="media-proxy-stop-btn" onclick="stopMediaProxy(this)">停止</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="control-station-layer">
-        <div class="control-station-layer-grid">
-          <div class="control-group">
-            <div class="control-group-heading">
-              <span class="control-group-icon">🧩</span>
-              <span class="control-group-title-link">OpenClaw</span>
-              <span id="openclaw-status-indicator" class="status-indicator-dot red"></span>
-            </div>
-            <div class="control-pair">
-              <button class="runtime-action-btn" id="openclaw-start-btn" onclick="startOpenClaw(this)">启动</button>
-              <button class="secondary runtime-action-btn" id="openclaw-restart-btn" onclick="restartOpenClaw(this)">重启</button>
-              <button class="danger runtime-action-btn" id="openclaw-stop-btn" onclick="stopOpenClaw(this)">停止</button>
-            </div>
-          </div>
-
-          <div class="control-group">
-            <div class="control-group-heading">
-              <span class="control-group-icon">🔑</span>
-              <a href="http://127.0.0.1:1900/" target="_blank" class="control-group-title-link" data-i18n="label.oauthManagerGroup">OAuth</a>
-              <span id="oauth-status-indicator" class="status-indicator-dot red"></span>
-            </div>
-            <div class="control-pair">
-              <button class="runtime-action-btn" onclick="startOAuthManager(this)" data-i18n="btn.startOAuthManager">启动</button>
-              <button class="secondary runtime-action-btn" onclick="restartOAuthManager(this)" data-i18n="btn.restartOAuthManager">重启</button>
-              <button class="danger runtime-action-btn" onclick="stopOAuthManager(this)" data-i18n="btn.stopOAuthManager">停止</button>
-            </div>
-          </div>
-
-          <div class="control-group">
-            <div class="control-group-heading">
-              <span class="control-group-icon">☁️</span>
-              <a href="https://cpa.felyou.cc.cd/" id="tunnel-title-link" target="_blank" class="control-group-title-link" data-i18n="label.tunnelControlGroup">Tunnel</a>
-              <span id="tunnel-status-indicator" class="status-indicator-dot red"></span>
-            </div>
-            <div class="control-pair">
-              <button class="runtime-action-btn" id="tunnel-start-btn" onclick="startTunnel(this)" data-i18n="btn.startTunnel">启动</button>
-              <button class="secondary runtime-action-btn" id="tunnel-restart-btn" onclick="restartTunnel(this)" data-i18n="btn.restartTunnel">重启</button>
-              <button class="danger runtime-action-btn" id="tunnel-stop-btn" onclick="stopTunnel(this)" data-i18n="btn.stopTunnel">停止</button>
-            </div>
-          </div>
-
-          <div class="control-group">
-            <div class="control-group-heading">
-              <span class="control-group-icon">🛡️</span>
-              <a href="#firewall-access" onclick="showSection('firewall-access')" class="control-group-title-link">IP Helper</a>
-              <span id="ip-helper-status-indicator" class="status-indicator-dot yellow" title="IP Helper 未读取"></span>
-            </div>
-            <div class="control-pair">
-              <button class="runtime-action-btn" id="ip-helper-start-btn" onclick="setIpHelperService('start', this)">启动</button>
-              <button class="secondary runtime-action-btn" id="ip-helper-restart-btn" onclick="setIpHelperService('restart', this)">重启</button>
-              <button class="danger runtime-action-btn" id="ip-helper-stop-btn" onclick="setIpHelperService('stop', this)">关闭</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="control-station-layer">
-        <div class="control-station-layer-grid">
-          <div class="control-group">
-            <div class="control-group-heading">
-              <span class="control-group-icon">🖥️</span>
-              <a href="http://127.0.0.1:5173/" target="_blank" class="control-group-title-link" id="grok2api-title-link" data-i18n="label.grok2apiFrontendGroup">前端</a>
-              <span id="grok2api-frontend-status-indicator" class="status-indicator-dot red" title="Grok2API 前端状态"></span>
-            </div>
-            <div class="control-pair">
-              <button class="runtime-action-btn" type="button" id="grok2api-frontend-start-btn" onclick="startGrok2ApiFrontend(this)" data-i18n="btn.grok2apiStart">启动</button>
-              <button class="secondary runtime-action-btn" type="button" id="grok2api-frontend-restart-btn" onclick="restartGrok2ApiFrontend(this)" data-i18n="btn.grok2apiRestart">重启</button>
-              <button class="danger runtime-action-btn" type="button" id="grok2api-frontend-stop-btn" onclick="stopGrok2ApiFrontend(this)" data-i18n="btn.grok2apiStop">关闭</button>
-            </div>
-          </div>
-
-          <div class="control-group">
-            <div class="control-group-heading">
-              <span class="control-group-icon">⚙️</span>
-              <a href="http://127.0.0.1:8000/readyz" target="_blank" class="control-group-title-link" title="查看 Grok2API 后端就绪状态" data-i18n="label.grok2apiBackendGroup">后端</a>
-              <span id="grok2api-backend-status-indicator" class="status-indicator-dot red" title="Grok2API 后端状态"></span>
-            </div>
-            <div class="control-pair">
-              <button class="runtime-action-btn" type="button" id="grok2api-backend-start-btn" onclick="startGrok2ApiBackend(this)" data-i18n="btn.grok2apiStart">启动</button>
-              <button class="secondary runtime-action-btn" type="button" id="grok2api-backend-restart-btn" onclick="restartGrok2ApiBackend(this)" data-i18n="btn.grok2apiRestart">重启</button>
-              <button class="danger runtime-action-btn" type="button" id="grok2api-backend-stop-btn" onclick="stopGrok2ApiBackend(this)" data-i18n="btn.grok2apiStop">关闭</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="control-station-layer">
-        <div class="control-station-layer-grid control-station-layer-grid-1">
-          <div class="control-group">
-            <div class="control-group-heading">
-              <span class="control-group-icon">🌐</span>
-              <span class="control-group-title-link">系统代理</span>
-              <span id="system-proxy-status-indicator" class="status-indicator-dot red" title="系统代理未读取"></span>
-            </div>
-            <div class="control-pair">
-              <button class="runtime-action-btn secondary" id="proxy-port-7890-btn" type="button" title="切换系统代理到 127.0.0.1:7890（FlClash 常用）" onclick="proxySetPort(7890, this)">7890</button>
-              <button class="runtime-action-btn secondary" id="proxy-port-10090-btn" type="button" title="切换系统代理到 127.0.0.1:10090（猫猫云常用）" onclick="proxySetPort(10090, this)">10090</button>
-              <button class="runtime-action-btn secondary" id="proxy-port-7897-btn" type="button" title="切换系统代理到 127.0.0.1:7897" onclick="proxySetPort(7897, this)">7897</button>
-            </div>
-            <div class="control-pair" style="margin-top: 8px;">
-              <button class="runtime-action-btn" id="proxy-configure-btn" type="button" title="一键检测并配置系统代理" onclick="proxyConfigure(this)">检测</button>
-              <button class="secondary runtime-action-btn" id="proxy-toggle-btn" type="button" title="停止或启动系统代理" onclick="proxyToggle(this)">停用</button>
-              <button class="secondary runtime-action-btn" id="proxy-default-btn" type="button" title="恢复默认：关闭系统代理并清理环境变量" onclick="proxyDefault(this)">恢复</button>
-            </div>
-            <div id="proxy-status" class="tool-desc-zh control-group-note"></div>
-          </div>
-        </div>
-      </section>
-    </div>
-
-    <!-- Status Grid -->
+    <!-- 运行状态摘要（静态；与上方控制台分离） -->
     <div class="status-grid compact-grid">
       <div class="status-item">
         <div class="label" data-i18n="label.proxyProcess">Proxy Process</div>
@@ -163,7 +18,10 @@
       </div>
       <div class="status-item">
         <div class="label" data-i18n="hero.localUrl">Local URL</div>
-        <div class="status-value"><code id="proxy-local-url">http://127.0.0.1:8317</code></div>
+        <div class="status-value status-value-copy">
+          <code id="proxy-local-url">http://127.0.0.1:8317</code>
+          <button class="status-copy-btn" type="button" title="复制本地地址" onclick="copyStatusField(this, 'proxy-local-url')">复制</button>
+        </div>
       </div>
       <div class="status-item">
         <div class="label">Media Proxy</div>
@@ -183,7 +41,10 @@
       </div>
       <div class="status-item">
         <div class="label" data-i18n="hero.apiKey">API Key</div>
-        <div class="status-value"><code id="proxy-api-key">cliproxyapi</code></div>
+        <div class="status-value status-value-copy">
+          <code id="proxy-api-key">cliproxyapi</code>
+          <button class="status-copy-btn" type="button" title="复制 API 密钥" onclick="copyStatusField(this, 'proxy-api-key')">复制</button>
+        </div>
       </div>
       <div class="status-item status-item-accent">
         <div class="label">Imported Pool</div>

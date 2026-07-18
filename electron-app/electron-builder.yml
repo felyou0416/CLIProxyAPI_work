@@ -16,11 +16,15 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: CLIProxyAPI Dashboard
+  # Avoid leaving old shortcuts / partial installs confusing users.
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
 
 files:
   - "**/*"
   - "!node_modules/.cache"
   - "!dist"
+  - "!resources"
 
 extraResources:
   - from: resources/

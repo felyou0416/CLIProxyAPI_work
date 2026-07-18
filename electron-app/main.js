@@ -1,18 +1,27 @@
-const { app, BrowserWindow, dialog, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
+const http = require('http');
 
+// ─── Single instance ───────────────────────────────────────────────
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+  process.exit(0);
+}
+
+// ─── State ─────────────────────────────────────────────────────────
 let dashboardProcess = null;
-let proxyProcess = null;
 let mainWindow = null;
 let tray = null;
 let isQuitting = false;
 
 const DASHBOARD_PORT = parseInt(process.env.CLIPROXYAPI_DASHBOARD_PORT || '8765', 10);
-const PROXY_PORT = parseInt(process.env.CLIPROXYAPI_PROXY_PORT || '8317', 10);
+const WINDOW_STATE_FILE = 'window-state.json';
 
+// ─── Paths ─────────────────────────────────────────────────────────
 function getResourcesPath() {
   return app.isPackaged
     ? process.resourcesPath
@@ -20,9 +29,77 @@ function getResourcesPath() {
 }
 
 function getUserDataPath() {
-  return path.join(app.getPath('userData'));
+  return app.getPath('userData');
 }
 
+function getStoragePath() {
+  return path.join(getUserDataPath(), 'storage');
+}
+
+function getStateFilePath() {
+  return path.join(getStoragePath(), 'runtime', 'state.json');
+}
+
+function getWindowStatePath() {
+  return path.join(getUserDataPath(), WINDOW_STATE_FILE);
+}
+
+function getIconPath(name) {
+  return path.join(__dirname, 'assets', name);
+}
+
+// ─── App preferences (shared with Dashboard settings) ──────────────
+function readAppSettings() {
+  const defaults = {
+    minimize_tray: true,
+  };
+  try {
+    const statePath = getStateFilePath();
+    if (!fs.existsSync(statePath)) return defaults;
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+    return {
+      minimize_tray: state.minimize_tray !== false && state.minimize_tray !== 0 && state.minimize_tray !== '0' && state.minimize_tray !== 'false',
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function shouldMinimizeToTray() {
+  return !!readAppSettings().minimize_tray;
+}
+
+// ─── Window bounds ─────────────────────────────────────────────────
+function loadWindowState() {
+  try {
+    const file = getWindowStatePath();
+    if (!fs.existsSync(file)) return null;
+    const state = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    if (!state || typeof state !== 'object') return null;
+    return state;
+  } catch {
+    return null;
+  }
+}
+
+function saveWindowState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    const bounds = mainWindow.getBounds();
+    const state = {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      isMaximized: mainWindow.isMaximized(),
+    };
+    fs.writeFileSync(getWindowStatePath(), JSON.stringify(state), 'utf-8');
+  } catch (err) {
+    console.error('[Window] Failed to save state:', err.message);
+  }
+}
+
+// ─── Port helpers ──────────────────────────────────────────────────
 function checkPort(port, callback) {
   const server = net.createServer();
   server.once('error', () => callback(false));
@@ -38,10 +115,11 @@ function waitForPort(port, timeout = 15000) {
     const start = Date.now();
     const check = () => {
       checkPort(port, (available) => {
+        // available === false means something is already listening
         if (!available) {
           resolve();
         } else if (Date.now() - start > timeout) {
-          reject(new Error(`Port ${port} not available after ${timeout}ms`));
+          reject(new Error(`Port ${port} not ready after ${timeout}ms`));
         } else {
           setTimeout(check, 200);
         }
@@ -51,9 +129,32 @@ function waitForPort(port, timeout = 15000) {
   });
 }
 
+function waitForHttp(url, timeout = 15000) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const tryOnce = () => {
+      const req = http.get(url, (res) => {
+        res.resume();
+        resolve(true);
+      });
+      req.on('error', () => {
+        if (Date.now() - start > timeout) {
+          resolve(false);
+        } else {
+          setTimeout(tryOnce, 250);
+        }
+      });
+      req.setTimeout(1500, () => {
+        req.destroy();
+      });
+    };
+    tryOnce();
+  });
+}
+
+// ─── Storage bootstrap ─────────────────────────────────────────────
 function initStorageDir() {
-  const userDataPath = getUserDataPath();
-  const storagePath = path.join(userDataPath, 'storage');
+  const storagePath = getStoragePath();
   const dirs = [
     storagePath,
     path.join(storagePath, 'config'),
@@ -87,47 +188,21 @@ function initStorageDir() {
 
   const stateFile = path.join(storagePath, 'runtime', 'state.json');
   if (!fs.existsSync(stateFile)) {
-    fs.writeFileSync(stateFile, '{}', 'utf-8');
+    // Default minimize_tray=true so first-run close matches tray-app expectations.
+    fs.writeFileSync(stateFile, JSON.stringify({
+      autostart: false,
+      minimize_tray: true,
+      language: 'zh',
+      theme: 'light',
+      auto_update_check: true,
+      update_channel: 'stable',
+    }, null, 2), 'utf-8');
   }
 
   return storagePath;
 }
 
-function startProxyServer() {
-  const resPath = getResourcesPath();
-  const proxyExe = path.join(resPath, 'cli-proxy-api.exe');
-
-  if (!fs.existsSync(proxyExe)) {
-    console.log('[Proxy] Binary not found, skipping:', proxyExe);
-    return null;
-  }
-
-  const storagePath = initStorageDir();
-
-  console.log('[Proxy] Starting:', proxyExe);
-  const configFile = path.join(storagePath, 'config', 'base-config.yaml');
-  const proc = spawn(proxyExe, ['-config', configFile], {
-    cwd: storagePath,
-    stdio: 'ignore',
-    detached: false,
-    env: {
-      ...process.env,
-      CLIPROXYAPI_STORAGE_DIR: storagePath,
-    },
-  });
-
-  proc.on('error', (err) => {
-    console.error('[Proxy] Failed to start:', err.message);
-  });
-
-  proc.on('exit', (code) => {
-    console.log('[Proxy] Exited with code:', code);
-    proxyProcess = null;
-  });
-
-  return proc;
-}
-
+// ─── Child processes ───────────────────────────────────────────────
 function startDashboard() {
   const resPath = getResourcesPath();
   const dashboardDir = path.join(resPath, 'dashboard');
@@ -174,7 +249,15 @@ function startDashboard() {
 function killProcess(proc, name) {
   if (!proc) return;
   try {
-    proc.kill();
+    if (process.platform === 'win32' && proc.pid) {
+      // Ensure child tree exits on Windows.
+      spawn('taskkill', ['/pid', String(proc.pid), '/t', '/f'], {
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+    } else {
+      proc.kill();
+    }
     console.log(`[${name}] Process killed`);
   } catch (err) {
     console.error(`[${name}] Failed to kill:`, err.message);
@@ -183,128 +266,194 @@ function killProcess(proc, name) {
 
 function killAllServices() {
   killProcess(dashboardProcess, 'Dashboard');
-  killProcess(proxyProcess, 'Proxy');
   dashboardProcess = null;
-  proxyProcess = null;
+}
+
+// ─── Window / tray ─────────────────────────────────────────────────
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function hideToTray() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  saveWindowState();
+  mainWindow.hide();
+  ensureTray();
+}
+
+function quitApp() {
+  if (isQuitting) return;
+  isQuitting = true;
+  saveWindowState();
+  killAllServices();
+  if (tray) {
+    try { tray.destroy(); } catch { /* ignore */ }
+    tray = null;
+  }
+  app.quit();
+}
+
+function buildTrayMenu() {
+  return Menu.buildFromTemplate([
+    {
+      label: '显示主窗口',
+      click: () => showMainWindow(),
+    },
+    { type: 'separator' },
+    {
+      label: '退出',
+      click: () => quitApp(),
+    },
+  ]);
+}
+
+function ensureTray() {
+  if (tray) return;
+
+  const icoPath = getIconPath('icon.ico');
+  const pngPath = getIconPath('icon.png');
+  let icon;
+  if (fs.existsSync(icoPath)) {
+    icon = nativeImage.createFromPath(icoPath);
+  } else if (fs.existsSync(pngPath)) {
+    icon = nativeImage.createFromPath(pngPath).resize({ width: 16, height: 16 });
+  } else {
+    icon = nativeImage.createEmpty();
+  }
+
+  tray = new Tray(icon);
+  tray.setToolTip('CLIProxyAPI Dashboard');
+  tray.setContextMenu(buildTrayMenu());
+
+  // Windows: single click restores; other platforms keep double-click.
+  const restore = () => showMainWindow();
+  if (process.platform === 'win32') {
+    tray.on('click', restore);
+  }
+  tray.on('double-click', restore);
 }
 
 function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+  const saved = loadWindowState();
+  const options = {
+    width: saved?.width || 1400,
+    height: saved?.height || 900,
     minWidth: 960,
     minHeight: 600,
     title: 'CLIProxyAPI Dashboard',
-    icon: path.join(__dirname, 'assets', 'icon.png'),
+    icon: fs.existsSync(getIconPath('icon.ico'))
+      ? getIconPath('icon.ico')
+      : getIconPath('icon.png'),
+    show: false,
+    backgroundColor: '#0f172a',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
     },
-  });
+  };
+
+  if (
+    Number.isInteger(saved?.x) &&
+    Number.isInteger(saved?.y)
+  ) {
+    options.x = saved.x;
+    options.y = saved.y;
+  }
+
+  mainWindow = new BrowserWindow(options);
+
+  if (saved?.isMaximized) {
+    mainWindow.maximize();
+  }
 
   mainWindow.loadURL(`http://127.0.0.1:${DASHBOARD_PORT}`);
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-    tray = null;
+  mainWindow.once('ready-to-show', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.show();
+    mainWindow.focus();
   });
 
+  // Persist size/position while using the app.
+  mainWindow.on('resize', () => {
+    if (!mainWindow.isMaximized()) saveWindowState();
+  });
+  mainWindow.on('move', () => {
+    if (!mainWindow.isMaximized()) saveWindowState();
+  });
+  mainWindow.on('maximize', saveWindowState);
+  mainWindow.on('unmaximize', saveWindowState);
+
+  // Close (X): tray or quit — controlled by Settings → minimize_tray. No popup.
   mainWindow.on('close', (e) => {
     if (isQuitting) return;
     e.preventDefault();
-    const choice = dialog.showMessageBoxSync(mainWindow, {
-      type: 'question',
-      buttons: ['最小化到托盘', '退出程序'],
-      defaultId: 0,
-      title: '关闭方式',
-      message: '请选择关闭方式',
-      detail: '最小化到托盘：程序继续在后台运行\n退出程序：完全关闭所有服务',
-    });
-    if (choice === 0) {
-      mainWindow.hide();
-      showTray();
-    } else {
-      isQuitting = true;
-      killAllServices();
-      app.quit();
+    if (shouldMinimizeToTray()) {
+      hideToTray();
+      return;
     }
+    quitApp();
+  });
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
   });
 }
 
-function showTray() {
-  if (tray) return;
-  const iconPath = path.join(__dirname, 'assets', 'icon.png');
-  let icon;
-  if (fs.existsSync(iconPath)) {
-    icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
-  } else {
-    icon = nativeImage.createEmpty();
-  }
-  tray = new Tray(icon);
-  tray.setToolTip('CLIProxyAPI Dashboard');
-  tray.setContextMenu(Menu.buildFromTemplate([
-    {
-      label: '显示窗口', click: () => {
-        if (mainWindow) {
-          mainWindow.show();
-          mainWindow.focus();
-        }
-      }
-    },
-    { type: 'separator' },
-    {
-      label: '退出', click: () => {
-        isQuitting = true;
-        killAllServices();
-        app.quit();
-      }
-    },
-  ]));
-  tray.on('double-click', () => {
-    if (mainWindow) {
-      mainWindow.show();
-      mainWindow.focus();
-    }
-  });
+// ─── App lifecycle ─────────────────────────────────────────────────
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.cliproxyapi.dashboard');
 }
+
+app.on('second-instance', () => {
+  showMainWindow();
+});
 
 app.whenReady().then(async () => {
+  initStorageDir();
+  ensureTray();
+
+  // Dashboard auto-starts the proxy stack; Electron only hosts the shell window.
   dashboardProcess = startDashboard();
 
-  await waitForPort(DASHBOARD_PORT, 10000).catch(() => {
-    console.log('[Dashboard] Port wait timeout, continuing anyway');
+  await waitForPort(DASHBOARD_PORT, 12000).catch(() => {
+    console.log('[Dashboard] Port wait timeout, continuing');
   });
-
-  await waitForPort(PROXY_PORT, 30000).catch(() => {
-    console.log('[Proxy] Port wait timeout, continuing anyway');
-  });
+  await waitForHttp(`http://127.0.0.1:${DASHBOARD_PORT}/`, 12000);
 
   createWindow();
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    killAllServices();
-    app.quit();
-  }
+  // Tray mode keeps the process alive with a hidden window; otherwise quit.
+  if (process.platform === 'darwin') return;
+  if (!isQuitting && shouldMinimizeToTray() && tray) return;
+  quitApp();
 });
 
 app.on('before-quit', () => {
   isQuitting = true;
+  saveWindowState();
   killAllServices();
   if (tray) {
-    tray.destroy();
+    try { tray.destroy(); } catch { /* ignore */ }
     tray = null;
   }
 });
 
-process.on('SIGINT', () => {
-  killAllServices();
-  app.quit();
+app.on('activate', () => {
+  // macOS dock click
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+  } else {
+    showMainWindow();
+  }
 });
 
-process.on('SIGTERM', () => {
-  killAllServices();
-  app.quit();
-});
+process.on('SIGINT', () => quitApp());
+process.on('SIGTERM', () => quitApp());

@@ -8,6 +8,11 @@ let authSearchQuery = '';
 let authEntryStatuses = {};
 let authEntryStatusMeta = {};
 let authItemsById = {};
+// provider -> runtime call_ids（来自共享 availability 层）
+let authProviderModelIds = {};
+let authAvailabilityState = null;
+let authAvailabilityPollStop = null;
+let authAvailabilitySyncInFlight = false;
 
 // Cached data for client-side re-renders (no API calls)
 let _cachedAuthItems = [];
@@ -17,6 +22,10 @@ let _cachedFingerprint = '';
 let authVisibleLimit = 50;
 const AUTH_VISIBLE_STEP = 50;
 
+function _avail() {
+  return (typeof Availability !== 'undefined' && Availability) ? Availability : null;
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -24,20 +33,6 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
-}
-
-function formatAuthRetryAfter(seconds) {
-  const value = Number(seconds || 0);
-  if (!value) return '';
-  if (value < 60) return getLanguage() === 'zh' ? `${value} 秒后重试` : `Retry in ${value}s`;
-  return getLanguage() === 'zh' ? `${Math.ceil(value / 60)} 分钟后重试` : `Retry in ${Math.ceil(value / 60)}m`;
-}
-
-function formatAuthElapsed(ms) {
-  const value = Number(ms || 0);
-  if (!value) return '';
-  if (value < 1000) return `${value} ms`;
-  return getLanguage() === 'zh' ? `${(value / 1000).toFixed(1)} 秒` : `${(value / 1000).toFixed(1)} s`;
 }
 
 function isAuthExpanded(id) {
@@ -51,28 +46,124 @@ function toggleAuthExpanded(id) {
 }
 
 function authStatusLabel(status, meta = {}) {
-  const isZh = getLanguage() === 'zh';
-  if (status === 'ok') {
-    return `${t('common.available', 'Available')}${meta.working_model ? ` · ${meta.working_model}` : ''}`;
-  }
-  if (status === 'bad') {
-    return `${t('common.unavailable', 'Unavailable')}${meta.retry_after_seconds ? ` · ${formatAuthRetryAfter(meta.retry_after_seconds)}` : ''}`;
-  }
+  const A = _avail();
+  if (A) return A.statusLabel(status, meta);
+  if (status === 'ok') return t('common.available', 'Available');
+  if (status === 'bad') return t('common.unavailable', 'Unavailable');
   if (status === 'testing') return t('common.testing', 'Testing');
-  return t('common.pending', isZh ? '待检测' : 'Pending');
+  return t('common.pending', getLanguage() === 'zh' ? '待检测' : 'Pending');
+}
+
+// 折叠态三色灯：绿=可用 / 红=不可用 / 黄=检测中或待检测
+function authLightClass(status) {
+  const A = _avail();
+  if (A) return A.lightClass(status);
+  if (status === 'ok') return 'is-green';
+  if (status === 'bad') return 'is-red';
+  if (status === 'testing') return 'is-yellow is-busy';
+  return 'is-yellow';
 }
 
 function authStatusTitle(status, meta = {}) {
-  const isZh = getLanguage() === 'zh';
-  const lines = [
-    `${isZh ? '状态' : 'Status'}: ${status === 'ok' ? t('common.available', 'Available') : status === 'bad' ? t('common.unavailable', 'Unavailable') : status === 'testing' ? t('common.testing', 'Testing') : t('common.pending', 'Pending')}`,
-  ];
-  if (meta.working_path) lines.push(`${isZh ? '路径' : 'Path'}: ${meta.working_path}`);
-  if (meta.working_model) lines.push(`${isZh ? '模型' : 'Model'}: ${meta.working_model}`);
-  if (meta.elapsed_ms) lines.push(`${isZh ? '耗时' : 'Elapsed'}: ${formatAuthElapsed(meta.elapsed_ms)}`);
-  if (meta.retry_after_seconds) lines.push(`${isZh ? '重试' : 'Retry'}: ${formatAuthRetryAfter(meta.retry_after_seconds)}`);
-  if (meta.message) lines.push(`${isZh ? '信息' : 'Message'}: ${String(meta.message).slice(0, 180)}`);
-  return lines.join('\n');
+  const A = _avail();
+  if (A) return A.statusTitle(status, meta);
+  return authStatusLabel(status, meta);
+}
+
+function setAuthEntryStatus(id, status, meta = {}) {
+  const authId = String(id || '').trim();
+  if (!authId) return;
+  if (status) authEntryStatuses[authId] = status;
+  else delete authEntryStatuses[authId];
+  authEntryStatusMeta[authId] = {
+    ...(authEntryStatusMeta[authId] || {}),
+    ...meta,
+  };
+}
+
+function getAuthProviderKey(item) {
+  return String(item?.provider || item?.content?.provider || item?.metadata?.provider || '').trim();
+}
+
+function modelIdsForAuthItem(item) {
+  const provider = getAuthProviderKey(item);
+  if (!provider) return [];
+  if (Array.isArray(authProviderModelIds[provider])) return authProviderModelIds[provider];
+  const A = _avail();
+  if (A && authAvailabilityState) {
+    // groups 可能尚未缓存到 authProviderModelIds
+    return [];
+  }
+  return [];
+}
+
+function applyAuthLightsFromState(state) {
+  authAvailabilityState = state || null;
+  const items = Object.values(authItemsById || {});
+  items.forEach((item) => {
+    const id = String(item?.id || '').trim();
+    if (!id) return;
+    const modelIds = modelIdsForAuthItem(item);
+    const A = _avail();
+    if (!A) return;
+    const agg = A.aggregateAuthLight(modelIds, state);
+    setAuthEntryStatus(id, agg.status, agg.meta || {});
+  });
+}
+
+async function ensureAuthProviderModelMap(force = false) {
+  const A = _avail();
+  if (!A) return {};
+  const groups = await A.fetchProviderModelGroups(force);
+  const map = {};
+  (Array.isArray(groups) ? groups : []).forEach((group) => {
+    const key = String(group.provider || group.lookup_provider || '').trim();
+    if (!key) return;
+    map[key] = A.modelIdsForProvider(groups, key);
+  });
+  // 兼容 lookup_provider 与 provider 不一致
+  (Array.isArray(groups) ? groups : []).forEach((group) => {
+    const lookup = String(group.lookup_provider || '').trim();
+    const provider = String(group.provider || '').trim();
+    if (lookup && !map[lookup]) map[lookup] = A.modelIdsForProvider(groups, lookup);
+    if (provider && !map[provider]) map[provider] = A.modelIdsForProvider(groups, provider);
+  });
+  authProviderModelIds = map;
+  return map;
+}
+
+async function syncAuthAvailabilityFromServer() {
+  const A = _avail();
+  if (!A || authAvailabilitySyncInFlight) return;
+  authAvailabilitySyncInFlight = true;
+  try {
+    await ensureAuthProviderModelMap(false);
+    const state = await A.fetchAvailabilityState();
+    applyAuthLightsFromState(state);
+    // 只更新灯，避免整表重绘
+    Object.keys(authItemsById || {}).forEach((id) => updateAuthEntryLight(id));
+  } catch {
+    // 共享层不可用时保持现有展示
+  } finally {
+    authAvailabilitySyncInFlight = false;
+  }
+}
+
+function stopAuthAvailabilityPoll() {
+  if (typeof authAvailabilityPollStop === 'function') {
+    try { authAvailabilityPollStop(); } catch { /* ignore */ }
+  }
+  authAvailabilityPollStop = null;
+}
+
+function startAuthAvailabilityPoll(modelIds) {
+  const A = _avail();
+  if (!A) return;
+  stopAuthAvailabilityPoll();
+  authAvailabilityPollStop = A.pollAvailability(modelIds, (state) => {
+    applyAuthLightsFromState(state);
+    Object.keys(authItemsById || {}).forEach((id) => updateAuthEntryLight(id));
+  }, { intervalMs: 2000, maxMs: 12 * 60 * 1000 });
 }
 
 function toggleAuthCardSelection(id) {
@@ -103,8 +194,77 @@ async function testSelectedAuthCards() {
     showMessage(getLanguage() === 'zh' ? '请先选择账号卡片。' : 'Select auth cards first.', true);
     return;
   }
-  for (const id of ids) {
-    await runAuthEntryDetection(id);
+  const bulkBtn = document.getElementById('auth-bulk-test-btn');
+  const originalBulkText = bulkBtn ? bulkBtn.textContent : '';
+  if (bulkBtn) {
+    bulkBtn.disabled = true;
+    bulkBtn.textContent = getLanguage() === 'zh' ? '检测中...' : 'Testing...';
+  }
+
+  try {
+    // 同一 provider 多账号共享模型队列：去重后一次入队
+    await ensureAuthProviderModelMap(true);
+    const modelIdSet = new Set();
+    const now = Math.floor(Date.now() / 1000);
+    for (const id of ids) {
+      const item = authItemsById[id];
+      const modelIds = modelIdsForAuthItem(item);
+      modelIds.forEach((mid) => modelIdSet.add(mid));
+      setAuthEntryStatus(id, 'testing', {
+        tested_at: now,
+        message: getLanguage() === 'zh' ? '模型检测进行中…' : 'Model tests running…',
+        total_count: modelIds.length,
+      });
+      updateAuthEntryLight(id);
+    }
+
+    const modelIds = [...modelIdSet];
+    if (!modelIds.length) {
+      for (const id of ids) {
+        setAuthEntryStatus(id, 'pending', {
+          tested_at: now,
+          message: getLanguage() === 'zh' ? '没有关联的 runtime 模型。' : 'No linked runtime models.',
+        });
+        updateAuthEntryLight(id);
+      }
+      showMessage(getLanguage() === 'zh' ? '选中账号没有可检测的 runtime 模型。' : 'Selected auths have no runtime models to test.', true);
+      return;
+    }
+
+    const A = _avail();
+    if (!A) throw new Error('Availability module is not loaded.');
+    const queued = await A.queueModelTests(modelIds, { clearFirst: true });
+    if (queued.mode === 'sync' && Array.isArray(queued.items)) {
+      const state = A.normalizeModelTestState({
+        results: Object.fromEntries(queued.items.map((item) => [item.model, item])),
+        running: [],
+        queue: [],
+      });
+      applyAuthLightsFromState(state);
+      ids.forEach((id) => updateAuthEntryLight(id));
+      const okCount = ids.filter((id) => authEntryStatuses[id] === 'ok').length;
+      const badCount = ids.filter((id) => authEntryStatuses[id] === 'bad').length;
+      showMessage(
+        getLanguage() === 'zh'
+          ? `批量检测完成：可用 ${okCount} · 不可用 ${badCount}`
+          : `Batch done: available ${okCount} · unavailable ${badCount}`
+      );
+      return;
+    }
+
+    startAuthAvailabilityPoll(modelIds);
+    showMessage(
+      getLanguage() === 'zh'
+        ? `已加入模型检测队列：${modelIds.length} 个模型（${ids.length} 个账号共享缓存）`
+        : `Queued ${modelIds.length} models for ${ids.length} auths (shared model cache).`
+    );
+  } catch (err) {
+    showMessage(err.message, true);
+  } finally {
+    if (bulkBtn) {
+      bulkBtn.disabled = false;
+      bulkBtn.textContent = originalBulkText || (getLanguage() === 'zh' ? '检测选中' : 'Test selected');
+    }
   }
 }
 
@@ -213,87 +373,136 @@ async function toggleAuthInPool(id, selectedIds) {
   }
 }
 
-async function runAuthEntryDetection(authId, triggerButton) {
+const authDetectInFlight = new Set();
+
+function paintAuthStatusUI() {
+  // 仅状态变化时：fingerprint 不变，loadAuthFiles 会跳过重绘；直接用缓存渲染。
+  if (typeof renderAuthUI === 'function' && Array.isArray(_cachedAuthItems) && _cachedAuthItems.length) {
+    renderAuthUI();
+    return;
+  }
+  if (typeof loadAuthFiles === 'function') loadAuthFiles(true);
+}
+
+// 并发检测时只改灯/按钮，避免整表重绘互相踩踏
+function updateAuthEntryLight(id) {
+  const authId = String(id || '').trim();
+  if (!authId) return;
+  const status = authEntryStatuses[authId] || '';
+  const meta = authEntryStatusMeta[authId] || {};
+  const strip = document.querySelector(`.auth-strip[data-auth-id="${CSS.escape(authId)}"]`);
+  if (!strip) return;
+  const light = strip.querySelector('.auth-status-light');
+  if (light) {
+    light.className = `auth-status-light ${authLightClass(status)}`;
+    light.title = authStatusTitle(status, meta);
+    light.setAttribute('aria-label', authStatusLabel(status, meta));
+  }
+  const testBtn = strip.querySelector('[data-auth-test]');
+  if (testBtn) {
+    if (status === 'testing') {
+      testBtn.disabled = true;
+      testBtn.textContent = getLanguage() === 'zh' ? '检测中...' : 'Testing...';
+    } else {
+      testBtn.disabled = false;
+      testBtn.textContent = getLanguage() === 'zh' ? '检测' : 'Test';
+    }
+  }
+}
+
+async function runAuthEntryDetection(authId, triggerButton, options = {}) {
   const id = String(authId || '').trim();
   if (!id) return;
+  if (authDetectInFlight.has(id)) return;
+  authDetectInFlight.add(id);
+
+  const silent = Boolean(options.silent);
   const button = triggerButton || null;
   const originalText = button ? button.textContent : '';
+  const item = authItemsById[id];
+  const authName = item?.name || id;
   try {
-    authEntryStatuses[id] = 'testing';
-    authEntryStatusMeta[id] = {
+    setAuthEntryStatus(id, 'testing', {
       tested_at: Math.floor(Date.now() / 1000),
-    };
-    await loadAuthFiles();
+      message: getLanguage() === 'zh' ? '模型检测进行中…' : 'Model tests running…',
+    });
+    updateAuthEntryLight(id);
 
-    if (button) {
-      button.disabled = true;
-      button.textContent = getLanguage() === 'zh' ? '检测中...' : 'Testing...';
+    const busyButton = document.querySelector(`[data-auth-test="${CSS.escape(id)}"]`) || button;
+    if (busyButton) {
+      busyButton.disabled = true;
+      busyButton.textContent = getLanguage() === 'zh' ? '检测中...' : 'Testing...';
     }
 
-    let result;
-    try {
-      result = await api('/api/test-auth-entry', 'POST', { auth_ref: id });
-    } catch (err) {
-      if (!/Not found/i.test(String(err.message || ''))) throw err;
-      const item = authItemsById[id];
-      const provider = String(item?.provider || '').trim();
-      const providerData = await api('/api/provider-models?runtime_state=1');
-      const groups = Array.isArray(providerData.items) ? providerData.items : [];
-      const group = groups.find(entry =>
-        String(entry.provider || '').trim() === provider || String(entry.lookup_provider || '').trim() === provider
+    await ensureAuthProviderModelMap(false);
+    let modelIds = modelIdsForAuthItem(item);
+    if (!modelIds.length) {
+      // 强制刷新一次 provider 模型映射
+      await ensureAuthProviderModelMap(true);
+      modelIds = modelIdsForAuthItem(item);
+    }
+    if (!modelIds.length) {
+      const provider = getAuthProviderKey(item) || 'unknown';
+      throw new Error(
+        getLanguage() === 'zh'
+          ? `没有找到 provider「${provider}」的 runtime 模型。`
+          : `No runtime model IDs found for provider: ${provider}`
       );
-      const modelIds = Array.isArray(group?.rows)
-        ? [...new Set(group.rows.filter(row => row && row.runtime_registered).map(row => String(row.call_id || '').trim()).filter(Boolean))]
-        : [];
-      if (!modelIds.length) {
-        throw new Error(`No runtime model IDs found for provider: ${provider || 'unknown'}`);
-      }
-      const batch = await api('/api/test-provider-models', 'POST', { model_ids: modelIds });
-      const entries = Array.isArray(batch.items) ? batch.items : [];
-      const best = entries.find(entry => entry.available) || entries[0];
-      result = {
-        ok: true,
-        auth_ref: id,
-        auth_name: item?.name || id,
-        available: Boolean(best?.available),
-        working_model: best?.model || null,
-        working_path: best?.working_path || null,
-        status_code: best?.status_code,
-        message: best?.message || 'Fallback via provider detection.',
-        elapsed_ms: best?.elapsed_ms,
-        retry_after_seconds: best?.retry_after_seconds,
-        tested_at: best?.tested_at || Math.floor(Date.now() / 1000),
-      };
     }
-    authEntryStatuses[id] = result.available ? 'ok' : 'bad';
-    authEntryStatusMeta[id] = {
-      working_model: result.working_model,
-      working_path: result.working_path,
-      elapsed_ms: result.elapsed_ms,
-      retry_after_seconds: result.retry_after_seconds,
-      tested_at: result.tested_at,
-      status_code: result.status_code,
-      message: result.message,
-    };
-    await loadAuthFiles();
 
-    const suffix = result.available
-      ? `${getLanguage() === 'zh' ? '可用' : 'Available'}${result.working_model ? ` · ${result.working_model}` : ''}`
-      : `${getLanguage() === 'zh' ? '不可用' : 'Unavailable'}${result.retry_after_seconds ? ` · ${formatAuthRetryAfter(result.retry_after_seconds)}` : ''}`;
-    showMessage(`${result.auth_name || id} · ${suffix}`);
-  } catch (err) {
-    authEntryStatuses[id] = 'bad';
-    authEntryStatusMeta[id] = {
-      tested_at: Math.floor(Date.now() / 1000),
-      retry_after_seconds: 120,
-      message: err.message,
+    const A = _avail();
+    if (!A) throw new Error('Availability module is not loaded.');
+
+    const queued = await A.queueModelTests(modelIds, { clearFirst: true });
+    if (queued.mode === 'sync' && Array.isArray(queued.items)) {
+      const state = A.normalizeModelTestState({
+        results: Object.fromEntries(queued.items.map((row) => [row.model, row])),
+        running: [],
+        queue: [],
+      });
+      applyAuthLightsFromState(state);
+      updateAuthEntryLight(id);
+      if (!silent) {
+        const status = authEntryStatuses[id] || '';
+        const meta = authEntryStatusMeta[id] || {};
+        showMessage(`${authName} · ${authStatusLabel(status, meta)}`);
+      }
+      return;
+    }
+
+    // 队列模式：先黄灯，再轮询模型权威缓存
+    const testingState = {
+      statuses: Object.fromEntries(modelIds.map((mid) => [mid, 'testing'])),
+      meta: Object.fromEntries(modelIds.map((mid) => [mid, { tested_at: Math.floor(Date.now() / 1000) }])),
+      runningSet: new Set(modelIds),
+      queueSet: new Set(),
+      raw: {},
     };
-    await loadAuthFiles();
-    showMessage(err.message, true);
+    applyAuthLightsFromState(testingState);
+    updateAuthEntryLight(id);
+    startAuthAvailabilityPoll(modelIds);
+
+    if (!silent) {
+      showMessage(
+        getLanguage() === 'zh'
+          ? `${authName} · 已加入模型检测队列（${modelIds.length}）`
+          : `${authName} · queued ${modelIds.length} model tests`
+      );
+    }
+  } catch (err) {
+    setAuthEntryStatus(id, 'bad', {
+      tested_at: Math.floor(Date.now() / 1000),
+      message: err.message,
+    });
+    updateAuthEntryLight(id);
+    if (!silent) showMessage(err.message, true);
   } finally {
-    if (button) {
-      button.disabled = false;
-      button.textContent = originalText;
+    authDetectInFlight.delete(id);
+    updateAuthEntryLight(id);
+    const liveButton = document.querySelector(`[data-auth-test="${CSS.escape(id)}"]`) || button;
+    if (liveButton && authEntryStatuses[id] !== 'testing') {
+      liveButton.disabled = false;
+      liveButton.textContent = originalText || (getLanguage() === 'zh' ? '检测' : 'Test');
     }
   }
 }
@@ -459,8 +668,9 @@ function authCardHtml(item, options = {}) {
   const cardPicked = selectedAuthCards.has(authId);
 
   const statusText = authStatusLabel(detectStatus, detectMeta);
-  const statusClass = detectStatus ? `status-${detectStatus}` : 'status-idle';
-  
+  const statusTitle = authStatusTitle(detectStatus, detectMeta);
+  const lightClass = authLightClass(detectStatus);
+
   const poolLabel = isZh ? '已启用' : 'Enabled';
   const appliedLabel = applied ? (isZh ? '已应用' : 'Applied') : '';
 
@@ -477,23 +687,20 @@ function authCardHtml(item, options = {}) {
   if (detectMeta.working_path) detailLines.push(`${isZh ? '命中路径' : 'Working path'}: ${detectMeta.working_path}`);
   if (detectMeta.message) detailLines.push(`${isZh ? '信息' : 'Message'}: ${String(detectMeta.message).slice(0, 180)}`);
 
-  
+
   return `
     <article class="auth-strip ${selected ? 'is-selected' : ''} ${cardPicked ? 'is-picked' : ''} ${isExpanded ? 'is-expanded' : ''}" data-auth-id="${id}">
       <div class="auth-strip-summary" data-auth-expand="${id}">
         <div class="auth-strip-toggle ${cardPicked ? 'is-checked' : ''}" data-auth-check="${id}">
           <span class="auth-toggle-indicator"></span>
         </div>
+        <span class="auth-status-light ${lightClass}" title="${escapeHtml(statusTitle)}" aria-label="${escapeHtml(statusText)}"></span>
         <div class="auth-strip-main">
           <span class="auth-strip-name">${name}</span>
           <span class="auth-inline-chip provider">${provider}</span>
           <span class="auth-inline-chip email">${email}</span>
         </div>
         <div class="auth-strip-status">
-          <div class="auth-test-status ${statusClass}" title="${escapeHtml(statusText)}">
-            <span class="auth-test-status-dot ${statusClass}"></span>
-            <span class="auth-strip-status-text">${escapeHtml(statusText)}</span>
-          </div>
           <span class="auth-inline-chip pool active-chip">${poolLabel}</span>
           ${applied ? `<span class="auth-inline-chip applied active-chip">${appliedLabel}</span>` : ''}
         </div>
@@ -655,6 +862,14 @@ async function loadAuthFiles(force = false) {
       .catch(() => {});
     const items = Array.isArray(authData.items) ? [...authData.items] : [];
     authItemsById = Object.fromEntries(items.filter(item => item?.id).map(item => [item.id, item]));
+    // 清理已删除账号的状态，避免脏灯号
+    const liveIds = new Set(Object.keys(authItemsById));
+    for (const id of Object.keys(authEntryStatuses)) {
+      if (!liveIds.has(id)) {
+        delete authEntryStatuses[id];
+        delete authEntryStatusMeta[id];
+      }
+    }
     const selectedIds = Array.isArray(authData.selected_auth_refs) && authData.selected_auth_refs.length
       ? authData.selected_auth_refs.filter(Boolean)
       : (authData.selected_auth_ref ? [authData.selected_auth_ref] : []);
@@ -683,6 +898,9 @@ async function loadAuthFiles(force = false) {
 
     setText('summary-auth-count', String(items.length), '0');
     setText('auth-count-badge', String(items.length), '0');
+
+    // 用服务端模型权威缓存聚合灯号（不阻塞首屏）
+    syncAuthAvailabilityFromServer().catch(() => {});
 
     // Only re-render DOM if data actually changed or forced
     if (changed || force) {

@@ -5,6 +5,10 @@ async function boot() {
   applySidebarNavOrder();
   applyNavGroupCollapsed();
   setLanguageToggleLabel();
+  // 在挂载控制台之前先恢复指示灯缓存，避免账号页首屏先红后绿
+  if (typeof loadIndicatorStates === 'function') {
+    loadIndicatorStates();
+  }
   const authOk = await checkAuthStatus();
   if (!authOk) {
     return;
@@ -35,7 +39,8 @@ async function boot() {
   } catch (err) {
     console.error("Startup update check failed:", err);
   }
-  setInterval(refreshStatus, 8000);
+  // 账号页轮询：12s 足够，配合 refreshStatus 内“无变化不写 DOM”可明显减卡顿
+  setInterval(refreshStatus, 12000);
   setInterval(() => {
     // Only poll auth data when auth tab is visible
     const active = getActiveSection();

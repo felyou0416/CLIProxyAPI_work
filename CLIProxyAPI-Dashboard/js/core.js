@@ -143,7 +143,7 @@ function toggleSidebarCollapsed() {
 
 function getNavGroups() {
   return {
-    runtime: ['account', 'chat', 'requests', 'token-usage', 'model-stats', 'clients', 'auth-health', 'settings'],
+    runtime: ['account', 'chat', 'requests', 'token-usage', 'model-stats', 'clients', 'settings'],
     config: ['providers', 'media-models', 'aggregates', 'model-thinking', 'model-map', 'api-key-intake', 'auths'],
     access: ['firewall-access', 'terminals', 'tools', 'virtual-keys', 'doc'],
     system: ['system', 'network-access', 'model-proxy', 'cooldown', 'storage-config', 'home-config', 'docker-deploy', 'advanced-config', 'cloaking-config', 'amp-config', 'data-transfer'],
@@ -186,7 +186,7 @@ function persistActiveGroup(group) {
 }
 
 function getDefaultSidebarNavOrder() {
-  return ['account', 'chat', 'requests', 'token-usage', 'model-stats', 'clients', 'auth-health', 'settings', 'providers', 'media-models', 'aggregates', 'model-thinking', 'model-map', 'api-key-intake', 'auths', 'firewall-access', 'terminals', 'tools', 'virtual-keys', 'doc', 'system'];
+  return ['account', 'chat', 'requests', 'token-usage', 'model-stats', 'clients', 'settings', 'providers', 'media-models', 'aggregates', 'model-thinking', 'model-map', 'api-key-intake', 'auths', 'firewall-access', 'terminals', 'tools', 'virtual-keys', 'doc', 'system'];
 }
 
 function getSidebarNavOrder() {
@@ -627,9 +627,6 @@ async function showSection(name, options = {}) {
   if (name === 'models' && typeof loadModelsPanel === 'function') {
     loadModelsPanel();
   }
-  if (name === 'auth-health' && typeof loadAuthHealthPanel === 'function') {
-    loadAuthHealthPanel();
-  }
   if (name === 'overview' && typeof loadOverviewPanel === 'function') {
     loadOverviewPanel();
   }
@@ -640,6 +637,10 @@ async function showSection(name, options = {}) {
     loadNetworkAccessPanel();
   }
   if (name === 'account') {
+    // 先挂控制台（幂等），再拉 IP Helper / 系统代理状态（依赖已渲染的固定 id）
+    if (typeof mountControlStation === 'function') {
+      mountControlStation();
+    }
     if (typeof loadIpHelperStatus === 'function') {
       loadIpHelperStatus(true);
     }
@@ -746,7 +747,10 @@ function setLogVisible(el, visible) {
 
 function setText(id, value, fallback = '') {
   const el = document.getElementById(id);
-  if (el) el.textContent = value || fallback;
+  if (!el) return;
+  const next = value || fallback;
+  if (el.textContent === next) return;
+  el.textContent = next;
 }
 
 let _messageTimer = null;

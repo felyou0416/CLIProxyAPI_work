@@ -1,0 +1,38 @@
+/* ===============================================================
+   账号首页 — 在全局 full-bleed 之上的页面特化
+   壳层铺满已由 layout.css / components.css 统一处理；
+   这里只去掉 panel-sub 第二层框，并给控制台内容留边距。
+   =============================================================== */
+
+.panel-account.panel,
+#section-account.panel {
+  padding: 0;
+  background: var(--panel);
+}
+
+/* 内层 panel-sub 不再套卡片，只保留内容间距 */
+.panel-account .panel-sub {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 18px 22px 28px;
+  gap: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.panel-account .control-station {
+  margin-bottom: 8px;
+}
+
+.panel-account .status-grid {
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  .panel-account .panel-sub {
+    padding: 12px 12px 20px;
+  }
+}

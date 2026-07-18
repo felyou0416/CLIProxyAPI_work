@@ -1,3 +1,14 @@
+// =============================================================================
+// 运行时状态与控制台原语
+// -----------------------------------------------------------------------------
+// 账号页按钮 UI 已迁到 control-station-config/js；本文件保留：
+//   - 状态轮询 refreshStatus（按固定 element id 更新灯色 / OpenClaw 禁用态）
+//   - 指示灯缓存 updateIndicator / loadIndicatorStates
+//   - 组锁与 spinner：withRuntimeAction
+//   - 通用启停：handleActionWithIndicator
+// 控制台外仍可调用的 shim：startProxy / restartProxy / stopProxy（如网络访问页）
+// =============================================================================
+
 let refreshStatusPending = false;
 window.tunnelActionBusy = false;
 window.proxyActionBusy = false;
@@ -5,11 +16,11 @@ window.oauthActionBusy = false;
 window.dashboardActionBusy = false;
 window.openclawActionBusy = false;
 window.mediaProxyActionBusy = false;
-// Frontend/backend share one busy flag so concurrent grok2api actions don't race the dots.
+// 前后端共用一把锁，避免并发改灯互相覆盖
 window.grok2apiActionBusy = false;
 
-// Traffic-light cache covers every control-station group, including the split Grok2API dots.
-// Keys are logical service names; DOM ids are resolved by indicatorElementId().
+// 指示灯逻辑名列表（含拆分后的 grok2api-frontend/backend + 系统代理）
+// DOM id 默认 `${type}-status-indicator`，例外见 INDICATOR_ELEMENT_IDS
 const INDICATOR_TYPES = [
   'proxy',
   'media-proxy',
@@ -18,93 +29,202 @@ const INDICATOR_TYPES = [
   'dashboard',
   'oauth',
   'tunnel',
-  // Split indicators (new). Kept separate so front/back can show independent colors.
+  // 拆分指示灯：前后端独立变色
   'grok2api-frontend',
   'grok2api-backend',
-  // Legacy combined key from older builds; still read for migration, no longer written.
+  // 系统代理 / grok2api 进程侧上报
+  'system-proxy',
+  'grok2api-sys-proxy',
+  // 旧版合并键：只读迁移用，不再写入缓存
   'grok2api',
 ];
 const GROK2API_DEFAULT_URL = 'http://127.0.0.1:5173/';
 const INDICATOR_CACHE_KEY = 'cli-indicator-states';
-// Non-standard element ids (HTML historically used *-dot for Grok2API).
+// 逻辑名 → 实际 DOM id（与 control-station-config 中 indicator.id 对齐）
 const INDICATOR_ELEMENT_IDS = {
   'grok2api-frontend': 'grok2api-frontend-status-indicator',
   'grok2api-backend': 'grok2api-backend-status-indicator',
-  // Older cache entries / callers may still pass "grok2api"; prefer frontend as fallback target.
+  'system-proxy': 'system-proxy-status-indicator',
+  'grok2api-sys-proxy': 'grok2api-sys-proxy-indicator',
+  // 旧缓存/调用方可能仍传 "grok2api"，回退到前端灯
   'grok2api': 'grok2api-frontend-status-indicator',
 };
+// 内存态：script 加载后立刻 hydrate，渲染控制台时直接用缓存色，避免先红后绿闪一下
+const INDICATOR_MEMORY = Object.create(null);
+const INDICATOR_VALID_COLORS = new Set(['red', 'green', 'yellow']);
+
+function normalizeIndicatorColor(state, fallback = 'red') {
+  const color = String(state || '').trim().toLowerCase();
+  return INDICATOR_VALID_COLORS.has(color) ? color : fallback;
+}
 
 function indicatorElementId(type) {
   if (INDICATOR_ELEMENT_IDS[type]) return INDICATOR_ELEMENT_IDS[type];
   return `${type}-status-indicator`;
 }
 
-// Map logical indicator type -> window.*ActionBusy flag used by refreshStatus.
+function indicatorTypeFromElementId(elementId) {
+  const id = String(elementId || '').trim();
+  if (!id) return '';
+  for (const [type, mappedId] of Object.entries(INDICATOR_ELEMENT_IDS)) {
+    if (mappedId === id) return type;
+  }
+  if (id.endsWith('-status-indicator')) {
+    return id.slice(0, -'-status-indicator'.length);
+  }
+  if (id.endsWith('-indicator')) {
+    return id.slice(0, -'-indicator'.length);
+  }
+  return id;
+}
+
+// 逻辑指示灯类型 → window.*ActionBusy；busy 时 refreshStatus 不覆盖黄灯
 function indicatorBusyKey(type) {
   if (type === 'media-proxy') return 'mediaProxyActionBusy';
-  // Both Grok2API rows share one lock.
+  // Grok2API 前后端共享一把锁
   if (type === 'grok2api' || type === 'grok2api-frontend' || type === 'grok2api-backend') {
     return 'grok2apiActionBusy';
+  }
+  if (type === 'system-proxy' || type === 'grok2api-sys-proxy') {
+    return 'systemProxyActionBusy';
   }
   return `${type}ActionBusy`;
 }
 
-function loadIndicatorStates() {
+function readIndicatorCacheObject() {
   try {
     const raw = localStorage.getItem(INDICATOR_CACHE_KEY);
-    if (!raw) return;
+    if (!raw) return {};
     const states = JSON.parse(raw);
-    // Restore last known colors before /api/status returns, so new buttons don't flash red.
+    if (!states || typeof states !== 'object') return {};
+    const out = {};
     for (const [type, color] of Object.entries(states)) {
-      if (typeof window.updateIndicator === 'function') {
-        window.updateIndicator(type, color, { persist: false });
-      }
+      out[type] = normalizeIndicatorColor(color);
     }
-    // Migrate legacy combined "grok2api" into the split keys when they are missing.
-    if (states.grok2api) {
-      if (!states['grok2api-frontend']) {
-        window.updateIndicator('grok2api-frontend', states.grok2api, { persist: false });
-      }
-      if (!states['grok2api-backend']) {
-        window.updateIndicator('grok2api-backend', states.grok2api, { persist: false });
-      }
+    // 旧合并键迁移到拆分前后端
+    if (out.grok2api) {
+      if (!out['grok2api-frontend']) out['grok2api-frontend'] = out.grok2api;
+      if (!out['grok2api-backend']) out['grok2api-backend'] = out.grok2api;
     }
-  } catch (e) { /* ignore */ }
+    return out;
+  } catch (e) {
+    return {};
+  }
+}
+
+function hydrateIndicatorMemory() {
+  const states = readIndicatorCacheObject();
+  for (const [type, color] of Object.entries(states)) {
+    if (type === 'grok2api') continue;
+    INDICATOR_MEMORY[type] = color;
+  }
+  return states;
+}
+
+let _lastIndicatorCacheJson = '';
+let _indicatorCacheDirty = false;
+let _lastSysProxyPollAt = 0;
+let _lastToolHintFingerprint = '';
+let _lastProxySummaryFingerprint = '';
+
+function applyIndicatorDom(type, state) {
+  const el = document.getElementById(indicatorElementId(type));
+  if (!el) return false;
+  const color = normalizeIndicatorColor(state);
+  const nextClass = `status-indicator-dot ${color}`;
+  if (el.className === nextClass) return false;
+  el.className = nextClass;
+  return true;
+}
+
+function loadIndicatorStates() {
+  // 先灌内存，再刷 DOM；控制台尚未挂载时至少保住 memory，供 render 读色
+  const states = hydrateIndicatorMemory();
+  for (const [type, color] of Object.entries(states)) {
+    if (type === 'grok2api') continue;
+    applyIndicatorDom(type, color);
+  }
 }
 window.loadIndicatorStates = loadIndicatorStates;
 
-function saveIndicatorStates() {
+function buildIndicatorCacheObject() {
   const states = {};
   for (const type of INDICATOR_TYPES) {
-    // Skip legacy combined key when writing so cache stays on the split indicators.
     if (type === 'grok2api') continue;
-    const el = document.getElementById(indicatorElementId(type));
-    if (!el) continue;
-    const match = el.className.match(/status-indicator-dot\s+(\w+)/);
-    if (match) states[type] = match[1];
+    if (INDICATOR_MEMORY[type]) states[type] = normalizeIndicatorColor(INDICATOR_MEMORY[type]);
+  }
+  return states;
+}
+
+function saveIndicatorStates(force = false) {
+  const states = buildIndicatorCacheObject();
+  const json = JSON.stringify(states);
+  if (!force && json === _lastIndicatorCacheJson) {
+    _indicatorCacheDirty = false;
+    return;
   }
   try {
     if (Object.keys(states).length) {
-      localStorage.setItem(INDICATOR_CACHE_KEY, JSON.stringify(states));
+      localStorage.setItem(INDICATOR_CACHE_KEY, json);
+      _lastIndicatorCacheJson = json;
+      _indicatorCacheDirty = false;
     }
   } catch (e) { /* ignore */ }
 }
 window.saveIndicatorStates = saveIndicatorStates;
 
+// 供 control-station 渲染时直接取缓存色，避免 HTML 先写 red 再被改色
+window.getCachedIndicatorColor = function(elementIdOrType, fallback = 'red') {
+  const raw = String(elementIdOrType || '').trim();
+  if (!raw) return normalizeIndicatorColor(fallback);
+  if (INDICATOR_MEMORY[raw]) return INDICATOR_MEMORY[raw];
+  const type = indicatorTypeFromElementId(raw) || raw;
+  if (INDICATOR_MEMORY[type]) return INDICATOR_MEMORY[type];
+  return normalizeIndicatorColor(fallback);
+};
+
 // options.persist=false is used by load/refresh internals to avoid write thrash.
 window.updateIndicator = function(type, state, options = {}) {
-  const el = document.getElementById(indicatorElementId(type));
-  if (el) {
-    el.className = `status-indicator-dot ${state}`;
+  const color = normalizeIndicatorColor(state);
+  const key = String(type || '').trim();
+  if (!key) return;
+  const prev = INDICATOR_MEMORY[key];
+  const memoryChanged = prev !== color;
+  if (memoryChanged) {
+    INDICATOR_MEMORY[key] = color;
+    _indicatorCacheDirty = true;
   }
-  if (options.persist !== false) {
+  // 仅当内存变化或 DOM 颜色不一致时写 class，避免 8s 轮询反复触发布局
+  applyIndicatorDom(key, color);
+  if (options.persist !== false && (memoryChanged || _indicatorCacheDirty)) {
     saveIndicatorStates();
   }
 };
 
+// script 一加载就 hydrate，抢在 showSection/mount 之前
+(() => {
+  const states = hydrateIndicatorMemory();
+  _lastIndicatorCacheJson = JSON.stringify(states);
+})();
+
 function setHtml(id, html) {
   const el = document.getElementById(id);
-  if (el) el.innerHTML = html;
+  if (!el) return;
+  if (el.innerHTML === html) return;
+  el.innerHTML = html;
+}
+
+function shouldRefreshSysProxySide() {
+  try {
+    if (typeof getActiveSection === 'function' && getActiveSection() === 'account') return true;
+  } catch (e) { /* ignore */ }
+  return !!document.getElementById('system-proxy-status-indicator')
+    || !!document.getElementById('grok2api-sys-proxy-indicator');
+}
+
+function setRuntimeIndicator(type, running, busyFlag) {
+  if (busyFlag) return;
+  window.updateIndicator(type, running ? 'green' : 'red', { persist: false });
 }
 
 function summarizePool(names, fallback) {
@@ -120,12 +240,36 @@ function summarizeProviders(providers, fallback) {
 }
 
 function updateProxyToolSummary(s) {
+  // 工具页日志区不在账号页；元素缺失时直接跳过，避免每 8s 拼大字符串
+  const proxyLog = document.getElementById('log-proxy-main');
+  const proxyStatus = document.getElementById('status-proxy-main');
+  const hasToolsUi = !!(proxyLog || proxyStatus
+    || document.getElementById('status-proxy-main-chip')
+    || document.getElementById('tools-summary-proxy'));
+  if (!hasToolsUi) return;
+
   const proxyStateText = statusText(s.proxy_running);
   const selectedAccountText = summarizePool(s.selected_auths, s.selected_auth || t('common.notSelected', 'Not selected'));
   const appliedAccountText = summarizePool(s.applied_auths, s.applied_auth || t('common.notSelected', 'Not selected'));
   const selectedProviderText = summarizeProviders(s.selected_providers, s.selected_provider || t('common.notSelected', 'Not selected'));
   const appliedProviderText = summarizeProviders(s.applied_providers, s.applied_provider || t('common.notSelected', 'Not selected'));
-  const proxyLog = document.getElementById('log-proxy-main');
+  const fingerprint = [
+    proxyStateText,
+    !!s.exposure_enabled,
+    selectedAccountText,
+    selectedProviderText,
+    appliedAccountText,
+    appliedProviderText,
+    !!s.restart_required,
+    s.local_proxy_url || s.proxy_url || '',
+    s.exposure_url || '',
+    s.api_key || '',
+    s.proxy_stdout || '',
+    s.proxy_stderr || '',
+  ].join('');
+  if (fingerprint === _lastProxySummaryFingerprint) return;
+  _lastProxySummaryFingerprint = fingerprint;
+
   const proxySummary = [
     `Status: ${proxyStateText}`,
     `Exposure mode: ${s.exposure_enabled ? 'Enabled' : 'Disabled'}`,
@@ -143,14 +287,15 @@ function updateProxyToolSummary(s) {
   ].filter(Boolean).join('\n').trim();
 
   if (proxyLog) {
-    proxyLog.textContent = proxySummary || t('common.noLogs', 'No logs yet');
+    const next = proxySummary || t('common.noLogs', 'No logs yet');
+    if (proxyLog.textContent !== next) proxyLog.textContent = next;
     setLogVisible(proxyLog, true);
   }
 
-  const proxyStatus = document.getElementById('status-proxy-main');
   if (proxyStatus) {
-    proxyStatus.textContent = proxyStateText;
-    proxyStatus.className = 'tool-status ' + (s.proxy_running ? 'tool-running' : 'tool-stopped');
+    if (proxyStatus.textContent !== proxyStateText) proxyStatus.textContent = proxyStateText;
+    const nextClass = 'tool-status ' + (s.proxy_running ? 'tool-running' : 'tool-stopped');
+    if (proxyStatus.className !== nextClass) proxyStatus.className = nextClass;
   }
 
   setText('status-proxy-main-chip', proxyStateText, 'Not running');
@@ -166,6 +311,18 @@ async function refreshStatus() {
   if (refreshStatusPending) return;
   refreshStatusPending = true;
   try {
+    // 系统代理侧只在账号页需要时刷新，且节流到 20s，避免每 8s 额外 1~2 个请求
+    if (shouldRefreshSysProxySide()) {
+      const now = Date.now();
+      if (now - _lastSysProxyPollAt > 20000) {
+        _lastSysProxyPollAt = now;
+        if (typeof loadGrok2ApiSysProxyStatus === 'function') {
+          loadGrok2ApiSysProxyStatus().catch(() => {});
+        } else if (typeof loadProxyStatus === 'function') {
+          loadProxyStatus().catch(() => {});
+        }
+      }
+    }
     const data = await api('/api/status');
     const s = data.status || {};
     const selectedAuth = summarizePool(s.selected_auths, s.selected_auth || t('common.notSelected', 'Not selected'));
@@ -194,119 +351,26 @@ async function refreshStatus() {
     setText('media-proxy-url', s.media_proxy_url || 'http://127.0.0.1:8320', 'http://127.0.0.1:8320');
     const grok2apiUrl = s.grok2api_url || GROK2API_DEFAULT_URL;
     const grok2apiTitle = document.getElementById('grok2api-title-link');
-    if (grok2apiTitle) grok2apiTitle.href = grok2apiUrl;
+    if (grok2apiTitle && grok2apiTitle.href !== grok2apiUrl) grok2apiTitle.href = grok2apiUrl;
     setText('proxy-exposure-url', s.exposure_url || '-', '-');
     setText('proxy-api-key', s.api_key || 'cliproxyapi', 'cliproxyapi');
     setText('exposure-mode-status', s.exposure_enabled ? 'Enabled (LAN)' : 'Disabled', 'Disabled');
 
-    // Skip live updates while that group is mid-action so yellow "working" is not overwritten.
-    if (!window.proxyActionBusy) {
-      window.updateIndicator('proxy', s.proxy_running ? 'green' : 'red', { persist: false });
-    }
-    if (!window.mediaProxyActionBusy) {
-      window.updateIndicator('media-proxy', s.media_proxy_running ? 'green' : 'red', { persist: false });
-    }
-    if (!window.tunnelActionBusy) {
-      window.updateIndicator('tunnel', s.tunnel_running ? 'green' : 'red', { persist: false });
-    }
-    if (!window.oauthActionBusy) {
-      window.updateIndicator('oauth', s.oauth_manager_running ? 'green' : 'red', { persist: false });
-    }
-    if (!window.openclawActionBusy) {
-      window.updateIndicator('openclaw', s.openclaw_running ? 'green' : 'red', { persist: false });
-    }
+    // 灯色无变化时 updateIndicator 会短路；busy 组保持黄灯不被覆盖
+    setRuntimeIndicator('proxy', s.proxy_running, window.proxyActionBusy);
+    setRuntimeIndicator('media-proxy', s.media_proxy_running, window.mediaProxyActionBusy);
+    setRuntimeIndicator('tunnel', s.tunnel_running, window.tunnelActionBusy);
+    setRuntimeIndicator('oauth', s.oauth_manager_running, window.oauthActionBusy);
+    setRuntimeIndicator('openclaw', s.openclaw_running, window.openclawActionBusy);
     if (!window.dashboardActionBusy) {
       window.updateIndicator('dashboard', 'green', { persist: false });
     }
-    // Split Grok2API dots must be cached independently (restart/start buttons are per-row).
-    if (!window.grok2apiActionBusy) {
-      window.updateIndicator('grok2api-frontend', s.grok2api_frontend_running ? 'green' : 'red', { persist: false });
-      window.updateIndicator('grok2api-backend', s.grok2api_backend_running ? 'green' : 'red', { persist: false });
-    }
+    setRuntimeIndicator('grok2api-frontend', s.grok2api_frontend_running, window.grok2apiActionBusy);
+    setRuntimeIndicator('grok2api-backend', s.grok2api_backend_running, window.grok2apiActionBusy);
 
-    // One write after batch updates (persist:false above).
-    saveIndicatorStates();
-
-    const openClawStartBtn = document.getElementById('openclaw-start-btn');
-    const openClawRestartBtn = document.getElementById('openclaw-restart-btn');
-    const openClawStopBtn = document.getElementById('openclaw-stop-btn');
-    if (openClawStartBtn && openClawRestartBtn && openClawStopBtn) {
-      const isRunning = !!s.openclaw_running;
-      openClawStartBtn.disabled = isRunning;
-      openClawStartBtn.style.opacity = isRunning ? '0.5' : '1';
-      openClawRestartBtn.disabled = !isRunning;
-      openClawRestartBtn.style.opacity = isRunning ? '1' : '0.5';
-      openClawStopBtn.disabled = !isRunning;
-      openClawStopBtn.style.opacity = isRunning ? '1' : '0.5';
-      if (window.openclawActionBusy) {
-        openClawStartBtn.disabled = true;
-        openClawRestartBtn.disabled = true;
-        openClawStopBtn.disabled = true;
-      }
-    }
-
-    const mediaProxyStartBtn = document.getElementById('media-proxy-start-btn');
-    const mediaProxyRestartBtn = document.getElementById('media-proxy-restart-btn');
-    const mediaProxyStopBtn = document.getElementById('media-proxy-stop-btn');
-    if (mediaProxyStartBtn && mediaProxyRestartBtn && mediaProxyStopBtn) {
-      const isRunning = !!s.media_proxy_running;
-      mediaProxyStartBtn.disabled = isRunning;
-      mediaProxyStartBtn.style.opacity = isRunning ? '0.5' : '1';
-      mediaProxyRestartBtn.disabled = !isRunning;
-      mediaProxyRestartBtn.style.opacity = isRunning ? '1' : '0.5';
-      mediaProxyStopBtn.disabled = !isRunning;
-      mediaProxyStopBtn.style.opacity = isRunning ? '1' : '0.5';
-      if (window.mediaProxyActionBusy) {
-        mediaProxyStartBtn.disabled = true;
-        mediaProxyRestartBtn.disabled = true;
-        mediaProxyStopBtn.disabled = true;
-      }
-    }
-
-    // Button enable/disable only here; colors already went through updateIndicator above.
-    const grok2apiControls = [
-      { type: 'frontend', running: !!s.grok2api_frontend_running },
-      { type: 'backend', running: !!s.grok2api_backend_running },
-    ];
-    for (const control of grok2apiControls) {
-      const startButton = document.getElementById(`grok2api-${control.type}-start-btn`);
-      const restartButton = document.getElementById(`grok2api-${control.type}-restart-btn`);
-      const stopButton = document.getElementById(`grok2api-${control.type}-stop-btn`);
-      if (!startButton || !stopButton) continue;
-      startButton.disabled = control.running;
-      startButton.style.opacity = control.running ? '0.5' : '1';
-      if (restartButton) {
-        restartButton.disabled = !control.running;
-        restartButton.style.opacity = control.running ? '1' : '0.5';
-      }
-      stopButton.disabled = !control.running;
-      stopButton.style.opacity = control.running ? '1' : '0.5';
-      if (window.grok2apiActionBusy) {
-        startButton.disabled = true;
-        if (restartButton) restartButton.disabled = true;
-        stopButton.disabled = true;
-      }
-    }
-
-    const startBtn = document.getElementById('tunnel-start-btn');
-    const restartBtn = document.getElementById('tunnel-restart-btn');
-    const stopBtn = document.getElementById('tunnel-stop-btn');
-    if (startBtn && stopBtn) {
-      const isRunning = !!s.tunnel_running;
-      startBtn.disabled = isRunning;
-      startBtn.style.opacity = isRunning ? '0.5' : '1';
-      if (restartBtn) {
-        restartBtn.disabled = !isRunning;
-        restartBtn.style.opacity = isRunning ? '1' : '0.5';
-      }
-      stopBtn.disabled = !isRunning;
-      stopBtn.style.opacity = isRunning ? '1' : '0.5';
-      if (window.tunnelActionBusy) {
-        startBtn.disabled = true;
-        if (restartBtn) restartBtn.disabled = true;
-        stopBtn.disabled = true;
-      }
-    }
+    // 仅状态真变时写 localStorage
+    if (_indicatorCacheDirty) saveIndicatorStates();
+    // 按钮始终可点：不按 running 状态置灰/禁用；仅操作中的组锁由 withRuntimeAction 负责。
 
     setText('summary-selected-auth-count', selectedAuthCount, '0');
     setText('summary-auth-count', authCount, '0');
@@ -316,7 +380,11 @@ async function refreshStatus() {
 
     updateProxyToolSummary(s);
     if (typeof updateToolCommandHints === 'function') {
-      updateToolCommandHints(s);
+      const hintFp = `${s.cli_exe || ''}|${s.base_config || ''}|${s.proxy_root || ''}|${s.dashboard_root || ''}`;
+      if (hintFp !== _lastToolHintFingerprint) {
+        _lastToolHintFingerprint = hintFp;
+        updateToolCommandHints(s);
+      }
     }
   } catch (err) {
   } finally {
@@ -341,6 +409,31 @@ async function stopDeviceLogin() {
     await refreshStatus();
   } catch (e) {
     showMessage(e.message, true);
+  }
+}
+
+async function copyStatusField(btn, elementId) {
+  const el = document.getElementById(elementId);
+  const text = String(el?.textContent || '').trim();
+  if (!text) return;
+  if (typeof copyDocText === 'function') {
+    return copyDocText(btn, text);
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) {
+      const original = btn.textContent;
+      btn.classList.add('copied');
+      btn.textContent = '已复制';
+      setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.textContent = original;
+      }, 1500);
+    }
+  } catch (err) {
+    if (typeof showMessage === 'function') {
+      showMessage('复制失败，请手动复制。', true);
+    }
   }
 }
 
@@ -380,9 +473,9 @@ function shortRuntimeLabel(label) {
   return compact.slice(0, 4) || '处理';
 }
 
+// 只锁同一 control-group 内的兄弟按钮，其它服务组仍可点
 function getRuntimeActionGroupButtons(button) {
   if (!button) return [];
-  // Only lock siblings in the same control group / pair so other services stay clickable.
   const group = button.closest('.control-group, .control-pair') || button.parentElement;
   if (!group) return [button];
   const buttons = Array.from(group.querySelectorAll('.runtime-action-btn, button'));
@@ -409,9 +502,9 @@ function clearRuntimeActionState(button) {
   }
 }
 
+// 组级互斥 + spinner；整站其它组不受影响
 async function withRuntimeAction(button, label, task) {
   if (!button) return task();
-  // Prevent double-click on the same group, but never freeze the whole control station.
   if (button.dataset.runtimeBusy === '1' || button.closest('.control-group')?.dataset.runtimeBusy === '1') {
     return null;
   }
@@ -460,11 +553,13 @@ async function waitForRuntimeStatus(predicate, timeoutMs = 150000, intervalMs = 
   return null;
 }
 
+// 标准服务启停：黄灯 → POST → 可选 waitFor 轮询 → 失败回写 errorIndicatorState
+// 控制台 service 按钮最终都落到这里
 async function handleActionWithIndicator(type, button, label, actionApiUrl, errorIndicatorState, options = {}) {
-  // Resolve busy flag via shared helper so split types (grok2api-*) share one lock.
+  // grok2api-frontend/backend 会解析到同一 busyKey
   const busyKey = indicatorBusyKey(type);
   window[busyKey] = true;
-  // Yellow = action in progress; persist so reload mid-action still shows working state briefly.
+  // 黄灯表示进行中；persist 默认开启，中途刷新也能短暂保留
   if (typeof window.updateIndicator === 'function') {
     window.updateIndicator(type, 'yellow');
   }
@@ -499,6 +594,8 @@ async function handleActionWithIndicator(type, button, label, actionApiUrl, erro
   }
 }
 
+// 兼容旧调用点（控制台外，如 network-access.js 的 onclick="startProxy()"）
+// 账号页按钮已改走 control-station 配置分发，不再依赖下列函数名
 async function startProxy(button) {
   return handleActionWithIndicator('proxy', button, t('runtime.startingProxy', '启动'), '/api/start-project', 'red');
 }
@@ -509,100 +606,6 @@ async function restartProxy(button) {
 
 async function stopProxy(button) {
   return handleActionWithIndicator('proxy', button, t('runtime.stoppingProxy', '停止'), '/api/stop-proxy', 'green');
-}
-
-async function startOAuthManager(button) {
-  return handleActionWithIndicator('oauth', button, t('runtime.startingOAuthManager', '启动'), '/api/start-oauth-manager', 'red', {
-    waitFor: status => !!status.oauth_manager_running,
-    timeoutMs: 20000,
-    intervalMs: 1000,
-    readyMessage: t('runtime.oauthManagerReady', 'OAuth Manager 已启动。'),
-    timeoutMessage: t('runtime.oauthManagerStartTimeout', 'OAuth Manager 启动命令已发出，但未检测到服务就绪。请查看 OAuth Manager 日志。'),
-  });
-}
-
-async function stopOAuthManager(button) {
-  return handleActionWithIndicator('oauth', button, t('runtime.stoppingOAuthManager', '停止'), '/api/stop-oauth-manager', 'green', {
-    waitFor: status => !status.oauth_manager_running,
-    timeoutMs: 15000,
-    intervalMs: 800,
-    readyMessage: t('runtime.oauthManagerStopped', 'OAuth Manager 已停止。'),
-  });
-}
-
-async function restartOAuthManager(button) {
-  return handleActionWithIndicator('oauth', button, t('runtime.restartingOAuthManager', '重启'), '/api/restart-oauth-manager', 'red', {
-    waitFor: status => !!status.oauth_manager_running,
-    timeoutMs: 25000,
-    intervalMs: 1000,
-    readyMessage: t('runtime.oauthManagerReady', 'OAuth Manager 已启动。'),
-    timeoutMessage: t('runtime.oauthManagerStartTimeout', 'OAuth Manager 重启命令已发出，但未检测到服务就绪。请查看 OAuth Manager 日志。'),
-  });
-}
-
-async function waitForOpenClawRunning(button, label, actionApiUrl) {
-  return handleActionWithIndicator('openclaw', button, label, actionApiUrl, 'red', {
-    waitFor: status => !!status.openclaw_running,
-    timeoutMs: 180000,
-    intervalMs: 3000,
-    readyMessage: 'OpenClaw 已启动并可用。',
-    timeoutMessage: 'OpenClaw 启动命令已发出，但 3 分钟内未检测到网关。请查看 OpenClaw 日志。',
-  });
-}
-
-async function startOpenClaw(button) {
-  return waitForOpenClawRunning(button, '启动', '/api/openclaw/start');
-}
-
-async function restartOpenClaw(button) {
-  return waitForOpenClawRunning(button, '重启', '/api/openclaw/restart');
-}
-
-async function stopOpenClaw(button) {
-  return handleActionWithIndicator('openclaw', button, '停止', '/api/openclaw/stop', 'green');
-}
-
-async function startMediaProxy(button) {
-  return handleActionWithIndicator('media-proxy', button, '启动', '/api/media-proxy/start', 'red');
-}
-
-async function restartMediaProxy(button) {
-  return handleActionWithIndicator('media-proxy', button, '重启', '/api/media-proxy/restart', 'red');
-}
-
-async function stopMediaProxy(button) {
-  return handleActionWithIndicator('media-proxy', button, '停止', '/api/media-proxy/stop', 'green');
-}
-
-// type must be 'grok2api-frontend' or 'grok2api-backend' so the correct traffic light is cached.
-async function runGrok2ApiServiceAction(type, button, label, endpoint, errorState) {
-  const result = await handleActionWithIndicator(type, button, label, endpoint, errorState);
-  await refreshStatus();
-  return result;
-}
-
-async function startGrok2ApiFrontend(button) {
-  return runGrok2ApiServiceAction('grok2api-frontend', button, '启动', '/api/grok2api/frontend/start', 'red');
-}
-
-async function stopGrok2ApiFrontend(button) {
-  return runGrok2ApiServiceAction('grok2api-frontend', button, '关闭', '/api/grok2api/frontend/stop', 'red');
-}
-
-async function restartGrok2ApiFrontend(button) {
-  return runGrok2ApiServiceAction('grok2api-frontend', button, '重启', '/api/grok2api/frontend/restart', 'red');
-}
-
-async function startGrok2ApiBackend(button) {
-  return runGrok2ApiServiceAction('grok2api-backend', button, '启动', '/api/grok2api/backend/start', 'red');
-}
-
-async function stopGrok2ApiBackend(button) {
-  return runGrok2ApiServiceAction('grok2api-backend', button, '关闭', '/api/grok2api/backend/stop', 'red');
-}
-
-async function restartGrok2ApiBackend(button) {
-  return runGrok2ApiServiceAction('grok2api-backend', button, '重启', '/api/grok2api/backend/restart', 'red');
 }
 
 async function enableExposureMode(button) {
@@ -633,16 +636,4 @@ async function disableExposureMode(button) {
       showMessage(e.message, true);
     }
   });
-}
-
-async function startTunnel(button) {
-  return handleActionWithIndicator('tunnel', button, t('runtime.startingTunnel', '启动'), '/api/tunnel/start', 'red');
-}
-
-async function stopTunnel(button) {
-  return handleActionWithIndicator('tunnel', button, t('runtime.stoppingTunnel', '关闭'), '/api/tunnel/stop', 'green');
-}
-
-async function restartTunnel(button) {
-  return handleActionWithIndicator('tunnel', button, t('runtime.restartingTunnel', '重启'), '/api/tunnel/restart', 'red');
 }

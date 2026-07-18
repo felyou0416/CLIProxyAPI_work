@@ -21,7 +21,8 @@ def _load_settings():
 
     defaults = {
         'autostart': False,
-        'minimize_tray': False,
+        # Desktop shell default: close (X) hides to tray; Settings can turn this off.
+        'minimize_tray': True,
         'language': 'zh',
         'theme': 'light',
         'auto_update_check': True,

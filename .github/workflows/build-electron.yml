@@ -88,11 +88,21 @@ jobs:
           cd electron-app
           npm run build
 
+      - name: List build outputs
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path electron-app\dist -Recurse -File |
+            Select-Object FullName, Length |
+            Format-Table -AutoSize
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: cliproxyapi-dashboard-${{ steps.version.outputs.VERSION }}-windows
-          path: electron-app/dist/*.exe
+          path: |
+            electron-app/dist/*.exe
+            electron-app/dist/**/*.exe
+          if-no-files-found: error
           retention-days: 30
 
       - name: Create Release
@@ -101,5 +111,7 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.Tag }}
           name: "CLIProxyAPI Dashboard v${{ steps.version.outputs.VERSION }}"
-          files: electron-app/dist/*.exe
+          files: |
+            electron-app/dist/*.exe
           generate_release_notes: true
+          fail_on_unmatched_files: true

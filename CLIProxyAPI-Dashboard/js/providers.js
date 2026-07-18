@@ -90,7 +90,17 @@ function normalizeModelKey(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function _providerAvail() {
+  return (typeof Availability !== 'undefined' && Availability) ? Availability : null;
+}
+
 function formatRetryAfter(seconds) {
+  const A = _providerAvail();
+  if (A) {
+    const text = A.formatRetryAfter(seconds);
+    if (text) return text;
+    return getLanguage() === 'zh' ? '无需重试' : 'No retry needed';
+  }
   const value = Number(seconds || 0);
   if (!value) return getLanguage() === 'zh' ? '无需重试' : 'No retry needed';
   if (value < 60) return getLanguage() === 'zh' ? `${value} 秒后重试` : `Retry in ${value}s`;
@@ -98,6 +108,11 @@ function formatRetryAfter(seconds) {
 }
 
 function formatElapsedMs(ms) {
+  const A = _providerAvail();
+  if (A) {
+    const text = A.formatElapsed(ms);
+    return text || '-';
+  }
   const value = Number(ms || 0);
   if (!value) return '-';
   if (value < 1000) return `${value} ms`;
@@ -487,6 +502,14 @@ function bindProviderGroupActions(root) {
 
 async function syncProviderModelTestState() {
   try {
+    const A = _providerAvail();
+    if (A) {
+      const state = await A.fetchAvailabilityState();
+      providerModelsRunningSet = new Set([...(state.runningSet || []), ...(state.queueSet || [])]);
+      providerModelStatuses = { ...(state.statuses || {}) };
+      providerModelStatusMeta = { ...(state.meta || {}) };
+      return;
+    }
     const data = await api('/api/provider-model-test-state');
     const results = data.results || {};
     providerModelsRunningSet = new Set(Array.isArray(data.running) ? data.running : []);
@@ -690,48 +713,74 @@ async function loadProviderModels(includeAvailability = false) {
 }
 
 async function runProviderModelDetection(modelIds) {
-  const ids = [...new Set((modelIds || []).map((value) => String(value || '').trim()).filter(Boolean))];
+  const A = _providerAvail();
+  const ids = A
+    ? A.normalizeModelIds(modelIds)
+    : [...new Set((modelIds || []).map((value) => String(value || '').trim()).filter(Boolean))];
   if (!ids.length) {
     showMessage(getLanguage() === 'zh' ? '请先选择至少一个模型。' : 'Please select at least one model first.', true);
     return;
   }
 
   try {
-    try {
-      await api('/api/provider-model-tests', 'POST', { action: 'clear', model_ids: ids });
-    } catch {
-      // Ignore reset failures and still try to start a fresh detection pass.
-    }
-
     ids.forEach((id) => {
       providerModelsRunningSet.delete(id);
       delete providerModelStatuses[id];
       delete providerModelStatusMeta[id];
     });
 
-    try {
-      await api('/api/provider-model-tests', 'POST', { model_ids: ids });
-    } catch {
-      const fallback = await api('/api/test-provider-models', 'POST', { model_ids: ids });
-      const items = Array.isArray(fallback.items) ? fallback.items : [];
-      items.forEach((item) => {
-        providerModelsRunningSet.delete(item.model);
-        providerModelStatuses[item.model] = item.available ? 'ok' : 'bad';
-        providerModelStatusMeta[item.model] = {
-          elapsed_ms: item.elapsed_ms,
-          retry_after_seconds: item.retry_after_seconds,
-          tested_at: item.tested_at,
-          status_code: item.status_code,
-          working_path: item.working_path,
-          failure_kind: item.failure_kind,
-          message: item.message,
-        };
-      });
-      await loadProviderModels(true);
-      showMessage(getLanguage() === 'zh'
-        ? `检测完成：${items.filter((item) => item.available).length}/${items.length} 可用`
-        : `Test completed: ${items.filter((item) => item.available).length}/${items.length} available.`);
-      return;
+    if (A) {
+      const queued = await A.queueModelTests(ids, { clearFirst: true });
+      if (queued.mode === 'sync' && Array.isArray(queued.items)) {
+        queued.items.forEach((item) => {
+          providerModelsRunningSet.delete(item.model);
+          providerModelStatuses[item.model] = item.available ? 'ok' : 'bad';
+          providerModelStatusMeta[item.model] = {
+            elapsed_ms: item.elapsed_ms,
+            retry_after_seconds: item.retry_after_seconds,
+            tested_at: item.tested_at,
+            status_code: item.status_code,
+            working_path: item.working_path,
+            failure_kind: item.failure_kind,
+            message: item.message,
+          };
+        });
+        await loadProviderModels(true);
+        showMessage(getLanguage() === 'zh'
+          ? `检测完成：${queued.items.filter((item) => item.available).length}/${queued.items.length} 可用`
+          : `Test completed: ${queued.items.filter((item) => item.available).length}/${queued.items.length} available.`);
+        return;
+      }
+    } else {
+      try {
+        await api('/api/provider-model-tests', 'POST', { action: 'clear', model_ids: ids });
+      } catch {
+        // Ignore reset failures and still try to start a fresh detection pass.
+      }
+      try {
+        await api('/api/provider-model-tests', 'POST', { model_ids: ids });
+      } catch {
+        const fallback = await api('/api/test-provider-models', 'POST', { model_ids: ids });
+        const items = Array.isArray(fallback.items) ? fallback.items : [];
+        items.forEach((item) => {
+          providerModelsRunningSet.delete(item.model);
+          providerModelStatuses[item.model] = item.available ? 'ok' : 'bad';
+          providerModelStatusMeta[item.model] = {
+            elapsed_ms: item.elapsed_ms,
+            retry_after_seconds: item.retry_after_seconds,
+            tested_at: item.tested_at,
+            status_code: item.status_code,
+            working_path: item.working_path,
+            failure_kind: item.failure_kind,
+            message: item.message,
+          };
+        });
+        await loadProviderModels(true);
+        showMessage(getLanguage() === 'zh'
+          ? `检测完成：${items.filter((item) => item.available).length}/${items.length} 可用`
+          : `Test completed: ${items.filter((item) => item.available).length}/${items.length} available.`);
+        return;
+      }
     }
 
     ids.forEach((id) => {
@@ -751,7 +800,9 @@ async function runProviderModelDetection(modelIds) {
 
 async function clearProviderModelTestResults() {
   try {
-    await api('/api/provider-model-tests', 'POST', { action: 'clear' });
+    const A = _providerAvail();
+    if (A) await A.clearModelTests();
+    else await api('/api/provider-model-tests', 'POST', { action: 'clear' });
     providerModelsRunningSet = new Set();
     providerModelStatuses = {};
     providerModelStatusMeta = {};
@@ -764,7 +815,9 @@ async function clearProviderModelTestResults() {
 
 async function stopProviderModelTests() {
   try {
-    await api('/api/provider-model-tests', 'POST', { action: 'stop' });
+    const A = _providerAvail();
+    if (A) await A.stopModelTests();
+    else await api('/api/provider-model-tests', 'POST', { action: 'stop' });
     providerModelsRunningSet = new Set();
     providerModelStatuses = {};
     providerModelStatusMeta = {};

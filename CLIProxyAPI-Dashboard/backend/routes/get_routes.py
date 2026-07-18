@@ -3,7 +3,7 @@ from backend.api_keys import list_api_keys
 from urllib.parse import parse_qs
 from backend.auth import list_auth_files, get_configured_provider_models, get_model_route_preview, get_configured_aggregate_models, get_aggregate_route_health, get_manual_provider_presets, filter_provider_models_by_runtime, annotate_provider_models_runtime, canonicalize_auth_ref, get_model_proxy_settings, _current_route_strategy, derive_global_aggregate_aliases, _read_auth_payload
 from backend.state import load_state, normalize_route_strategy, save_state
-from backend.processes import current_status, firewall_access_status, custom_firewall_status, normalize_firewall_ports, normalize_firewall_protocols, port_binding_status, ip_helper_status
+from backend.processes import current_status, firewall_access_status, custom_firewall_status, normalize_firewall_ports, normalize_firewall_protocols, port_binding_status, ip_helper_status, grok2api_port
 from backend.security import generate_security_report
 from backend.tools import get_tool_outputs, query_models, test_proxy, get_provider_model_test_state
 from backend.model_thinking import load_model_thinking_configs, collect_thinking_candidates, collect_all_configured_models
@@ -711,5 +711,40 @@ def handle_get(handler, parsed):
             send_json(handler, get_system_proxy_status())
         except Exception as e:
             send_json(handler, {'ok': False, 'message': str(e)}, status=500)
+        return True
+    if parsed.path == '/api/grok2api/system-proxy':
+        # Ask the running grok2api process what port *it* currently resolved.
+        # Do not reuse /api/system-proxy (OS setting); those can diverge.
+        try:
+            import json as _json
+            import urllib.error
+            import urllib.request
+
+            url = f'http://127.0.0.1:{grok2api_port()}/system-proxy'
+            req = urllib.request.Request(url, method='GET')
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                body = resp.read().decode('utf-8', errors='replace')
+            payload = _json.loads(body or '{}')
+            if not isinstance(payload, dict):
+                payload = {}
+            send_json(handler, {
+                'ok': True,
+                'source': 'grok2api-process',
+                'reachable': True,
+                'enabled': bool(payload.get('enabled')),
+                'port': int(payload.get('port') or 0) or None,
+                'proxy_url': str(payload.get('proxyURL') or payload.get('proxy_url') or ''),
+                'raw': payload,
+            })
+        except Exception as e:
+            send_json(handler, {
+                'ok': False,
+                'source': 'grok2api-process',
+                'reachable': False,
+                'enabled': False,
+                'port': None,
+                'proxy_url': '',
+                'message': f'无法读取 grok2api 实际系统代理端口: {e}',
+            })
         return True
     return False

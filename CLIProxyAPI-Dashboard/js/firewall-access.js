@@ -245,6 +245,7 @@ async function loadIpHelperStatus(force = false) {
   }
 }
 
+// IP Helper 启停（可能 UAC elevated）；控制台 ip-helper 按钮分发到此
 async function setIpHelperService(action, button) {
   const nextAction = String(action || '').toLowerCase();
   if (nextAction !== 'start' && nextAction !== 'stop' && nextAction !== 'restart') {
@@ -257,7 +258,7 @@ async function setIpHelperService(action, button) {
   const label = labelMap[nextAction];
   const run = async () => {
     try {
-      // Yellow working state goes through the same cache path as other control groups.
+      // 黄灯走与其它控制组相同的指示灯缓存
       if (typeof window.updateIndicator === 'function') {
         window.updateIndicator('ip-helper', 'yellow');
       }

@@ -3,25 +3,22 @@
    left: sessions · center: thread + composer · right: media options
    =============================================================== */
 
-/* Full-bleed when chat is active */
+/* 聊天页：在全局 full-bleed 上锁定整页高度，禁止外层滚动（内部自己滚） */
 .workspace:has(#section-chat.active-view) {
   overflow: hidden !important;
-  padding: 0 !important;
   height: 100vh !important;
 }
 .workspace:has(#section-chat.active-view) .content-grid {
-  padding: 0 !important;
-  max-width: none !important;
-  margin: 0 !important;
   height: 100% !important;
 }
 .workspace:has(#section-chat.active-view) #section-chat {
   height: 100% !important;
+  min-height: 0 !important;
   display: flex !important;
   flex-direction: column !important;
 }
 
-/* Shell */
+/* Shell：三栏应用占满主区域 */
 .chat-panel {
   display: flex;
   flex-direction: column;

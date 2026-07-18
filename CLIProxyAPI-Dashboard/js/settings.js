@@ -27,7 +27,8 @@ async function loadSettings() {
     const updateChannelEl = document.getElementById('setting-update-channel');
 
     if (autostartEl) autostartEl.checked = currentSettings.autostart || false;
-    if (minimizeTrayEl) minimizeTrayEl.checked = currentSettings.minimize_tray || false;
+    // Default on (matches desktop shell / backend defaults).
+    if (minimizeTrayEl) minimizeTrayEl.checked = currentSettings.minimize_tray !== false;
     if (languageEl) languageEl.value = currentSettings.language || 'zh';
     if (themeEl) themeEl.value = currentSettings.theme || 'light';
     if (autoUpdateCheckEl) autoUpdateCheckEl.checked = currentSettings.auto_update_check !== false;
@@ -204,6 +205,12 @@ async function saveSetting(key, value) {
       showMessage(res?.message || (savedValue
         ? (t('settings.msg.autostartOn', '已开启开机自启动') || '已开启开机自启动')
         : (t('settings.msg.autostartOff', '已关闭开机自启动') || '已关闭开机自启动')));
+    } else if (key === 'minimize_tray') {
+      const trayEl = document.getElementById('setting-minimize-tray');
+      if (trayEl) trayEl.checked = !!savedValue;
+      showMessage(savedValue
+        ? (t('settings.msg.minimizeTrayOn', '已开启：关闭窗口时最小化到托盘') || '已开启：关闭窗口时最小化到托盘')
+        : (t('settings.msg.minimizeTrayOff', '已关闭：关闭窗口时直接退出程序') || '已关闭：关闭窗口时直接退出程序'));
     } else {
       showMessage(res?.message || `Setting '${key}' saved successfully`);
     }
