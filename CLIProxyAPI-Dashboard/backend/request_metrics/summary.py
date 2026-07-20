@@ -1,10 +1,214 @@
 import ipaddress
 import json
+import re
 from collections import Counter, defaultdict
 
 from backend.auth import list_auth_files, get_configured_aggregate_models
 from backend.request_metrics.merge import _provider_lookup
 from backend.paths import STORAGE_DIR
+
+_HISTORICAL_PROVIDER = '历史残留'
+_MODEL_SLUG_RE = re.compile(r'[^a-z0-9]+')
+
+
+def _slug_model_id(value: str) -> str:
+    text = _MODEL_SLUG_RE.sub('-', str(value or '').strip().lower()).strip('-')
+    return text
+
+
+def _override_model_lookup() -> tuple[dict[str, str], dict[str, dict], set[str]]:
+    """Scan mapping overrides (including deleted) for historical provider attribution."""
+    by_call_id: dict[str, str] = {}
+    by_upstream: dict[str, dict] = {}
+    providers: set[str] = set()
+    try:
+        from backend.auth import _load_model_mapping_overrides
+        overrides = _load_model_mapping_overrides()
+    except Exception:
+        return by_call_id, by_upstream, providers
+
+    for provider, model_map in (overrides or {}).items():
+        provider_key = str(provider or '').strip().lower()
+        if not provider_key or not isinstance(model_map, dict):
+            continue
+        providers.add(provider_key)
+        for upstream_id, entry in model_map.items():
+            upstream = str(upstream_id or '').strip()
+            mappings = entry.get('mappings') if isinstance(entry, dict) else []
+            if not isinstance(mappings, list):
+                continue
+            for item in mappings:
+                if not isinstance(item, dict):
+                    continue
+                call_id = str(item.get('call_id') or '').strip()
+                target_provider = str(item.get('provider') or provider_key).strip().lower() or provider_key
+                target_upstream = str(item.get('upstream_id') or upstream).strip()
+                deleted = bool(item.get('deleted'))
+                row = {
+                    'source_provider': provider_key,
+                    'target_provider': target_provider,
+                    'upstream_id': target_upstream,
+                    'lookup_upstream_id': upstream or target_upstream,
+                    'call_id': call_id or target_upstream,
+                    'deleted': deleted,
+                }
+                providers.add(target_provider)
+                if call_id:
+                    by_call_id.setdefault(call_id, target_provider)
+                    by_upstream.setdefault(call_id, row)
+                for key in (target_upstream, upstream):
+                    if key:
+                        by_upstream.setdefault(key, row)
+                # Historical probes often used provider-slug call ids.
+                for raw in (call_id, target_upstream, upstream):
+                    slug = _slug_model_id(raw)
+                    if not slug:
+                        continue
+                    synthetic = f'{provider_key}-{slug}'
+                    by_call_id.setdefault(synthetic, target_provider)
+                    by_upstream.setdefault(synthetic, row)
+    return by_call_id, by_upstream, providers
+
+
+def _guess_provider_from_model_id(model_id: str, known_providers: set[str] | None = None) -> str:
+    value = str(model_id or '').strip().lower()
+    if not value or value in {'unknown', '-', '未识别'}:
+        return ''
+    providers = {str(item or '').strip().lower() for item in (known_providers or set()) if str(item or '').strip()}
+    # Prefer longer prefixes so "openrouter" wins over "open".
+    for provider in sorted(providers, key=len, reverse=True):
+        if value == provider or value.startswith(f'{provider}-') or value.startswith(f'{provider}/'):
+            return provider
+    return ''
+
+
+def resolve_model_stats_provider(model_id: str, provider_models: list[dict] | None = None) -> dict:
+    """Resolve provider metadata for a stats model id, including historical overrides."""
+    model_value = str(model_id or '').strip()
+    if not model_value:
+        return {
+            'provider': _HISTORICAL_PROVIDER,
+            'delete_provider': '',
+            'delete_upstream_id': '',
+            'actual_model': '',
+            'can_delete': False,
+            'is_historical': True,
+            'source': 'unknown',
+        }
+
+    by_call_id, by_upstream = _provider_lookup(provider_models or [])
+    ov_call, ov_up, ov_providers = _override_model_lookup()
+    known_providers = set(by_call_id.values()) | set(ov_providers)
+    for item in provider_models or []:
+        for key in ('provider', 'lookup_provider'):
+            value = str(item.get(key) or '').strip().lower()
+            if value:
+                known_providers.add(value)
+
+    row = by_upstream.get(model_value) or ov_up.get(model_value)
+    provider = str(by_call_id.get(model_value) or ov_call.get(model_value) or '').strip().lower()
+    if not provider and row:
+        provider = str(row.get('target_provider') or row.get('source_provider') or '').strip().lower()
+    if not provider:
+        provider = _guess_provider_from_model_id(model_value, known_providers)
+
+    deleted = bool((row or {}).get('deleted')) if row else False
+    active = bool(by_call_id.get(model_value) or (row and not deleted and model_value in by_upstream))
+    delete_provider = str((row or {}).get('source_provider') or provider or '').strip().lower()
+    delete_upstream_id = str(
+        (row or {}).get('lookup_upstream_id')
+        or (row or {}).get('upstream_id')
+        or ''
+    ).strip()
+    actual_model = delete_upstream_id
+    is_historical = (not active) or deleted or provider in {'', '-', 'unknown'}
+    if not provider:
+        provider = _HISTORICAL_PROVIDER
+        is_historical = True
+    if provider == 'unknown':
+        provider = _HISTORICAL_PROVIDER
+        is_historical = True
+
+    return {
+        'provider': provider,
+        'delete_provider': delete_provider if delete_provider not in {'', 'unknown', _HISTORICAL_PROVIDER} else '',
+        'delete_upstream_id': delete_upstream_id,
+        'actual_model': actual_model,
+        'can_delete': bool(delete_provider and delete_upstream_id and delete_provider not in {'unknown', _HISTORICAL_PROVIDER}),
+        'is_historical': is_historical,
+        'source': 'active' if active and not deleted else 'historical',
+    }
+
+
+def merge_cumulative_model_test_stats(
+    rows: list[dict],
+    cum_by_model: dict | None,
+    provider_models: list[dict] | None = None,
+) -> list[dict]:
+    """Overlay cumulative tokens and append historical-only models with provider attribution."""
+    result = [dict(row) for row in (rows or [])]
+    cum_by_model = cum_by_model or {}
+    for row in result:
+        model_id = str(row.get('model') or '').strip()
+        cum = cum_by_model.get(model_id) if model_id else None
+        if isinstance(cum, dict):
+            row['prompt_tokens'] = int(cum.get('prompt_tokens') or 0)
+            row['completion_tokens'] = int(cum.get('completion_tokens') or 0)
+            row['total_tokens'] = int(cum.get('total_tokens') or 0)
+            row['cumulative_request_count'] = int(cum.get('request_count') or 0)
+        meta = resolve_model_stats_provider(model_id, provider_models)
+        provider = str(row.get('provider') or '').strip()
+        if not provider or provider in {'-', 'unknown', '未识别'}:
+            row['provider'] = meta['provider']
+        if not row.get('delete_provider'):
+            row['delete_provider'] = meta['delete_provider']
+        if not row.get('delete_upstream_id'):
+            row['delete_upstream_id'] = meta['delete_upstream_id']
+        if not row.get('actual_model'):
+            row['actual_model'] = meta['actual_model']
+        if not row.get('can_delete'):
+            row['can_delete'] = meta['can_delete']
+        row['is_historical'] = bool(meta['is_historical']) if provider in {'', '-', 'unknown', '未识别', _HISTORICAL_PROVIDER} else False
+        row.setdefault('source', meta['source'])
+
+    seen_models = {str(row.get('model') or '').strip() for row in result if str(row.get('model') or '').strip()}
+    for model_id, cum in cum_by_model.items():
+        model_value = str(model_id or '').strip()
+        if not model_value or model_value in seen_models:
+            continue
+        if not isinstance(cum, dict) or not cum.get('request_count'):
+            continue
+        meta = resolve_model_stats_provider(model_value, provider_models)
+        result.append({
+            'model': model_value,
+            'provider': meta['provider'],
+            'delete_provider': meta['delete_provider'],
+            'delete_upstream_id': meta['delete_upstream_id'],
+            'actual_model': meta['actual_model'],
+            'can_delete': meta['can_delete'],
+            'is_historical': bool(meta['is_historical']),
+            'source': 'cumulative-only' if meta['is_historical'] else 'active-cumulative',
+            'total_tests': 0,
+            'success_count': 0,
+            'failure_count': 0,
+            'success_rate': 0,
+            'success_rate_percent': 0,
+            'last_log_at': 0,
+            'last_log_success': None,
+            'last_log_status_code': None,
+            'last_error_summary': '',
+            'available': None,
+            'tested_at': 0,
+            'test_status_code': None,
+            'test_message': '',
+            'working_path': '',
+            'failure_kind': '',
+            'prompt_tokens': int(cum.get('prompt_tokens') or 0),
+            'completion_tokens': int(cum.get('completion_tokens') or 0),
+            'total_tokens': int(cum.get('total_tokens') or 0),
+            'cumulative_request_count': int(cum.get('request_count') or 0),
+        })
+    return result
 
 
 def _safe_int(value, default=0) -> int:
@@ -332,15 +536,25 @@ def summarize_model_test_stats(events: list[dict], provider_models: list[dict], 
             provider = str(upstream_row.get('target_provider') or upstream_row.get('source_provider') or '').strip().lower()
         if not provider:
             provider = str(last_event.get('inferred_provider') or '').strip().lower()
-        if not provider:
-            continue
-        delete_provider = str((lookup_row or {}).get('source_provider') or provider or '').strip().lower()
+        resolved_meta = resolve_model_stats_provider(model_id, provider_models)
+        if not provider or provider in {'unknown', '-'}:
+            provider = str(resolved_meta.get('provider') or _HISTORICAL_PROVIDER)
+        is_historical = bool(resolved_meta.get('is_historical')) or provider == _HISTORICAL_PROVIDER
+        delete_provider = str(
+            (lookup_row or {}).get('source_provider')
+            or resolved_meta.get('delete_provider')
+            or provider
+            or ''
+        ).strip().lower()
+        if delete_provider in {'unknown', _HISTORICAL_PROVIDER, '-'}:
+            delete_provider = str(resolved_meta.get('delete_provider') or '').strip().lower()
         delete_upstream_id = str(
             (lookup_row or {}).get('lookup_upstream_id')
             or (lookup_row or {}).get('upstream_id')
+            or resolved_meta.get('delete_upstream_id')
             or ''
         ).strip()
-        actual_model = delete_upstream_id
+        actual_model = delete_upstream_id or str(resolved_meta.get('actual_model') or '')
         aggregate_members = aggregate_item.get('members') if isinstance(aggregate_item, dict) else []
         if aggregate_members:
             member_labels = []
@@ -421,7 +635,13 @@ def summarize_model_test_stats(events: list[dict], provider_models: list[dict], 
             'delete_provider': delete_provider,
             'delete_upstream_id': delete_upstream_id,
             'actual_model': actual_model,
-            'can_delete': bool(delete_provider and delete_upstream_id),
+            'can_delete': bool(
+                delete_provider
+                and delete_upstream_id
+                and delete_provider not in {'unknown', _HISTORICAL_PROVIDER, '-'}
+            ),
+            'is_historical': is_historical,
+            'source': 'historical' if is_historical else 'active',
             'total_tests': final_total,
             'success_count': final_success_count,
             'failure_count': final_failure_count,

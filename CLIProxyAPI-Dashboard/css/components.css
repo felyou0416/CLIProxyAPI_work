@@ -1123,6 +1123,19 @@ h1 {
   font-size: 12px;
   line-height: 1.4;
 }
+
+/* 全站页头减噪：kicker / 长说明默认隐藏，保留标题 + 动作 */
+.section-kicker,
+.panel > .tool-desc-zh,
+.panel-head > div > .tool-desc-zh,
+.panel-head .clients-subtitle,
+.token-quick-note {
+  display: none;
+}
+/* 工作台内状态摘要仍要显示（如聚合当前选择） */
+.aggregate-detail-card > .tool-desc-zh {
+  display: block;
+}
 @keyframes bubble-float {
   0%, 100% { translate: 0 0; }
   35% { translate: 3px -4px; }
@@ -1193,14 +1206,19 @@ pre,
 .tool-running { color: var(--ok); }
 @media (max-width: 980px) {
   body { overflow-x: hidden; overflow-y: auto; }
-  .app-shell { grid-template-columns: 1fr; height: auto; }
+  .app-shell { grid-template-columns: 1fr; height: auto; min-height: var(--app-height, 100vh); min-height: 100dvh; }
   /* 侧栏改为抽屉：布局细节见 layout.css，这里只保留壳层覆盖 */
   .workspace {
     height: auto;
     min-width: 0;
     overflow: visible;
     padding: 0; /* 与全局 full-bleed 一致，边距由 .panel 承担 */
-    padding-top: 52px;
+    /* 与 layout.css 一致：菜单钮 + 浏览器上下安全区 */
+    padding-top: calc(52px + var(--safe-top, 0px));
+    padding-bottom: var(--safe-bottom, 0px);
+    padding-left: var(--safe-left, 0px);
+    padding-right: var(--safe-right, 0px);
+    box-sizing: border-box;
   }
   .top-strip { display: grid; }
   .top-strip-items,
@@ -1313,6 +1331,9 @@ pre,
 .modal-overlay {
   position: fixed;
   inset: 0;
+  /* 避开浏览器上下栏 / 刘海，避免弹层贴边被裁 */
+  padding: max(12px, var(--safe-top, 0px)) max(12px, var(--safe-right, 0px)) max(12px, var(--safe-bottom, 0px)) max(12px, var(--safe-left, 0px));
+  box-sizing: border-box;
   background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;

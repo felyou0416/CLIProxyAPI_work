@@ -284,33 +284,153 @@ async function stopDashboardPanel(button) {
   return run();
 }
 
+const DASHBOARD_RESTART_WAIT_MS = 35000;
+const DASHBOARD_RESTART_POLL_MS = 700;
+const DASHBOARD_RESTART_PROBE_MS = 1000;
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForDashboardReady(timeoutMs = DASHBOARD_RESTART_WAIT_MS) {
+  // Bounded poll: hard deadline + per-probe abort so a hung TCP never freezes UI.
+  const started = Date.now();
+  const deadline = started + Math.max(3000, Number(timeoutMs) || DASHBOARD_RESTART_WAIT_MS);
+  let sawDown = false;
+  let attempts = 0;
+  const maxAttempts = Math.ceil((deadline - started) / DASHBOARD_RESTART_POLL_MS) + 2;
+
+  while (Date.now() < deadline && attempts < maxAttempts) {
+    attempts += 1;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), DASHBOARD_RESTART_PROBE_MS);
+      const res = await fetch(`/api/auth/check?_=${Date.now()}`, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      // Any HTTP answer means the panel is up (401/403 still count).
+      if (res && res.status > 0 && res.status < 500) {
+        if (sawDown || Date.now() - started > 1200) return true;
+      }
+    } catch {
+      sawDown = true;
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await sleepMs(Math.min(DASHBOARD_RESTART_POLL_MS, remaining));
+  }
+  return false;
+}
+
 async function restartDashboardPanel(button) {
+  // Client-side single-flight: ignore double-clicks while a restart is in flight.
+  if (window.dashboardRestartInFlight) {
+    if (typeof showMessage === 'function') {
+      showMessage(typeof getLanguage === 'function' && getLanguage() === 'en'
+        ? 'Dashboard restart already in progress.'
+        : '面板重启已在进行中。');
+    }
+    return null;
+  }
+
   const run = async () => {
     const logEl = document.getElementById('dashboard-script-log');
+    window.dashboardRestartInFlight = true;
+    window.dashboardActionBusy = true;
     if (typeof window.updateIndicator === 'function') {
       window.updateIndicator('dashboard', 'yellow');
     }
-    window.dashboardActionBusy = true;
     if (logEl) {
       setLogVisible(logEl, true);
       logEl.textContent = 'Restarting dashboard panel...';
     }
+
+    let finished = false;
+    const releaseClientGuards = () => {
+      if (finished) return;
+      finished = true;
+      window.dashboardRestartInFlight = false;
+      window.dashboardActionBusy = false;
+    };
+
+    // Absolute client-side safety net: never leave the UI stuck busy forever.
+    const hardTimeout = setTimeout(() => {
+      releaseClientGuards();
+      if (logEl && /Restarting|Waiting|restarting/i.test(String(logEl.textContent || ''))) {
+        logEl.textContent = 'Restart wait timed out on the client. If the panel is still down, run start_dashboard.ps1.';
+      }
+    }, DASHBOARD_RESTART_WAIT_MS + 5000);
+
     try {
       const result = await api('/api/dashboard/restart', 'POST', {});
-      showMessage(result.message || 'Dashboard panel is restarting...');
-      if (logEl) logEl.textContent = 'Dashboard panel is restarting. Reconnecting in 3 seconds...';
-      setTimeout(() => {
-        window.location.reload();
-      }, 3000);
-    } catch (err) {
-      if (logEl) logEl.textContent = 'Restart failed: ' + err.message;
-      showMessage(err.message || '重启面板失败。', true);
-      window.dashboardActionBusy = false;
-      if (typeof window.updateIndicator === 'function') {
-        window.updateIndicator('dashboard', 'green');
+      if (!result || result.ok === false) {
+        const msg = result?.message || (typeof getLanguage === 'function' && getLanguage() === 'en'
+          ? 'Dashboard restart was rejected.'
+          : '面板重启被拒绝。');
+        if (logEl) logEl.textContent = msg;
+        showMessage(msg, true);
+        releaseClientGuards();
+        if (typeof window.updateIndicator === 'function') {
+          window.updateIndicator('dashboard', 'green');
+        }
+        return;
       }
+
+      showMessage(result.message || 'Dashboard panel is restarting...');
+      if (logEl) logEl.textContent = 'Dashboard panel is restarting. Waiting for it to come back...';
+
+      // One bounded wait only — no nested retries that could loop forever.
+      const ready = await waitForDashboardReady(DASHBOARD_RESTART_WAIT_MS);
+      if (ready) {
+        if (logEl) logEl.textContent = 'Dashboard is back. Reloading...';
+        // Keep inFlight true until unload so a second click cannot fire mid-reload.
+        window.location.reload();
+        return;
+      }
+
+      if (logEl) {
+        logEl.textContent = 'Restart scheduled, but the panel did not answer in time. Check dashboard.relaunch.log or run start_dashboard.ps1.';
+      }
+      showMessage(
+        typeof getLanguage === 'function' && getLanguage() === 'en'
+          ? 'Restart was scheduled, but the panel did not recover in time. Check dashboard.relaunch.log.'
+          : '重启已调度，但面板未在时限内恢复。请查看 dashboard.relaunch.log。',
+        true,
+      );
+      releaseClientGuards();
+      if (typeof window.updateIndicator === 'function') {
+        window.updateIndicator('dashboard', 'red');
+      }
+    } catch (err) {
+      // After the server schedules exit, the socket often dies mid-response —
+      // treat network death as "restart likely underway", not a hard failure.
+      const msg = String(err?.message || err || '');
+      const likelyRestarting = /failed to fetch|networkerror|load failed|aborted|connection/i.test(msg);
+      if (likelyRestarting) {
+        if (logEl) logEl.textContent = 'Connection dropped (expected during restart). Waiting for panel...';
+        const ready = await waitForDashboardReady(DASHBOARD_RESTART_WAIT_MS);
+        if (ready) {
+          if (logEl) logEl.textContent = 'Dashboard is back. Reloading...';
+          window.location.reload();
+          return;
+        }
+      }
+      if (logEl) logEl.textContent = 'Restart failed: ' + msg;
+      showMessage(msg || (typeof getLanguage === 'function' && getLanguage() === 'en'
+        ? 'Failed to restart panel.'
+        : '重启面板失败。'), true);
+      releaseClientGuards();
+      if (typeof window.updateIndicator === 'function') {
+        window.updateIndicator('dashboard', likelyRestarting ? 'red' : 'green');
+      }
+    } finally {
+      clearTimeout(hardTimeout);
     }
   };
+
   if (button && typeof withRuntimeAction === 'function') {
     return withRuntimeAction(button, '重启', run);
   }

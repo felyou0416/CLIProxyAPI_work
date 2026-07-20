@@ -16,6 +16,9 @@ window.oauthActionBusy = false;
 window.dashboardActionBusy = false;
 window.openclawActionBusy = false;
 window.mediaProxyActionBusy = false;
+// create-grok 面板（:3780）busy 锁
+window['create-grokActionBusy'] = false;
+window['77chatActionBusy'] = false;
 // 前后端共用一把锁，避免并发改灯互相覆盖
 window.grok2apiActionBusy = false;
 
@@ -25,6 +28,8 @@ const INDICATOR_TYPES = [
   'proxy',
   'media-proxy',
   'openclaw',
+  'create-grok',
+  '77chat',
   'ip-helper',
   'dashboard',
   'oauth',
@@ -88,6 +93,8 @@ function indicatorBusyKey(type) {
   if (type === 'system-proxy' || type === 'grok2api-sys-proxy') {
     return 'systemProxyActionBusy';
   }
+  // create-grok 含连字符，直接用同名 busy key
+  if (type === 'create-grok') return 'create-grokActionBusy';
   return `${type}ActionBusy`;
 }
 
@@ -362,6 +369,15 @@ async function refreshStatus() {
     setRuntimeIndicator('tunnel', s.tunnel_running, window.tunnelActionBusy);
     setRuntimeIndicator('oauth', s.oauth_manager_running, window.oauthActionBusy);
     setRuntimeIndicator('openclaw', s.openclaw_running, window.openclawActionBusy);
+    setRuntimeIndicator('create-grok', s.create_grok_running, window['create-grokActionBusy']);
+    const createGrokTitle = document.getElementById('create-grok-title-link');
+    const createGrokUrl = s.create_grok_url || 'http://127.0.0.1:3780/';
+    if (createGrokTitle && createGrokTitle.href !== createGrokUrl) createGrokTitle.href = createGrokUrl;
+
+    setRuntimeIndicator('77chat', s.chat77_running, window['77chatActionBusy']);
+    const chat77Title = document.getElementById('chat77-title-link');
+    const chat77Url = s.chat77_url || 'http://127.0.0.1:90/';
+    if (chat77Title && chat77Title.href !== chat77Url) chat77Title.href = chat77Url;
     if (!window.dashboardActionBusy) {
       window.updateIndicator('dashboard', 'green', { persist: false });
     }

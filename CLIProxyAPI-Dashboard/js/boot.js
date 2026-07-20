@@ -1,4 +1,44 @@
+const AUTH_COOKIE_MAX_AGE = 30 * 24 * 3600;
+
+function syncAccessTokenCookie(token) {
+  const value = String(token || '').trim();
+  if (!value) {
+    document.cookie = 'access_token=; path=/; max-age=0; SameSite=Lax';
+    return false;
+  }
+  const hasCookie = document.cookie.split(';').some(item => item.trim().startsWith('access_token='));
+  // Always refresh cookie attributes for consistency (SameSite=Lax). No full-page reload.
+  document.cookie = `access_token=${value}; path=/; max-age=${AUTH_COOKIE_MAX_AGE}; SameSite=Lax`;
+  return !hasCookie;
+}
+
 async function boot() {
+  const token = localStorage.getItem('dashboard_auth_token') || '';
+  if (token) {
+    syncAccessTokenCookie(token);
+  }
+
+  // One optional hard reload only when the server version changes (cache bust).
+  // Never chain this with cookie sync reloads.
+  try {
+    const versionRes = await api('/api/version');
+    const serverVer = versionRes?.item?.version || '';
+    if (serverVer) {
+      const cachedVer = localStorage.getItem('dashboard_cached_version') || '';
+      localStorage.setItem('dashboard_cached_version', serverVer);
+      if (cachedVer && cachedVer !== serverVer) {
+        const reloadKey = `dashboard_version_reload:${serverVer}`;
+        if (!sessionStorage.getItem(reloadKey)) {
+          sessionStorage.setItem(reloadKey, '1');
+          window.location.reload();
+          return;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Version check failed:', err);
+  }
+
   applyTheme();
   applyLanguage();
   applySidebarCollapsed();
@@ -28,10 +68,10 @@ async function boot() {
     loadIndicatorStates();
   }
   await refreshStatus();
-  if (getActiveSection() === 'auths') {
+  if (getActiveSection() === 'auths' && typeof loadAuthFiles === 'function') {
     await loadAuthFiles();
   }
-  
+
   // Check for updates on startup if enabled
   try {
     const settings = await api('/api/settings');
@@ -42,14 +82,13 @@ async function boot() {
       }
     }
   } catch (err) {
-    console.error("Startup update check failed:", err);
+    console.error('Startup update check failed:', err);
   }
   // 账号页轮询：12s 足够，配合 refreshStatus 内“无变化不写 DOM”可明显减卡顿
   setInterval(refreshStatus, 12000);
   setInterval(() => {
-    // Only poll auth data when auth tab is visible
     const active = getActiveSection();
-    if (active === 'auths') {
+    if (active === 'auths' && typeof loadAuthFiles === 'function') {
       loadAuthFiles();
     }
   }, 15000);
@@ -117,9 +156,7 @@ async function submitLogin() {
     if (res && res.token) {
       setAuthToken(res.token);
       hideLoginScreen();
-      if (typeof boot === 'function') {
-        boot();
-      }
+      window.location.reload();
     }
   } catch (err) {
     if (errorEl) {

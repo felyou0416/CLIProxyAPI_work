@@ -24,7 +24,7 @@ def _load_settings():
         # Desktop shell default: close (X) hides to tray; Settings can turn this off.
         'minimize_tray': True,
         'language': 'zh',
-        'theme': 'light',
+        'theme': 'dark',
         'auto_update_check': True,
         'update_channel': 'stable',
     }

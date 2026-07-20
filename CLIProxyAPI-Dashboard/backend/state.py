@@ -102,6 +102,7 @@ def default_state():
         'ws_auth': False,
         'local_model': False,
         'commercial_mode': False,
+        'sensitive_auth_key': 'zR9#mX2$pQ7!yW5%vT1*nK8&sB6@hJ3(fG0',
     }
 
 

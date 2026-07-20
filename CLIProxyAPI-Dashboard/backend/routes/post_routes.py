@@ -2,7 +2,7 @@ from backend.auth import create_manual_auth_entry, create_manual_auth_bundle_ent
 from backend.model_thinking import save_model_thinking_configs
 from backend.api_keys import create_api_key, update_api_key, delete_api_key, reset_api_key_usage, reveal_api_key
 from backend.state import load_state, save_state, normalize_route_strategy
-from backend.processes import start_device_login, stop_device_login, start_proxy, stop_proxy, restart_proxy, start_project, start_oauth_manager, stop_oauth_manager, restart_oauth_manager, start_openclaw_gateway, stop_openclaw_gateway, restart_openclaw_gateway, start_media_proxy, stop_media_proxy, restart_media_proxy, start_grok2api, stop_grok2api, restart_grok2api, start_grok2api_backend, stop_grok2api_backend, restart_grok2api_backend, start_grok2api_frontend, stop_grok2api_frontend, restart_grok2api_frontend, current_status, ensure_firewall_access, ensure_custom_firewall_ports, remove_custom_firewall_ports, ensure_port_bindings, remove_port_bindings, set_ip_helper_service, stop_dashboard_panel, restart_dashboard_panel
+from backend.processes import start_device_login, stop_device_login, start_proxy, stop_proxy, restart_proxy, start_project, start_oauth_manager, stop_oauth_manager, restart_oauth_manager, start_openclaw_gateway, stop_openclaw_gateway, restart_openclaw_gateway, start_create_grok, stop_create_grok, restart_create_grok, start_chat77, stop_chat77, restart_chat77, start_media_proxy, stop_media_proxy, restart_media_proxy, start_grok2api, stop_grok2api, restart_grok2api, start_grok2api_backend, stop_grok2api_backend, restart_grok2api_backend, start_grok2api_frontend, stop_grok2api_frontend, restart_grok2api_frontend, current_status, ensure_firewall_access, ensure_custom_firewall_ports, remove_custom_firewall_ports, ensure_port_bindings, remove_port_bindings, set_ip_helper_service, stop_dashboard_panel, restart_dashboard_panel
 from backend.tools import run_tool, stop_tool, test_provider_models, test_image_models, test_auth_entry, queue_provider_model_tests, clear_provider_model_test_state, stop_provider_model_tests, run_storage_cleanup, _proxy_request
 from backend.terminals import open_terminal, open_desktop_terminal, close_terminal, list_terminals, write_terminal, resize_terminal
 from backend.routes.helpers import send_json
@@ -700,6 +700,28 @@ def handle_post(handler, parsed, data):
     if parsed.path == '/api/openclaw/stop':
         send_json(handler, stop_openclaw_gateway())
         return True
+    if parsed.path == '/api/create-grok/start':
+        result = start_create_grok()
+        send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/create-grok/restart':
+        result = restart_create_grok()
+        send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/create-grok/stop':
+        send_json(handler, stop_create_grok())
+        return True
+    if parsed.path == '/api/77chat/start':
+        result = start_chat77()
+        send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/77chat/restart':
+        result = restart_chat77()
+        send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/77chat/stop':
+        send_json(handler, stop_chat77())
+        return True
     if parsed.path == '/api/clear-cooldown':
         if not isinstance(data, dict):
             send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
@@ -1202,6 +1224,20 @@ def handle_post(handler, parsed, data):
                     return True
         result = set_access_password(str(new_password or ''))
         send_json(handler, result, status=200 if result.get('ok') else 500)
+        return True
+    if parsed.path == '/api/auth/sensitive/verify':
+        from backend.state import load_state
+        import hmac
+        state = load_state()
+        expected = state.get('sensitive_auth_key', '').strip()
+        key_input = (data or {}).get('key', '').strip() if isinstance(data, dict) else ''
+        if not expected:
+            send_json(handler, {'ok': True, 'message': 'No secondary key set.'})
+            return True
+        if key_input and hmac.compare_digest(key_input, expected):
+            send_json(handler, {'ok': True, 'message': 'Verification successful.'})
+        else:
+            send_json(handler, {'ok': False, 'message': 'Invalid secondary key.'}, status=403)
         return True
     if parsed.path == '/api/system-proxy/configure':
         try:

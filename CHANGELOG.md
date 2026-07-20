@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] - 2026-07-20
+### Added
+- create-grok control-station service (start/restart/stop) with status indicator on port 3780.
+- Historical model-stats provider attribution, including deleted mappings labeled as residual history.
+- Forced observability cache refresh that waits for in-flight rebuilds, then rescans logs once more.
+- Mobile safe-area insets and additional lite-shell polish for narrow viewports.
+
+### Fixed
+- Dashboard restart race: exit current process first, then detach relauncher with cooldown stamp.
+- Requests refresh button no longer returns stale cache during an active observability rebuild.
+- Boot double-reload loops; hard reload only when the server version changes.
+- Static asset serving and lazy-loading of heavy frontend assets to reduce first-paint lag.
+
+### Changed
+- Control-station config gains create-grok alongside OAuth/OpenClaw service cards.
+- Request metrics summary and model-stats panels surface historical-only models more clearly.
+
 ## [1.0.5] - 2026-07-18
 ### Added
 - Windows logon autostart via Startup folder `.cmd` launcher, wired from Settings.

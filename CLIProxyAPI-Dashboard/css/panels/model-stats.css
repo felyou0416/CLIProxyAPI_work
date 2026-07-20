@@ -94,3 +94,35 @@
   border-radius: 6px;
   font-size: 12px;
 }
+.model-stats-filters .provider-category-btn.is-historical {
+  opacity: 0.78;
+  border-style: dashed;
+}
+.model-stats-provider-group.is-historical {
+  border-style: dashed;
+  opacity: 0.96;
+}
+.model-stats-historical-hint {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  background: color-mix(in srgb, var(--panel-2) 70%, transparent);
+}
+.model-stats-table tr.is-historical {
+  opacity: 0.88;
+}
+.model-stats-historical-tag {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.model-stats-model > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.model-stats-model > div code {
+  min-width: 0;
+}

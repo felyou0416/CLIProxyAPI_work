@@ -26,6 +26,7 @@ from backend.paths import (
     ACCESS_GATEWAY_BINARY,
     DASHBOARD_ROOT,
     STORAGE_DIR,
+    RUNTIME_DIR,
     LOGS_DIR,
     MEDIA_PROXY_STDOUT,
     MEDIA_PROXY_STDERR,
@@ -58,6 +59,8 @@ processes = {
     'media_proxy': None,
     'oauth_manager': None,
     'openclaw': None,
+    'create_grok': None,
+    'chat77': None,
     'grok2api': None,
     'grok2api_frontend': None,
 }
@@ -73,6 +76,19 @@ OAUTH_MANAGER_LEGACY_PORT_FILE = OAUTH_MANAGER_DIR / 'dashboard_port.txt'
 OAUTH_MANAGER_STDOUT = OAUTH_MANAGER_DIR / 'logs' / 'dashboard.stdout.log'
 OAUTH_MANAGER_STDERR = OAUTH_MANAGER_DIR / 'logs' / 'dashboard.stderr.log'
 OAUTH_MANAGER_DEFAULT_PORT = 1900
+# Grok 批量注册面板（create-grok Web UI，默认 :3780）
+CREATE_GROK_DIR = Path(r'E:\U_App\FlowPilot浏览器插件，批量codex账号注册\create-grok')
+CREATE_GROK_SERVER = CREATE_GROK_DIR / 'server.js'
+CREATE_GROK_DEFAULT_PORT = 3780
+CREATE_GROK_STDOUT = LOGS_DIR / 'create-grok.stdout.log'
+CREATE_GROK_STDERR = LOGS_DIR / 'create-grok.stderr.log'
+
+# 77chat 面板（默认 :90）
+CHAT77_DIR = Path(r'E:\Cloud\77chat-90')
+CHAT77_SERVER = CHAT77_DIR / 'src' / 'server' / 'index.js'
+CHAT77_DEFAULT_PORT = 90
+CHAT77_STDOUT = LOGS_DIR / 'chat77.stdout.log'
+CHAT77_STDERR = LOGS_DIR / 'chat77.stderr.log'
 OPENCLAW_HOME = Path.home() / '.openclaw'
 OPENCLAW_GATEWAY_CMD = OPENCLAW_HOME / 'gateway.cmd'
 OPENCLAW_CMD = Path.home() / 'AppData' / 'Roaming' / 'npm' / 'openclaw.cmd'
@@ -228,37 +244,383 @@ def get_dashboard_bind_host():
     return (os.environ.get('CLIPROXYAPI_DASHBOARD_HOST', '127.0.0.1') or '127.0.0.1').strip() or '127.0.0.1'
 
 
+# Dashboard self-restart guards (process-local + on-disk).
+_DASHBOARD_LIFECYCLE_LOCK = threading.Lock()
+_DASHBOARD_EXIT_SCHEDULED = False
+_DASHBOARD_RESTART_SCHEDULED = False
+_DASHBOARD_RESTART_COOLDOWN_SECONDS = 20.0
+_DASHBOARD_RELAUNCH_WAIT_SECONDS = 30.0
+_DASHBOARD_RESTART_STAMP_FILE = None  # resolved lazily under RUNTIME_DIR
+
+
+def _dashboard_restart_stamp_path() -> Path:
+    global _DASHBOARD_RESTART_STAMP_FILE
+    if _DASHBOARD_RESTART_STAMP_FILE is None:
+        _DASHBOARD_RESTART_STAMP_FILE = Path(RUNTIME_DIR) / 'dashboard-restart.stamp'
+    return _DASHBOARD_RESTART_STAMP_FILE
+
+
+def _dashboard_relaunch_log_path() -> Path:
+    return Path(LOGS_DIR) / 'dashboard.relaunch.log'
+
+
+def _read_dashboard_restart_stamp() -> dict | None:
+    path = _dashboard_restart_stamp_path()
+    try:
+        if not path.exists():
+            return None
+        data = json.loads(path.read_text(encoding='utf-8'))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _write_dashboard_restart_stamp(payload: dict) -> None:
+    path = _dashboard_restart_stamp_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+    except Exception:
+        pass
+
+
+def _clear_dashboard_restart_stamp(token: str | None = None) -> None:
+    path = _dashboard_restart_stamp_path()
+    try:
+        if not path.exists():
+            return
+        if token:
+            current = _read_dashboard_restart_stamp() or {}
+            if str(current.get('token') or '') not in ('', str(token)):
+                return
+        path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _dashboard_restart_in_cooldown(now: float | None = None) -> dict | None:
+    """Return a reject payload if another restart was scheduled too recently."""
+    stamp = _read_dashboard_restart_stamp()
+    if not stamp:
+        return None
+    now = float(now if now is not None else time.time())
+    scheduled_at = float(stamp.get('scheduled_at') or 0.0)
+    if scheduled_at <= 0:
+        return None
+    age = now - scheduled_at
+    if age < 0:
+        # Clock skew / corrupt stamp — clear and allow.
+        _clear_dashboard_restart_stamp()
+        return None
+    if age >= _DASHBOARD_RESTART_COOLDOWN_SECONDS:
+        # Stale stamp from a previous attempt; do not block forever.
+        if age >= max(_DASHBOARD_RESTART_COOLDOWN_SECONDS * 3, 60.0):
+            _clear_dashboard_restart_stamp()
+        return None
+    remaining = max(1, int(_DASHBOARD_RESTART_COOLDOWN_SECONDS - age))
+    return {
+        'ok': False,
+        'message': f'Dashboard restart already in progress. Retry in ~{remaining}s.',
+        'cooldown_seconds': remaining,
+        'token': stamp.get('token'),
+    }
+
+
 def stop_dashboard_panel(delay_seconds: float = 0.5):
+    global _DASHBOARD_EXIT_SCHEDULED
+    with _DASHBOARD_LIFECYCLE_LOCK:
+        if _DASHBOARD_EXIT_SCHEDULED:
+            return {'ok': True, 'message': 'Dashboard panel stop already scheduled.'}
+        _DASHBOARD_EXIT_SCHEDULED = True
+
     def _stop_later():
-        time.sleep(delay_seconds)
+        time.sleep(max(0.15, float(delay_seconds or 0.5)))
         os._exit(0)
 
     threading.Thread(target=_stop_later, name='dashboard-stop', daemon=True).start()
     return {'ok': True, 'message': 'Dashboard panel is stopping.'}
 
 
-def restart_dashboard_panel(delay_seconds: float = 0.5):
-    def _restart_later():
-        time.sleep(delay_seconds)
-        ps_script = DASHBOARD_ROOT / 'start_dashboard.ps1'
-        if ps_script.exists():
-            subprocess.Popen(
-                ['powershell', '-ExecutionPolicy', 'Bypass', '-File', str(ps_script)],
-                cwd=str(DASHBOARD_ROOT),
-                creationflags=subprocess.CREATE_NEW_CONSOLE if is_windows() else 0
-            )
-        else:
-            bat_script = DASHBOARD_ROOT / 'start_dashboard.bat'
-            if bat_script.exists():
-                subprocess.Popen(
-                    [str(bat_script)],
-                    cwd=str(DASHBOARD_ROOT),
-                    creationflags=subprocess.CREATE_NEW_CONSOLE if is_windows() else 0
-                )
-        os._exit(0)
+def _dashboard_start_script() -> Path | None:
+    ps_script = DASHBOARD_ROOT / 'start_dashboard.ps1'
+    if ps_script.exists():
+        return ps_script
+    bat_script = DASHBOARD_ROOT / 'start_dashboard.bat'
+    if bat_script.exists():
+        return bat_script
+    return None
 
-    threading.Thread(target=_restart_later, name='dashboard-restart', daemon=True).start()
-    return {'ok': True, 'message': 'Dashboard panel is restarting.'}
+
+def _dashboard_relaunch_creationflags() -> int:
+    if not is_windows():
+        return 0
+    flags = 0
+    # Detach from the dying dashboard process tree so the relauncher survives os._exit.
+    flags |= int(getattr(subprocess, 'DETACHED_PROCESS', 0) or 0)
+    flags |= int(getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) or 0)
+    flags |= int(getattr(subprocess, 'CREATE_NO_WINDOW', 0) or 0)
+    return flags
+
+
+def _spawn_dashboard_relauncher(delay_seconds: float = 0.8, token: str = '') -> dict:
+    """Spawn a detached one-shot waiter that starts Dashboard after this process dies.
+
+    Guards:
+    - waits for the current PID to exit (hard deadline, no infinite loop)
+    - never force-starts while the old process is still alive (avoids the
+      start-script "already healthy → exit" short-circuit that leaves the panel dead)
+    - stamp token is one-shot; relauncher clears it and exits after a single attempt
+    """
+    script = _dashboard_start_script()
+    if script is None:
+        return {
+            'ok': False,
+            'message': f'Dashboard start script was not found under {DASHBOARD_ROOT}.',
+        }
+
+    port = get_dashboard_port()
+    pid = os.getpid()
+    root = str(DASHBOARD_ROOT)
+    settle_ms = int(max(0.2, float(delay_seconds or 0.8)) * 1000)
+    wait_budget = int(_DASHBOARD_RELAUNCH_WAIT_SECONDS)
+    log_dir = Path(LOGS_DIR)
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    relaunch_log = _dashboard_relaunch_log_path()
+    stamp_path = str(_dashboard_restart_stamp_path())
+    token = str(token or f'{pid}-{int(time.time())}')
+
+    if is_windows():
+        # One-shot waiter: poll PID with deadline, start only after death, clear stamp, exit.
+        ps = f"""
+$ErrorActionPreference = 'SilentlyContinue'
+$log = {json.dumps(str(relaunch_log))}
+$stamp = {json.dumps(stamp_path)}
+$token = {json.dumps(token)}
+$targetPid = {int(pid)}
+$port = {int(port)}
+function Write-RelaunchLog([string]$msg) {{
+  $line = "$((Get-Date).ToString('s')) [$token] $msg"
+  try {{ Add-Content -LiteralPath $log -Value $line -Encoding utf8 }} catch {{}}
+}}
+function Clear-RestartStamp {{
+  try {{
+    if (Test-Path -LiteralPath $stamp) {{
+      $raw = Get-Content -LiteralPath $stamp -Raw -ErrorAction SilentlyContinue
+      if (-not $raw -or $raw -match [regex]::Escape($token)) {{
+        Remove-Item -LiteralPath $stamp -Force -ErrorAction SilentlyContinue
+      }}
+    }}
+  }} catch {{}}
+}}
+function Test-PidAlive([int]$ProcessId) {{
+  try {{
+    $p = Get-Process -Id $ProcessId -ErrorAction Stop
+    return ($null -ne $p)
+  }} catch {{
+    return $false
+  }}
+}}
+Write-RelaunchLog "relauncher started; waiting for pid=$targetPid port=$port (max {wait_budget}s)"
+$deadline = (Get-Date).AddSeconds({wait_budget})
+$released = $false
+while ((Get-Date) -lt $deadline) {{
+  if (-not (Test-PidAlive $targetPid)) {{
+    $released = $true
+    break
+  }}
+  Start-Sleep -Milliseconds 250
+}}
+if (-not $released) {{
+  Write-RelaunchLog "timed out waiting for pid=$targetPid; aborting relaunch (no force-start while old process is alive)"
+  Clear-RestartStamp
+  exit 2
+}}
+Write-RelaunchLog "pid=$targetPid exited; settle {settle_ms}ms then start"
+Start-Sleep -Milliseconds {settle_ms}
+# If something else already revived the panel, do not start a second copy.
+try {{
+  $req = [System.Net.HttpWebRequest]::Create("http://127.0.0.1:$port/")
+  $req.Method = 'GET'
+  $req.Timeout = 800
+  $req.ReadWriteTimeout = 800
+  $req.Proxy = [System.Net.GlobalProxySelection]::GetEmptyWebProxy()
+  $req.KeepAlive = $false
+  try {{
+    $resp = $req.GetResponse()
+    $code = [int]$resp.StatusCode
+    $resp.Close()
+    if ($code -ge 200 -and $code -lt 500) {{
+      Write-RelaunchLog "port $port already healthy after exit; skip start"
+      Clear-RestartStamp
+      exit 0
+    }}
+  }} catch [System.Net.WebException] {{
+    $resp = $_.Exception.Response
+    if ($null -ne $resp) {{
+      $code = [int]$resp.StatusCode
+      $resp.Close()
+      if ($code -ge 200 -and $code -lt 500) {{
+        Write-RelaunchLog "port $port already answering ($code); skip start"
+        Clear-RestartStamp
+        exit 0
+      }}
+    }}
+  }}
+}} catch {{}}
+$script = {json.dumps(str(script))}
+$cwd = {json.dumps(root)}
+try {{
+  if ($script.ToLower().EndsWith('.ps1')) {{
+    $p = Start-Process -FilePath powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$script) -WorkingDirectory $cwd -WindowStyle Hidden -PassThru
+  }} else {{
+    $p = Start-Process -FilePath $script -WorkingDirectory $cwd -WindowStyle Hidden -PassThru
+  }}
+  Write-RelaunchLog "start script launched pid=$($p.Id)"
+  Clear-RestartStamp
+  exit 0
+}} catch {{
+  Write-RelaunchLog "failed to launch start script: $($_.Exception.Message)"
+  Clear-RestartStamp
+  exit 1
+}}
+""".strip()
+        encoded = base64.b64encode(ps.encode('utf-16le')).decode('ascii')
+        cmd = [
+            'powershell',
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-WindowStyle', 'Hidden',
+            '-EncodedCommand', encoded,
+        ]
+        popen_kwargs = {
+            'cwd': root,
+            'stdin': subprocess.DEVNULL,
+            'stdout': subprocess.DEVNULL,
+            'stderr': subprocess.DEVNULL,
+            'close_fds': True,
+            'creationflags': _dashboard_relaunch_creationflags(),
+        }
+    else:
+        shell = f"""
+set -eu
+log={json.dumps(str(relaunch_log))}
+stamp={json.dumps(stamp_path)}
+token={json.dumps(token)}
+pid={int(pid)}
+port={int(port)}
+log_line() {{ echo "$(date -Iseconds 2>/dev/null || date) [$token] $1" >>"$log" 2>/dev/null || true; }}
+clear_stamp() {{
+  if [ -f "$stamp" ]; then
+    if ! grep -q "$token" "$stamp" 2>/dev/null; then
+      return 0
+    fi
+    rm -f "$stamp" 2>/dev/null || true
+  fi
+}}
+log_line "relauncher started; waiting for pid=$pid port=$port (max {wait_budget}s)"
+deadline=$(( $(date +%s) + {wait_budget} ))
+released=0
+while kill -0 "$pid" 2>/dev/null; do
+  now=$(date +%s)
+  if [ "$now" -ge "$deadline" ]; then
+    log_line "timed out waiting for pid=$pid; aborting relaunch"
+    clear_stamp
+    exit 2
+  fi
+  sleep 0.25
+done
+released=1
+log_line "pid=$pid exited; settle then start"
+sleep {max(0.2, float(delay_seconds or 0.8))}
+if command -v curl >/dev/null 2>&1; then
+  if curl -fsS --max-time 1 "http://127.0.0.1:$port/" >/dev/null 2>&1; then
+    log_line "port $port already healthy after exit; skip start"
+    clear_stamp
+    exit 0
+  fi
+fi
+cd {json.dumps(root)}
+log_line "starting dashboard via {script.name}"
+if [ -f {json.dumps(str(script))} ]; then
+  nohup {json.dumps(str(script))} >/dev/null 2>&1 &
+fi
+clear_stamp
+exit 0
+"""
+        cmd = ['/bin/bash', '-lc', shell]
+        popen_kwargs = {
+            'cwd': root,
+            'stdin': subprocess.DEVNULL,
+            'stdout': subprocess.DEVNULL,
+            'stderr': subprocess.DEVNULL,
+            'close_fds': True,
+            'start_new_session': True,
+        }
+
+    try:
+        subprocess.Popen(cmd, **popen_kwargs)
+    except Exception as exc:
+        return {
+            'ok': False,
+            'message': f'Failed to schedule dashboard relaunch: {exc}',
+        }
+    return {
+        'ok': True,
+        'message': 'Dashboard panel is restarting.',
+        'relaunch_log': str(relaunch_log),
+        'port': port,
+        'pid': pid,
+        'token': token,
+    }
+
+
+def restart_dashboard_panel(delay_seconds: float = 0.5):
+    """Schedule a one-shot detached relaunch, then exit this process once.
+
+    Multi-layer guards against hang / restart storms:
+    1. process-local single-flight (no double exit / double relauncher)
+    2. on-disk cooldown stamp (cross-request debounce)
+    3. relauncher hard deadline + no force-start while old PID is alive
+    4. skip start if port already healthy after exit
+    """
+    global _DASHBOARD_EXIT_SCHEDULED, _DASHBOARD_RESTART_SCHEDULED
+
+    with _DASHBOARD_LIFECYCLE_LOCK:
+        if _DASHBOARD_RESTART_SCHEDULED or _DASHBOARD_EXIT_SCHEDULED:
+            return {
+                'ok': False,
+                'message': 'Dashboard restart/stop already scheduled in this process.',
+            }
+        blocked = _dashboard_restart_in_cooldown()
+        if blocked:
+            return blocked
+
+        token = f'{os.getpid()}-{time.time_ns()}'
+        settle = max(0.4, float(delay_seconds or 0.5))
+        scheduled = _spawn_dashboard_relauncher(delay_seconds=settle, token=token)
+        if not scheduled.get('ok'):
+            return scheduled
+
+        _write_dashboard_restart_stamp({
+            'token': token,
+            'pid': os.getpid(),
+            'port': scheduled.get('port') or get_dashboard_port(),
+            'scheduled_at': time.time(),
+            'relaunch_log': scheduled.get('relaunch_log'),
+        })
+        _DASHBOARD_RESTART_SCHEDULED = True
+        _DASHBOARD_EXIT_SCHEDULED = True
+
+        def _exit_later():
+            # Give the HTTP response a moment to flush, then hard-exit once.
+            time.sleep(max(0.15, min(settle, 2.0)))
+            os._exit(0)
+
+        threading.Thread(target=_exit_later, name='dashboard-restart-exit', daemon=True).start()
+        return scheduled
 
 
 
@@ -1519,6 +1881,273 @@ def restart_oauth_manager():
     return start_oauth_manager()
 
 
+def create_grok_port() -> int:
+    raw = str(os.environ.get('GROK_UI_PORT') or '').strip()
+    try:
+        port = int(raw) if raw else CREATE_GROK_DEFAULT_PORT
+    except Exception:
+        port = CREATE_GROK_DEFAULT_PORT
+    return port if port > 0 else CREATE_GROK_DEFAULT_PORT
+
+
+def _create_grok_url() -> str:
+    return f'http://127.0.0.1:{create_grok_port()}/'
+
+
+def _create_grok_health_ok() -> bool:
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(f'{_create_grok_url().rstrip("/")}/api/health', timeout=1.2) as resp:
+            if getattr(resp, 'status', 200) >= 400:
+                return False
+            body = resp.read(200).decode('utf-8', errors='ignore')
+            return '"ok"' in body or 'true' in body.lower()
+    except Exception:
+        return False
+
+
+def find_create_grok_pid():
+    tracked = processes.get('create_grok')
+    if process_alive(tracked):
+        return tracked.pid
+    return find_proxy_listener_pid(create_grok_port())
+
+
+def _create_grok_node_bin() -> str | None:
+    candidates = []
+    which_node = shutil.which('node')
+    if which_node:
+        candidates.append(which_node)
+    # 常见 Windows 安装路径兜底
+    candidates.extend([
+        str(Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'nodejs' / 'node.exe'),
+        str(Path(os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')) / 'nodejs' / 'node.exe'),
+        str(Path.home() / 'AppData' / 'Roaming' / 'nvm' / 'current' / 'node.exe'),
+    ])
+    seen = set()
+    for path in candidates:
+        key = str(path or '').strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if Path(path).exists():
+            return str(path)
+    return which_node
+
+
+def start_create_grok():
+    if not CREATE_GROK_DIR.exists():
+        return {'ok': False, 'message': f'create-grok 目录不存在: {CREATE_GROK_DIR}', 'url': _create_grok_url()}
+    if not CREATE_GROK_SERVER.exists():
+        return {'ok': False, 'message': f'server.js 不存在: {CREATE_GROK_SERVER}', 'url': _create_grok_url()}
+
+    with process_lock:
+        running_pid = None
+        tracked = processes.get('create_grok')
+        if process_alive(tracked):
+            running_pid = tracked.pid
+        if not running_pid:
+            running_pid = find_proxy_listener_pid(create_grok_port())
+        if running_pid:
+            return {
+                'ok': True,
+                'message': f'create-grok 已在运行：{_create_grok_url()}',
+                'pid': running_pid,
+                'url': _create_grok_url(),
+            }
+
+        node_bin = _create_grok_node_bin()
+        if not node_bin:
+            return {'ok': False, 'message': '未找到 node，请先安装 Node.js 并加入 PATH。', 'url': _create_grok_url()}
+
+        try:
+            LOGS_DIR.mkdir(parents=True, exist_ok=True)
+            command = [node_bin, str(CREATE_GROK_SERVER)]
+            env = os.environ.copy()
+            env['GROK_UI_HOST'] = env.get('GROK_UI_HOST') or '127.0.0.1'
+            env['GROK_UI_PORT'] = str(create_grok_port())
+            fout = open(CREATE_GROK_STDOUT, 'w', encoding='utf-8', errors='ignore')
+            ferr = open(CREATE_GROK_STDERR, 'w', encoding='utf-8', errors='ignore')
+            creationflags = 0
+            if is_windows():
+                creationflags = getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+            proc = subprocess.Popen(
+                command,
+                cwd=str(CREATE_GROK_DIR),
+                stdout=fout,
+                stderr=ferr,
+                stdin=subprocess.DEVNULL,
+                env=env,
+                creationflags=creationflags,
+                close_fds=False if is_windows() else True,
+            )
+            processes['create_grok'] = proc
+
+            ready = wait_for_listener(create_grok_port(), proc=proc, timeout_seconds=12.0)
+            if not ready and not process_alive(proc):
+                err_tail = ''
+                try:
+                    err_tail = CREATE_GROK_STDERR.read_text(encoding='utf-8', errors='ignore')[-500:]
+                except Exception:
+                    pass
+                processes['create_grok'] = None
+                message = 'create-grok 启动失败。'
+                if err_tail.strip():
+                    message = f'{message} {err_tail.strip()}'
+                return {'ok': False, 'message': message, 'command': command, 'url': _create_grok_url()}
+
+            ready_pid = find_proxy_listener_pid(create_grok_port()) or (proc.pid if process_alive(proc) else None)
+            return {
+                'ok': True,
+                'message': f'已启动 create-grok：{_create_grok_url()}',
+                'pid': ready_pid,
+                'command': command,
+                'url': _create_grok_url(),
+            }
+        except Exception as exc:
+            processes['create_grok'] = None
+            return {'ok': False, 'message': f'启动 create-grok 失败: {exc}', 'url': _create_grok_url()}
+
+
+def stop_create_grok():
+    stopped = False
+    with process_lock:
+        proc = processes.get('create_grok')
+        if process_alive(proc):
+            stopped = _kill_pid_tree(proc.pid) or kill_process(proc) or stopped
+            processes['create_grok'] = None
+
+    pid = find_proxy_listener_pid(create_grok_port())
+    if pid:
+        stopped = _kill_pid_tree(pid) or stopped
+
+    return {
+        'ok': True,
+        'message': '已停止 create-grok。' if stopped else 'create-grok 未在运行。',
+        'url': _create_grok_url(),
+    }
+
+
+def restart_create_grok():
+    stop_create_grok()
+    time.sleep(0.4)
+    return start_create_grok()
+
+
+def chat77_port() -> int:
+    return CHAT77_DEFAULT_PORT
+
+
+def _chat77_url() -> str:
+    return f'http://127.0.0.1:{chat77_port()}/'
+
+
+def find_chat77_pid():
+    tracked = processes.get('chat77')
+    if process_alive(tracked):
+        return tracked.pid
+    return find_proxy_listener_pid(chat77_port())
+
+
+def start_chat77():
+    if not CHAT77_DIR.exists():
+        return {'ok': False, 'message': f'77chat 目录不存在: {CHAT77_DIR}', 'url': _chat77_url()}
+    if not CHAT77_SERVER.exists():
+        return {'ok': False, 'message': f'src/server/index.js 不存在: {CHAT77_SERVER}', 'url': _chat77_url()}
+
+    with process_lock:
+        running_pid = None
+        tracked = processes.get('chat77')
+        if process_alive(tracked):
+            running_pid = tracked.pid
+        if not running_pid:
+            running_pid = find_proxy_listener_pid(chat77_port())
+        if running_pid:
+            return {
+                'ok': True,
+                'message': f'77chat 已在运行：{_chat77_url()}',
+                'pid': running_pid,
+                'url': _chat77_url(),
+            }
+
+        node_bin = _create_grok_node_bin()
+        if not node_bin:
+            return {'ok': False, 'message': '未找到 node，请先安装 Node.js 并加入 PATH。', 'url': _chat77_url()}
+
+        try:
+            LOGS_DIR.mkdir(parents=True, exist_ok=True)
+            command = [node_bin, str(CHAT77_SERVER)]
+            env = os.environ.copy()
+            env['PORT'] = str(chat77_port())
+            fout = open(CHAT77_STDOUT, 'w', encoding='utf-8', errors='ignore')
+            ferr = open(CHAT77_STDERR, 'w', encoding='utf-8', errors='ignore')
+            creationflags = 0
+            if is_windows():
+                creationflags = getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+            proc = subprocess.Popen(
+                command,
+                cwd=str(CHAT77_DIR),
+                stdout=fout,
+                stderr=ferr,
+                stdin=subprocess.DEVNULL,
+                env=env,
+                creationflags=creationflags,
+                close_fds=False if is_windows() else True,
+            )
+            processes['chat77'] = proc
+
+            ready = wait_for_listener(chat77_port(), proc=proc, timeout_seconds=12.0)
+            if not ready and not process_alive(proc):
+                err_tail = ''
+                try:
+                    err_tail = CHAT77_STDERR.read_text(encoding='utf-8', errors='ignore')[-500:]
+                except Exception:
+                    pass
+                processes['chat77'] = None
+                message = '77chat 启动失败。'
+                if err_tail.strip():
+                    message = f'{message} {err_tail.strip()}'
+                return {'ok': False, 'message': message, 'command': command, 'url': _chat77_url()}
+
+            ready_pid = find_proxy_listener_pid(chat77_port()) or (proc.pid if process_alive(proc) else None)
+            return {
+                'ok': True,
+                'message': f'已启动 77chat：{_chat77_url()}',
+                'pid': ready_pid,
+                'command': command,
+                'url': _chat77_url(),
+            }
+        except Exception as exc:
+            processes['chat77'] = None
+            return {'ok': False, 'message': f'启动 77chat 失败: {exc}', 'url': _chat77_url()}
+
+
+def stop_chat77():
+    stopped = False
+    with process_lock:
+        proc = processes.get('chat77')
+        if process_alive(proc):
+            stopped = _kill_pid_tree(proc.pid) or kill_process(proc) or stopped
+            processes['chat77'] = None
+
+    pid = find_proxy_listener_pid(chat77_port())
+    if pid:
+        stopped = _kill_pid_tree(pid) or stopped
+
+    return {
+        'ok': True,
+        'message': '已停止 77chat。' if stopped else '77chat 未在运行。',
+        'url': _chat77_url(),
+    }
+
+
+def restart_chat77():
+    stop_chat77()
+    time.sleep(0.4)
+    return start_chat77()
+
+
 def read_tail(path, max_chars: int = 6000):
     if not path.exists():
         return ''
@@ -2136,10 +2765,16 @@ def current_status(include_logs: bool = True):
     tracked_oauth_manager_running = process_alive(processes.get('oauth_manager'))
     tracked_openclaw_proc = processes.get('openclaw')
     tracked_openclaw_running = process_alive(tracked_openclaw_proc)
+    tracked_create_grok_running = process_alive(processes.get('create_grok'))
+    tracked_chat77_running = process_alive(processes.get('chat77'))
     oauth_manager_pid = find_oauth_manager_pid()
     oauth_manager_running = bool(tracked_oauth_manager_running or oauth_manager_pid)
     openclaw_pid = tracked_openclaw_proc.pid if tracked_openclaw_running else find_openclaw_gateway_pid()
     openclaw_running = bool(tracked_openclaw_running or openclaw_pid)
+    create_grok_pid = processes.get('create_grok').pid if tracked_create_grok_running else find_proxy_listener_pid(create_grok_port())
+    create_grok_running = bool(tracked_create_grok_running or create_grok_pid)
+    chat77_pid = processes.get('chat77').pid if tracked_chat77_running else find_proxy_listener_pid(chat77_port())
+    chat77_running = bool(tracked_chat77_running or chat77_pid)
     listener_pid = find_proxy_listener_pid()
     media_proxy_pid = processes.get('media_proxy').pid if tracked_media_proxy_running else find_proxy_listener_pid(media_proxy_port())
     grok2api_pid = processes.get('grok2api').pid if tracked_grok2api_running else find_proxy_listener_pid(grok2api_port())
@@ -2221,6 +2856,14 @@ def current_status(include_logs: bool = True):
         'oauth_manager_url': _oauth_manager_url(),
         'openclaw_running': openclaw_running,
         'openclaw_pid': openclaw_pid,
+        'create_grok_running': create_grok_running,
+        'create_grok_pid': create_grok_pid,
+        'create_grok_url': _create_grok_url(),
+        'create_grok_root': str(CREATE_GROK_DIR),
+        'chat77_running': chat77_running,
+        'chat77_pid': chat77_pid,
+        'chat77_url': _chat77_url(),
+        'chat77_root': str(CHAT77_DIR),
         'auth_files_count': len(auth_files),
         'tunnel_running': is_cloudflared_running(),
         'dashboard_root': str(DASHBOARD_ROOT),

@@ -2,6 +2,8 @@ let modelsPanelLoaded = false;
 let modelStatsPanelLoaded = false;
 let modelStatsItems = [];
 let modelStatsActiveProvider = '';
+const MODEL_STATS_HISTORICAL_PROVIDER = '历史残留';
+const MODEL_STATS_UNRESOLVED = new Set(['', '-', 'unknown', '未识别', MODEL_STATS_HISTORICAL_PROVIDER]);
 
 function modelStatsEscape(value) {
   return String(value ?? '')
@@ -10,6 +12,18 @@ function modelStatsEscape(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+function modelStatsProviderLabel(item) {
+  const raw = String(item?.provider || '').trim();
+  if (!raw || MODEL_STATS_UNRESOLVED.has(raw)) return MODEL_STATS_HISTORICAL_PROVIDER;
+  return raw;
+}
+
+function modelStatsIsHistorical(item) {
+  if (item?.is_historical === true) return true;
+  if (String(item?.source || '') === 'cumulative-only') return true;
+  return MODEL_STATS_UNRESOLVED.has(String(item?.provider || '').trim());
 }
 
 function formatModelStatsTime(timestamp) {
@@ -44,7 +58,8 @@ function modelStatsTokenTitle(item) {
 
 function modelStatsRowHtml(item) {
   const rate = Number(item.success_rate_percent || 0);
-  const provider = item.provider || '-';
+  const provider = modelStatsProviderLabel(item);
+  const historical = modelStatsIsHistorical(item);
   const canDelete = Boolean(item.can_delete && item.delete_provider && item.delete_upstream_id);
   const deleteAttrs = canDelete
     ? `data-provider="${modelStatsEscape(item.delete_provider)}" data-upstream="${modelStatsEscape(item.delete_upstream_id)}" data-model="${modelStatsEscape(item.model || '')}"`
@@ -53,11 +68,14 @@ function modelStatsRowHtml(item) {
   const ct = modelStatsFormatTokens(item.completion_tokens);
   const tt = modelStatsFormatTokens(item.total_tokens);
   const tokenTitle = modelStatsTokenTitle(item);
+  const note = historical
+    ? `历史请求残留 · 累计 ${Number(item.cumulative_request_count || 0)} 次`
+    : `实际: ${item.actual_model || item.delete_upstream_id || '-'}`;
   return `
-    <tr>
+    <tr class="${historical ? 'is-historical' : ''}">
       <td class="model-stats-model">
-        <div><code>${modelStatsEscape(item.model || '-')}</code></div>
-        <div class="metric-note"><small>实际: ${modelStatsEscape(item.actual_model || item.delete_upstream_id || '-')}</small></div>
+        <div><code>${modelStatsEscape(item.model || '-')}</code>${historical ? '<span class="pill off model-stats-historical-tag">历史</span>' : ''}</div>
+        <div class="metric-note"><small>${modelStatsEscape(note)}</small></div>
       </td>
       <td>${modelStatsEscape(provider)}</td>
       <td class="metric-number" title="${tokenTitle}">${pt}</td>
@@ -78,20 +96,25 @@ function modelStatsRowHtml(item) {
 function modelStatsProviderCounts(items) {
   const counts = new Map();
   for (const item of items) {
-    const provider = String(item.provider || '未识别').trim() || '未识别';
+    const provider = modelStatsProviderLabel(item);
     counts.set(provider, (counts.get(provider) || 0) + 1);
   }
-  return Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  return Array.from(counts.entries()).sort((a, b) => {
+    if (a[0] === MODEL_STATS_HISTORICAL_PROVIDER) return 1;
+    if (b[0] === MODEL_STATS_HISTORICAL_PROVIDER) return -1;
+    return a[0].localeCompare(b[0]);
+  });
 }
 
 function renderModelStatsFilters(items) {
   const wrap = document.getElementById('model-test-stats-filters');
   if (!wrap) return;
   const counts = modelStatsProviderCounts(items);
+  const preferred = counts.find(([provider]) => provider !== MODEL_STATS_HISTORICAL_PROVIDER)?.[0] || counts[0]?.[0] || '';
   const providerExists = counts.some(([provider]) => provider === modelStatsActiveProvider);
-  if (!providerExists) modelStatsActiveProvider = counts[0]?.[0] || '';
+  if (!providerExists) modelStatsActiveProvider = preferred;
   const buttonHtml = counts.map(([provider, count]) => (
-    `<button class="provider-category-btn ${modelStatsActiveProvider === provider ? 'is-active' : ''}" type="button" data-provider="${modelStatsEscape(provider)}">${modelStatsEscape(provider)}<span>${count}</span></button>`
+    `<button class="provider-category-btn ${modelStatsActiveProvider === provider ? 'is-active' : ''} ${provider === MODEL_STATS_HISTORICAL_PROVIDER ? 'is-historical' : ''}" type="button" data-provider="${modelStatsEscape(provider)}">${modelStatsEscape(provider)}<span>${count}</span></button>`
   )).join('');
   wrap.innerHTML = buttonHtml;
   wrap.querySelectorAll('button[data-provider]').forEach((button) => {
@@ -103,20 +126,23 @@ function renderModelStatsFilters(items) {
 }
 
 function groupedModelStatsHtml(items) {
-  const visibleItems = items.filter((item) => (String(item.provider || '未识别').trim() || '未识别') === modelStatsActiveProvider);
+  const visibleItems = items.filter((item) => modelStatsProviderLabel(item) === modelStatsActiveProvider);
   const groups = new Map();
   for (const item of visibleItems) {
-    const provider = String(item.provider || '未识别').trim() || '未识别';
+    const provider = modelStatsProviderLabel(item);
     if (!groups.has(provider)) groups.set(provider, []);
     groups.get(provider).push(item);
   }
   if (!visibleItems.length) return '<div class="metric-empty">当前 Provider 暂无模型测试统计</div>';
-  return Array.from(groups.entries()).map(([provider, rows]) => `
-    <section class="model-stats-provider-group">
+  return Array.from(groups.entries()).map(([provider, rows]) => {
+    const historical = provider === MODEL_STATS_HISTORICAL_PROVIDER;
+    return `
+    <section class="model-stats-provider-group ${historical ? 'is-historical' : ''}">
       <div class="model-stats-provider-head">
         <strong>${modelStatsEscape(provider)}</strong>
-        <span class="auth-chip">${rows.length} 个</span>
+        <span class="auth-chip">${rows.length} 个${historical ? ' · 历史请求残留' : ''}</span>
       </div>
+      ${historical ? '<div class="model-stats-historical-hint">这些名字来自历史请求累计，当前 Provider/映射页未必还配置。仅作统计参考，不代表当前可调用。</div>' : ''}
       <div class="metric-table-wrap metric-table-wrap-compact">
         <table class="metric-table model-stats-table">
           <thead>
@@ -138,7 +164,8 @@ function groupedModelStatsHtml(items) {
         </table>
       </div>
     </section>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function bindModelStatsDeleteButtons(wrap) {
@@ -192,7 +219,9 @@ async function loadModelStatsPanel(force = false) {
     modelStatsItems = items;
     if (meta) {
       const refreshed = data.refreshed_at ? new Date(Number(data.refreshed_at) * 1000).toLocaleTimeString() : '-';
-      meta.textContent = `${items.length} 个模型 · 累计 Token · 最近 ${data.limit || 500} 条可用性 · ${refreshed}`;
+      const historicalCount = items.filter((item) => modelStatsIsHistorical(item)).length;
+      const activeCount = items.length - historicalCount;
+      meta.textContent = `${activeCount} 当前 · ${historicalCount} 历史残留 · 累计 Token · 最近 ${data.limit || 500} 条可用性 · ${refreshed}`;
     }
     renderModelStatsPanel();
     modelStatsPanelLoaded = true;

@@ -1,16 +1,14 @@
 <section id="section-virtual-keys" class="panel panel-scroll section-view" hidden>
   <div class="panel-head">
     <div>
-      <div class="section-kicker">密钥分发</div>
       <h2 class="section-title">虚拟 API Key 管理</h2>
     </div>
-    <div class="action-row">
+    <div class="action-row toolbar-scroll">
       <span id="virtual-keys-meta" class="metric-note"></span>
-      <button class="primary" type="button" onclick="showCreateVirtualKeyModal()">🔑 创建新密钥</button>
+      <button class="primary" type="button" onclick="showCreateVirtualKeyModal()">创建密钥</button>
       <button class="secondary" type="button" onclick="loadVirtualKeysPanel(true)">刷新</button>
     </div>
   </div>
-  <div class="tool-desc-zh">创建虚拟 API Key 分发给其他用户。每个 Key 可独立设定额度上限、速率限制和模型访问权限。</div>
 
   <div id="virtual-keys-list" class="vk-list"></div>
 

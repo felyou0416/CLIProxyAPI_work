@@ -22,16 +22,28 @@ _PUBLIC_PATHS = {
 }
 
 
+# Static UI assets stay public so the shell can boot without 401 thrash / half-loaded scripts.
+# API routes remain protected by auth_required() + token checks below.
+_PUBLIC_STATIC_PREFIXES = (
+    '/js/',
+    '/css/',
+    '/sections/',
+    '/generated/',
+)
+
+_PUBLIC_STATIC_FILES = {
+    '/',
+    '/index.html',
+    '/dashboard.css',
+}
+
+
 def _is_public_path(path: str) -> bool:
     if path in _PUBLIC_PATHS:
         return True
-    if path in ('/', '/index.html', '/dashboard.css'):
+    if path in _PUBLIC_STATIC_FILES:
         return True
-    if path.startswith('/js/') or path.startswith('/css/') or path.startswith('/sections/'):
-        return True
-    if path.startswith('/generated/images/'):
-        return True
-    return False
+    return any(path.startswith(prefix) for prefix in _PUBLIC_STATIC_PREFIXES)
 
 
 def _check_auth(handler, parsed) -> bool:
@@ -77,6 +89,59 @@ def _read_request_data(handler):
         return _flatten_form_data(raw)
 
 
+_SENSITIVE_PATHS = {
+    # Terminals
+    '/api/terminals',
+    '/api/terminals/open',
+    '/api/terminals/open-desktop',
+    '/api/terminals/close',
+    '/api/terminals/input',
+    '/api/terminals/resize',
+    '/api/terminals/output',
+
+    # Port Bindings & Firewall
+    '/api/port-bindings',
+    '/api/port-bindings/enable',
+    '/api/port-bindings/remove',
+    '/api/ip-helper',
+    '/api/firewall-access',
+    '/api/firewall-access/allow',
+    '/api/firewall-access/remove',
+
+    # Network access
+    '/api/network-access',
+    '/api/network-access/firewall/allow',
+}
+
+
+def _check_sensitive_auth(handler, parsed) -> bool:
+    if parsed.path not in _SENSITIVE_PATHS:
+        return True
+    from backend.state import load_state
+    import hmac
+    state = load_state()
+    expected_key = state.get('sensitive_auth_key', '').strip()
+    if not expected_key:
+        return True
+    
+    # Extract client key from header
+    client_key = handler.headers.get('X-Sensitive-Auth-Key', '').strip()
+    if not client_key:
+        # Check query param fallback
+        params = parse_qs(parsed.query)
+        client_key = (params.get('sensitive_key') or [''])[0].strip()
+
+    if client_key and hmac.compare_digest(client_key, expected_key):
+        return True
+
+    send_json(handler, {
+        'ok': False,
+        'message': 'Sensitive operation authorization required',
+        'sensitive_auth_required': True
+    }, status=403)
+    return False
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
@@ -85,6 +150,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if not _check_auth(self, parsed):
             return
+        if not _check_sensitive_auth(self, parsed):
+            return
         if handle_get(self, parsed):
             return
         send_json(self, {'ok': False, 'message': 'Not found'}, status=404)
@@ -92,6 +159,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         if not _check_auth(self, parsed):
+            return
+        if not _check_sensitive_auth(self, parsed):
             return
         try:
             data = _read_request_data(self)

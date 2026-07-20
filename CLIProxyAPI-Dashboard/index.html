@@ -2,23 +2,22 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>CLIProxyAPI Codex Dashboard</title>
-  <link rel="stylesheet" href="/dashboard.css?v=20260718-chat-drawer-fix" />
+  <link rel="stylesheet" href="/dashboard.css?v=20260720-safe-area" />
   <link rel="stylesheet" href="/css/atom-one-dark.min.css" />
-  <link rel="stylesheet" href="/css/xterm.min.css" />
 </head>
 <body>
-<div class="app-shell">
+<div class="app-shell sidebar-is-collapsed">
   <button class="mobile-nav-toggle" id="mobile-nav-toggle" type="button" onclick="toggleMobileNav()" aria-expanded="false" aria-controls="app-sidebar" title="打开导航">
     <span class="mobile-nav-toggle-bars" aria-hidden="true"></span>
     <span class="mobile-nav-toggle-label">菜单</span>
   </button>
   <div class="mobile-nav-scrim" id="mobile-nav-scrim" onclick="closeMobileNav()" hidden></div>
 
-  <aside class="sidebar" id="app-sidebar">
+  <aside class="sidebar sidebar-collapsed" id="app-sidebar">
     <div class="sidebar-block brand-block">
-      <button class="sidebar-collapse-toggle" id="sidebar-collapse-toggle" type="button" onclick="toggleSidebarCollapsed()" aria-expanded="true" title="折叠侧栏">
+      <button class="sidebar-collapse-toggle" id="sidebar-collapse-toggle" type="button" onclick="toggleSidebarCollapsed()" aria-expanded="false" title="展开侧栏">
         <div class="app-icon-squircle">
           <svg class="app-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="4 17 10 11 4 5" />
@@ -47,7 +46,6 @@
             <button class="nav-pill top-nav-btn" id="tab-chat" data-group="runtime" onclick="showSection('chat')"><span data-i18n="nav.chat">聊天</span></button>
             <button class="nav-pill top-nav-btn" id="tab-requests" data-group="runtime" onclick="showSection('requests')"><span data-i18n="nav.requests">请求</span></button>
             <button class="nav-pill top-nav-btn" id="tab-token-usage" data-group="runtime" onclick="showSection('token-usage')"><span data-i18n="nav.tokenUsage">Token 用量</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-model-stats" data-group="runtime" onclick="showSection('model-stats')"><span data-i18n="nav.modelStats">模型统计</span></button>
             <button class="nav-pill top-nav-btn" id="tab-clients" data-group="runtime" onclick="showSection('clients')"><span data-i18n="nav.clients">客户端</span></button>
             <button class="nav-pill top-nav-btn" id="tab-settings" data-group="runtime" onclick="showSection('settings')"><span data-i18n="nav.settings">设置</span></button>
           </div></div>
@@ -63,7 +61,6 @@
             <button class="nav-pill top-nav-btn" id="tab-providers" data-group="config" onclick="showSection('providers')"><span data-i18n="nav.providers">提供方</span></button>
             <button class="nav-pill top-nav-btn" id="tab-media-models" data-group="config" onclick="showSection('media-models')"><span>图像/视频</span></button>
             <button class="nav-pill top-nav-btn" id="tab-aggregates" data-group="config" onclick="showSection('aggregates')"><span data-i18n="nav.aggregates">聚合</span></button>
-            <button class="nav-pill top-nav-btn" id="tab-model-thinking" data-group="config" onclick="showSection('model-thinking')"><span>Thinking</span></button>
             <button class="nav-pill top-nav-btn" id="tab-model-map" data-group="config" onclick="showSection('model-map')"><span data-i18n="nav.modelMap">映射</span></button>
             <button class="nav-pill top-nav-btn" id="tab-api-key-intake" data-group="config" onclick="showSection('api-key-intake')"><span>API Key</span></button>
             <button class="nav-pill top-nav-btn" id="tab-auths" data-group="config" onclick="showSection('auths')"><span data-i18n="nav.auths">OAuth</span></button>
@@ -78,10 +75,10 @@
           </button>
           <div class="nav-group-items-wrap"><div class="nav-group-items">
             <button class="nav-pill top-nav-btn" id="tab-virtual-keys" data-group="access" onclick="showSection('virtual-keys')"><span data-i18n="nav.virtualKeys">密钥管理</span></button>
-            <button class="nav-pill top-nav-btn nav-hidden" id="tab-firewall-access" data-group="system" onclick="showSection('firewall-access')"><span data-i18n="nav.firewallAccess">端口放行</span></button>
-            <button class="nav-pill top-nav-btn nav-hidden" id="tab-terminals" data-group="system" onclick="showSection('terminals')"><span data-i18n="nav.terminals">终端</span></button>
-            <button class="nav-pill top-nav-btn nav-hidden" id="tab-tools" data-group="system" onclick="showSection('tools')"><span data-i18n="nav.tools">工具</span></button>
-            <button class="nav-pill top-nav-btn nav-hidden" id="tab-doc" data-group="system" onclick="showSection('doc')"><span data-i18n="nav.doc">文档</span></button>
+            <button class="nav-pill nav-hidden" id="tab-firewall-access" data-group="system" onclick="showSection('firewall-access')"><span data-i18n="nav.firewallAccess">端口放行</span></button>
+            <button class="nav-pill nav-hidden" id="tab-terminals" data-group="system" onclick="showSection('terminals')"><span data-i18n="nav.terminals">终端</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-tools" data-group="access" onclick="showSection('tools')"><span data-i18n="nav.tools">工具</span></button>
+            <button class="nav-pill top-nav-btn" id="tab-doc" data-group="access" onclick="showSection('doc')"><span data-i18n="nav.doc">文档</span></button>
           </div></div>
         </div>
 
@@ -93,6 +90,8 @@
           </button>
           <div class="nav-group-items-wrap"><div class="nav-group-items">
             <button class="nav-pill top-nav-btn" id="tab-system" data-group="system" onclick="showSection('system')"><span data-i18n="nav.systemCenter">系统中心</span></button>
+            <button class="nav-pill nav-hidden" id="tab-model-stats" data-group="system" onclick="showSection('model-stats')"><span data-i18n="nav.modelStats">模型统计</span></button>
+            <button class="nav-pill nav-hidden" id="tab-model-thinking" data-group="system" onclick="showSection('model-thinking')"><span>Thinking</span></button>
           </div></div>
         </div>
 
@@ -100,7 +99,8 @@
     </div>
 
     <div class="sidebar-block sidebar-controls">
-      <button class="nav-btn secondary theme-btn" id="theme-toggle" onclick="toggleTheme()">主题：浅色</button>
+      <button class="nav-btn secondary theme-btn" id="theme-toggle" onclick="toggleTheme()">主题：暗色</button>
+      <button class="nav-btn secondary theme-btn" id="lang-toggle" onclick="toggleLanguage()" style="display: none;">Language</button>
     </div>
   </aside>
 
@@ -114,20 +114,19 @@
 </div>
 
 <script src="/js/i18n.js?v=20260718-grok2api-labels"></script>
-<script src="/js/core.js?v=20260718-nav-slim"></script>
+<script src="/js/core.js?v=20260720-lazy-assets"></script>
 <script src="/js/availability.js?v=20260718-model-cache-authority"></script>
-<script src="/js/status.js?v=20260718-refresh-cheap"></script>
-<script src="/js/control-station-config.js?v=20260718-1"></script>
+<script src="/js/status.js?v=20260719-create-grok"></script>
+<script src="/js/control-station-config.js?v=20260719-create-grok"></script>
 <script src="/js/control-station.js?v=20260718-indicator-memory"></script>
 <script src="/js/overview-panel.js?v=20260718-indicator-memory"></script>
 <script src="/js/auth.js?v=20260718-model-queue-lights"></script>
 <script src="/js/providers.js?v=20260718-overflow-fix"></script>
 <script src="/js/media-models.js"></script>
 <script src="/js/api-key-intake.js?v=20260608-provider-sync"></script>
-<script src="/js/aggregates.js?v=20260718-availability-shared"></script>
 <script src="/js/model-proxies.js?v=20260504-2"></script>
 <script src="/js/model-thinking.js"></script>
-<script src="/js/requests-panel.js?v=20260608-request-model-placeholder"></script>
+<script src="/js/requests-panel.js?v=20260720-request-refresh-wait"></script>
 <script src="/js/token-usage.js?v=20260703-3"></script>
 <script src="/js/clients-panel.js?v=20260608-ip-clients-redesign"></script>
 <script src="/js/models-panel.js?v=20260528-provider-only"></script>
@@ -135,11 +134,7 @@
 <script src="/js/virtual-keys.js?v=20260504-1"></script>
 <script src="/js/network-access.js?v=20260527-firewall-2"></script>
 <script src="/js/firewall-access.js?v=20260716-ip-helper-indicator-cache"></script>
-<link rel="stylesheet" href="/css/xterm.min.css" />
-<script src="/js/xterm.min.js"></script>
-<script src="/js/xterm-addon-fit.min.js"></script>
-<script src="/js/tools.js?v=20260718-control-station"></script>
-<script src="/js/terminals.js?v=20260528-web-terminal"></script>
+<script src="/js/tools.js?v=20260720-dashboard-relaunch-guards"></script>
 <script src="/js/advanced-config.js?v=20260522-1"></script>
 <script src="/js/cloaking-config.js?v=20260522-1"></script>
 <script src="/js/amp-config.js?v=20260522-1"></script>
@@ -148,10 +143,8 @@
 <script src="/js/docker-deploy.js?v=20260522-1"></script>
 <script src="/js/data-transfer.js?v=20260705-2"></script>
 <script src="/js/settings.js"></script>
-<script src="/js/boot.js?v=20260718-mobile-collapse"></script>
-<script src="/js/marked.min.js"></script>
-<script src="/js/highlight.min.js"></script>
-<script src="/js/chat.js?v=20260718-chat-mobile"></script>
+<script src="/js/boot.js?v=20260720-boot-no-reload-churn"></script>
+<!-- Heavy: chat / aggregates / terminals (+ xterm/marked/highlight) load on first open via core.js -->
 
 <!-- INCLUDE: sections/modals.html -->
 

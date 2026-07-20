@@ -8,7 +8,7 @@ from backend.security import generate_security_report
 from backend.tools import get_tool_outputs, query_models, test_proxy, get_provider_model_test_state
 from backend.model_thinking import load_model_thinking_configs, collect_thinking_candidates, collect_all_configured_models
 from backend.terminals import list_terminals, read_terminal
-from backend.request_metrics import parse_proxy_requests, parse_precise_request_events, parse_error_logs, merge_request_events, summarize_clients, summarize_models, summarize_model_test_stats, summarize_auth_health, ensure_observability_cache, refresh_observability_cache, get_cumulative_stats
+from backend.request_metrics import parse_proxy_requests, parse_precise_request_events, parse_error_logs, merge_request_events, summarize_clients, summarize_models, summarize_model_test_stats, summarize_auth_health, ensure_observability_cache, refresh_observability_cache, get_cumulative_stats, merge_cumulative_model_test_stats
 from backend.routes.helpers import send_json, send_file
 from backend.system_proxy import get_system_proxy_status
 import time
@@ -89,7 +89,15 @@ def handle_get(handler, parsed):
                         return target_file.read_text(encoding='utf-8')
                     return f"<!-- ERROR: Include file {rel_path} not found -->"
                 
-                compiled = re.sub(pattern, replace_match, text).encode('utf-8')
+                compiled_text = re.sub(pattern, replace_match, text)
+                try:
+                    from backend.settings import get_version_info
+                    version_info = get_version_info()
+                    version = version_info.get('item', {}).get('version', '1.0.0')
+                    compiled_text = re.sub(r'(\.js|\.css)\?v=[^\'\"\s>]+', f'\\1?v={version}', compiled_text)
+                except Exception:
+                    pass
+                compiled = compiled_text.encode('utf-8')
                 
                 handler.send_response(200)
                 handler.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -140,7 +148,7 @@ def handle_get(handler, parsed):
         selected_auth_refs = auth_state.get('selected_auth_refs') or []
         provider_models = get_configured_provider_models(include_override_only=False)
         force_refresh = str((params.get('refresh') or [''])[0] or '').strip().lower() in ('1', 'true', 'yes')
-        cache = refresh_observability_cache() if force_refresh else ensure_observability_cache()
+        cache = refresh_observability_cache(force=True) if force_refresh else ensure_observability_cache()
         events = list(cache.get('events') or [])
         clients = list(cache.get('clients') or [])
         auth_health = list(cache.get('auth_health') or [])
@@ -284,7 +292,7 @@ def handle_get(handler, parsed):
         except Exception:
             offset = 0
         refresh = str((params.get('refresh') or [''])[0] or '').strip().lower() in ('1', 'true', 'yes')
-        cache = refresh_observability_cache() if refresh else ensure_observability_cache()
+        cache = refresh_observability_cache(force=True) if refresh else ensure_observability_cache()
         items = cache.get('events') or []
         ip_filter = str((params.get('ip') or [''])[0] or '').strip().lower()
         model_filter = str((params.get('model') or [''])[0] or '').strip().lower()
@@ -368,57 +376,17 @@ def handle_get(handler, parsed):
             limit = max(1, min(2000, int((params.get('limit') or ['500'])[0] or 500)))
         except Exception:
             limit = 500
-        provider_models = get_configured_provider_models(include_override_only=False)
+        # include override-only providers so historical/deleted mappings can still be attributed
+        provider_models = get_configured_provider_models(include_override_only=True)
         force_refresh = str((params.get('refresh') or [''])[0] or '').strip().lower() in ('1', 'true', 'yes')
-        cache = refresh_observability_cache() if force_refresh else ensure_observability_cache()
+        cache = refresh_observability_cache(force=True) if force_refresh else ensure_observability_cache()
         events = list(cache.get('events') or [])[:limit]
         rows = summarize_model_test_stats(events, provider_models, get_provider_model_test_state(), limit=limit)
 
-        # 合并累积统计中的全量 token 消耗（累积统计来自所有归档+实时事件）
+        # 合并累积 token，并为仅出现在历史累计里的模型尽量反查 provider
         try:
             cumulative = get_cumulative_stats()
-            cum_by_model = cumulative.get('by_model') or {}
-            for row in rows:
-                cum = cum_by_model.get(row.get('model'))
-                if cum:
-                    row['prompt_tokens'] = int(cum.get('prompt_tokens') or 0)
-                    row['completion_tokens'] = int(cum.get('completion_tokens') or 0)
-                    row['total_tokens'] = int(cum.get('total_tokens') or 0)
-                    row['cumulative_request_count'] = int(cum.get('request_count') or 0)
-            # 把累积中有但实时窗口里没出现的模型也补进来（仅展示累计 token，成功率留空）
-            seen_models = {row.get('model') for row in rows}
-            for model_id, cum in cum_by_model.items():
-                if model_id in seen_models:
-                    continue
-                if not cum.get('request_count'):
-                    continue
-                rows.append({
-                    'model': model_id,
-                    'provider': '-',
-                    'delete_provider': '',
-                    'delete_upstream_id': '',
-                    'actual_model': '',
-                    'can_delete': False,
-                    'total_tests': 0,
-                    'success_count': 0,
-                    'failure_count': 0,
-                    'success_rate': 0,
-                    'success_rate_percent': 0,
-                    'last_log_at': 0,
-                    'last_log_success': None,
-                    'last_log_status_code': None,
-                    'last_error_summary': '',
-                    'available': None,
-                    'tested_at': 0,
-                    'test_status_code': None,
-                    'test_message': '',
-                    'working_path': '',
-                    'failure_kind': '',
-                    'prompt_tokens': int(cum.get('prompt_tokens') or 0),
-                    'completion_tokens': int(cum.get('completion_tokens') or 0),
-                    'total_tokens': int(cum.get('total_tokens') or 0),
-                    'cumulative_request_count': int(cum.get('request_count') or 0),
-                })
+            rows = merge_cumulative_model_test_stats(rows, cumulative.get('by_model') or {}, provider_models)
         except Exception:
             pass
 

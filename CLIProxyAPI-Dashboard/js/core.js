@@ -53,13 +53,13 @@ function toggleLanguage() {
 }
 
 function getTheme() {
-  const theme = localStorage.getItem('dashboard_theme') || 'light';
-  if (theme === 'eye' || theme === 'eye-white') return 'light';
+  const theme = localStorage.getItem('dashboard_theme') || 'dark';
+  if (theme === 'light' || theme === 'eye' || theme === 'eye-white') return 'dark';
   return theme;
 }
 
 function getThemeCycle() {
-  return ['light', 'dark', 'bright'];
+  return ['dark', 'bright'];
 }
 
 function getThemeName(theme, lang) {
@@ -111,7 +111,10 @@ function toggleTheme() {
 const DASHBOARD_SIDEBAR_COLLAPSED_KEY = 'dashboard_sidebar_collapsed_v1';
 
 function isSidebarCollapsed() {
-  return localStorage.getItem(DASHBOARD_SIDEBAR_COLLAPSED_KEY) === '1';
+  // 无本地记录时默认折叠；用户手动展开后写 '0'，折叠写 '1'
+  const raw = localStorage.getItem(DASHBOARD_SIDEBAR_COLLAPSED_KEY);
+  if (raw === null || raw === undefined || raw === '') return true;
+  return raw === '1';
 }
 
 function applySidebarCollapsed() {
@@ -378,9 +381,9 @@ function bindMobileNavChrome() {
 
 function getNavGroups() {
   return {
-    runtime: ['account', 'chat', 'requests', 'token-usage', 'model-stats', 'clients', 'settings'],
-    config: ['providers', 'media-models', 'aggregates', 'model-thinking', 'model-map', 'api-key-intake', 'auths'],
-    access: ['virtual-keys'],
+    runtime: ['account', 'chat', 'requests', 'token-usage', 'clients', 'settings'],
+    config: ['providers', 'media-models', 'aggregates', 'model-map', 'api-key-intake', 'auths'],
+    access: ['virtual-keys', 'tools', 'doc'],
     // 低频页不进侧栏，统一归系统中心入口
     system: [
       'system',
@@ -395,9 +398,9 @@ function getNavGroups() {
       'cloaking-config',
       'amp-config',
       'data-transfer',
-      'tools',
       'terminals',
-      'doc',
+      'model-stats',
+      'model-thinking',
     ],
   };
 }
@@ -788,12 +791,97 @@ function getNavTabForSection(name, activeGroup) {
   return '';
 }
 
+const _loadedScripts = new Map();
+const _loadedStyles = new Map();
+
+// Heavy panel assets — loaded on first open, not at dashboard boot.
+const SECTION_ASSETS = {
+  chat: {
+    scripts: [
+      '/js/marked.min.js',
+      '/js/highlight.min.js',
+      '/js/chat.js?v=20260720-lazy-assets',
+    ],
+  },
+  aggregates: {
+    scripts: ['/js/aggregates.js?v=20260720-lazy-assets'],
+  },
+  terminals: {
+    styles: ['/css/xterm.min.css'],
+    scripts: [
+      '/js/xterm.min.js',
+      '/js/xterm-addon-fit.min.js',
+      '/js/terminals.js?v=20260720-lazy-assets',
+    ],
+  },
+};
+
+function loadStylesheet(href) {
+  if (!href) return Promise.resolve();
+  if (_loadedStyles.has(href)) return _loadedStyles.get(href);
+  if (document.querySelector(`link[rel="stylesheet"][href="${href}"]`)) {
+    _loadedStyles.set(href, Promise.resolve());
+    return _loadedStyles.get(href);
+  }
+  const promise = new Promise((resolve, reject) => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = href;
+    link.onload = () => resolve();
+    link.onerror = () => reject(new Error(`Failed to load stylesheet ${href}`));
+    document.head.appendChild(link);
+  });
+  _loadedStyles.set(href, promise);
+  return promise;
+}
+
+function loadScript(src) {
+  if (!src) return Promise.resolve();
+  if (_loadedScripts.has(src)) return _loadedScripts.get(src);
+  const existing = document.querySelector(`script[src="${src}"]`);
+  if (existing) {
+    const promise = Promise.resolve();
+    _loadedScripts.set(src, promise);
+    return promise;
+  }
+  const promise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = false;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load script ${src}`));
+    document.head.appendChild(script);
+  });
+  _loadedScripts.set(src, promise);
+  return promise;
+}
+
+async function ensureSectionAssets(name) {
+  const assets = SECTION_ASSETS[name];
+  if (!assets) return;
+  for (const href of assets.styles || []) {
+    await loadStylesheet(href);
+  }
+  for (const src of assets.scripts || []) {
+    await loadScript(src);
+  }
+}
+
 async function showSection(name, options = {}) {
   if (name === 'external-access') {
     name = 'firewall-access';
   }
   if (!isKnownSection(name)) {
     name = 'account';
+  }
+
+  // 二级敏感页面鉴权拦截
+  const sensitiveSections = ['terminals', 'firewall-access', 'network-access'];
+  if (sensitiveSections.includes(name) && !sessionStorage.getItem('dashboard_sensitive_key')) {
+    pendingSensitiveSection = name;
+    pendingSensitiveOptions = options;
+    showSensitiveAuthModal();
+    return;
   }
 
   const requestedGroup = options && options.fromSystemHub ? 'system' : getSectionGroup(name);
@@ -831,6 +919,14 @@ async function showSection(name, options = {}) {
     } finally {
       delete loadingSections[name];
     }
+  }
+
+  try {
+    await ensureSectionAssets(name);
+  } catch (err) {
+    console.error(`Failed to load assets for ${name}:`, err);
+    showMessage(`加载面板资源 ${name} 失败: ${err.message}`, true);
+    return;
   }
 
   const activeGroup = requestedGroup;
@@ -964,13 +1060,16 @@ function getAuthToken() {
 function setAuthToken(token) {
   if (token) {
     localStorage.setItem('dashboard_auth_token', token);
+    document.cookie = `access_token=${token}; path=/; max-age=2592000; SameSite=Lax`;
   } else {
     localStorage.removeItem('dashboard_auth_token');
+    document.cookie = 'access_token=; path=/; max-age=0; SameSite=Lax';
   }
 }
 
 function clearAuthToken() {
   localStorage.removeItem('dashboard_auth_token');
+  document.cookie = 'access_token=; path=/; max-age=0; SameSite=Lax';
 }
 
 async function api(path, method = 'GET', body) {
@@ -978,6 +1077,10 @@ async function api(path, method = 'GET', body) {
   const token = getAuthToken();
   if (token) {
     headers['Authorization'] = 'Bearer ' + token;
+  }
+  const sensKey = sessionStorage.getItem('dashboard_sensitive_key');
+  if (sensKey) {
+    headers['X-Sensitive-Auth-Key'] = sensKey;
   }
   const res = await fetch(path, {
     method,
@@ -1000,6 +1103,16 @@ async function api(path, method = 'GET', body) {
       : `${path} returned invalid JSON.`;
     throw new Error(hint);
   }
+  if (res.status === 403 && data && data.sensitive_auth_required) {
+    sessionStorage.removeItem('dashboard_sensitive_key');
+    const activeSec = getActiveSection();
+    const sensitiveSections = ['terminals', 'firewall-access', 'network-access'];
+    if (sensitiveSections.includes(activeSec)) {
+      pendingSensitiveSection = activeSec;
+      showSensitiveAuthModal();
+    }
+    throw new Error('敏感操作授权已失效。');
+  }
   if (!res.ok) throw new Error(data.message || t('common.requestFailed', 'Request failed'));
   return data;
 }
@@ -1021,6 +1134,9 @@ let _messageTimer = null;
 let _messageHideTimer = null;
 
 function showMessage(text, isError = false) {
+  if (text && (text.includes('敏感') || text.includes('Sensitive'))) {
+    return;
+  }
   const el = document.getElementById('message');
   if (!el) return;
 
@@ -1056,4 +1172,73 @@ function statusPill(running) {
 
 function statusText(running) {
   return running ? t('running', 'Running') : t('stopped', 'Not running');
+}
+
+let pendingSensitiveSection = null;
+let pendingSensitiveOptions = null;
+
+function showSensitiveAuthModal() {
+  const modal = document.getElementById('sensitive-auth-modal');
+  if (modal) {
+    modal.hidden = false;
+    const input = document.getElementById('sensitive-auth-key-input');
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+    const err = document.getElementById('sensitive-auth-error');
+    if (err) err.style.display = 'none';
+  }
+}
+
+function cancelSensitiveAuth() {
+  const modal = document.getElementById('sensitive-auth-modal');
+  if (modal) modal.hidden = true;
+  pendingSensitiveSection = null;
+  pendingSensitiveOptions = null;
+  
+  // Go back to previous active section or account
+  const activeSec = getActiveSection();
+  const sensitiveSections = ['terminals', 'firewall-access', 'network-access'];
+  if (sensitiveSections.includes(activeSec)) {
+    showSection('account');
+  } else {
+    // Restore navigation active highlights
+    updateGroupNavigation(getSectionGroup(activeSec));
+    const activeTabId = getNavTabForSection(activeSec, getSectionGroup(activeSec));
+    document.querySelectorAll('.top-nav-btn').forEach(el => el.classList.remove('active'));
+    if (activeTabId) document.getElementById(activeTabId)?.classList.add('active');
+  }
+}
+
+async function submitSensitiveAuth() {
+  const input = document.getElementById('sensitive-auth-key-input');
+  const err = document.getElementById('sensitive-auth-error');
+  const key = input ? input.value : '';
+  if (!key) {
+    if (err) {
+      err.textContent = '请输入专用访问密钥';
+      err.style.display = 'block';
+    }
+    return;
+  }
+  
+  try {
+    const res = await api('/api/auth/sensitive/verify', 'POST', { key });
+    if (res && res.ok) {
+      sessionStorage.setItem('dashboard_sensitive_key', key);
+      const modal = document.getElementById('sensitive-auth-modal');
+      if (modal) modal.hidden = true;
+      if (pendingSensitiveSection) {
+        showSection(pendingSensitiveSection, pendingSensitiveOptions);
+        pendingSensitiveSection = null;
+        pendingSensitiveOptions = null;
+      }
+    }
+  } catch (ex) {
+    if (err) {
+      err.textContent = ex.message || '密钥验证错误';
+      err.style.display = 'block';
+    }
+  }
 }

@@ -1,13 +1,13 @@
-@import url('/css/variables.css');
-@import url('/css/layout.css?v=20260718-nav-narrow');
-@import url('/css/components.css?v=20260718-chat-drawer-fix');
+@import url('/css/variables.css?v=20260720-safe-area');
+@import url('/css/layout.css?v=20260720-safe-area');
+@import url('/css/components.css?v=20260720-safe-area');
 @import url('/css/motion.css');
 @import url('/css/panels/account.css?v=20260718-global-full-bleed');
 @import url('/css/panels/cooldown.css');
 @import url('/css/panels/model-proxy.css');
 @import url('/css/panels/model-thinking.css?v=20260718-overflow-fix');
-@import url('/css/panels/aggregates.css?v=20260718-mobile-layout');
-@import url('/css/panels/chat.css?v=20260718-chat-drawer-fix');
+@import url('/css/panels/aggregates.css?v=20260720-safe-area');
+@import url('/css/panels/chat.css?v=20260720-safe-area');
 @import url('/css/panels/virtual-keys.css');
 @import url('/css/panels/network-access.css');
 @import url('/css/panels/firewall-access.css');
@@ -21,4 +21,4 @@
 @import url('/css/panels/terminals.css');
 @import url('/css/panels/api-key-inplace.css');
 @import url('/css/panels/settings.css?v=20260718-lite-settings');
-@import url('/css/panels/login.css');
+@import url('/css/panels/login.css?v=20260720-safe-area');

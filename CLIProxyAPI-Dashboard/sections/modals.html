@@ -50,3 +50,29 @@
     </div>
   </div>
 </div>
+
+<!-- 二级敏感操作验证模态框 -->
+<div id="sensitive-auth-modal" class="modal-overlay" hidden>
+  <div class="modal" style="max-width: 400px;">
+    <div class="modal-head">
+      <h3 data-i18n="sensitive.modal.title">敏感页面授权</h3>
+      <button class="nav-btn secondary" onclick="cancelSensitiveAuth()">×</button>
+    </div>
+    <form onsubmit="event.preventDefault(); submitSensitiveAuth();">
+      <div class="modal-body form-grid" style="display: flex; flex-direction: column; gap: 12px;">
+        <p style="margin: 0; font-size: 14px; line-height: 1.5; color: #666;" data-i18n="sensitive.modal.desc">
+          您正在访问高权限敏感页面（终端、端口放行或网络接入），请输入专用的二级访问密钥进行授权。
+        </p>
+        <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+          <label style="font-weight: 500; font-size: 13px;" data-i18n="sensitive.modal.label">二级验证密钥</label>
+          <input type="password" id="sensitive-auth-key-input" class="form-input" placeholder="请输入授权密钥" data-i18n-placeholder="sensitive.modal.placeholder" style="width: 100%; box-sizing: border-box;" autofocus>
+          <div id="sensitive-auth-error" class="login-error" style="display:none; color: red; font-size: 12px; margin-top: 4px;"></div>
+        </div>
+      </div>
+      <div class="modal-foot" style="margin-top: 16px;">
+        <button type="button" class="secondary" onclick="cancelSensitiveAuth()" data-i18n="settings.btn.cancel">取消</button>
+        <button type="submit" class="primary" data-i18n="sensitive.modal.submit">授权进入</button>
+      </div>
+    </form>
+  </div>
+</div>

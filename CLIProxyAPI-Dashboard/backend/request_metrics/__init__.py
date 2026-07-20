@@ -6,6 +6,7 @@ from backend.request_metrics.parsing import (
 )
 from backend.request_metrics.merge import merge_request_events
 from backend.request_metrics.summary import (
+    merge_cumulative_model_test_stats,
     summarize_auth_health,
     summarize_clients,
     summarize_model_test_stats,
@@ -33,6 +34,7 @@ __all__ = [
     'merge_request_events',
     'summarize_auth_health',
     'summarize_clients',
+    'merge_cumulative_model_test_stats',
     'summarize_model_test_stats',
     'summarize_models',
     'build_observability_snapshot',

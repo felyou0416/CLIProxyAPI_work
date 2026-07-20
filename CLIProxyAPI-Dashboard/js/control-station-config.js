@@ -112,7 +112,7 @@ window.CONTROL_STATION_LAYERS = [
       ],
     }],
   },
-  // 第 2 层：OpenClaw / OAuth（长启动需 wait 轮询就绪）
+  // 第 2 层：OpenClaw / OAuth / create-grok（长启动需 wait 轮询就绪）
   {
     grids: [{
       className: 'control-station-layer-grid',
@@ -205,6 +205,101 @@ window.CONTROL_STATION_LAYERS = [
             },
           ],
         },
+        {
+          kind: 'service',
+          id: 'create-grok',
+          icon: '🧪',
+          title: {
+            text: 'create-grok',
+            href: 'http://127.0.0.1:3780/',
+            id: 'create-grok-title-link',
+            titleAttr: 'Grok 批量注册面板',
+          },
+          indicator: { id: 'create-grok-status-indicator', color: 'red' },
+          buttons: [
+            {
+              action: 'service', op: 'start', type: 'create-grok',
+              id: 'create-grok-start-btn', label: '启动',
+              api: '/api/create-grok/start', errorState: 'red',
+              wait: {
+                field: 'create_grok_running', expect: true,
+                timeoutMs: 20000, intervalMs: 1000,
+                readyMessage: 'create-grok 已启动：http://127.0.0.1:3780/',
+                timeoutMessage: 'create-grok 启动命令已发出，但未检测到 :3780 就绪。',
+              },
+            },
+            {
+              action: 'service', op: 'restart', type: 'create-grok',
+              id: 'create-grok-restart-btn', label: '重启',
+              api: '/api/create-grok/restart', className: 'secondary', errorState: 'red',
+              wait: {
+                field: 'create_grok_running', expect: true,
+                timeoutMs: 25000, intervalMs: 1000,
+                readyMessage: 'create-grok 已启动：http://127.0.0.1:3780/',
+                timeoutMessage: 'create-grok 重启命令已发出，但未检测到 :3780 就绪。',
+              },
+            },
+            {
+              action: 'service', op: 'stop', type: 'create-grok',
+              id: 'create-grok-stop-btn', label: '停止',
+              api: '/api/create-grok/stop', className: 'danger', errorState: 'green',
+              wait: {
+                field: 'create_grok_running', expect: false,
+                timeoutMs: 15000, intervalMs: 800,
+                readyMessage: 'create-grok 已停止。',
+              },
+            },
+          ],
+        },
+        {
+          kind: 'service',
+          id: '77chat',
+          icon: '💬',
+          title: {
+            text: '77chat',
+            id: 'chat77-title-link',
+            titleAttr: '77chat 智能对话面板',
+            hrefs: [
+              { text: '77chat (本地)', href: 'http://127.0.0.1:90/' },
+              { text: '77chat (公网)', href: 'https://qiqi.felyou.cc.cd/' },
+            ],
+          },
+          indicator: { id: 'chat77-status-indicator', color: 'red' },
+          buttons: [
+            {
+              action: 'service', op: 'start', type: '77chat',
+              id: 'chat77-start-btn', label: '启动',
+              api: '/api/77chat/start', errorState: 'red',
+              wait: {
+                field: 'chat77_running', expect: true,
+                timeoutMs: 20000, intervalMs: 1000,
+                readyMessage: '77chat 已启动：http://127.0.0.1:90/',
+                timeoutMessage: '77chat 启动命令已发出，但未检测到 :90 就绪。',
+              },
+            },
+            {
+              action: 'service', op: 'restart', type: '77chat',
+              id: 'chat77-restart-btn', label: '重启',
+              api: '/api/77chat/restart', className: 'secondary', errorState: 'red',
+              wait: {
+                field: 'chat77_running', expect: true,
+                timeoutMs: 25000, intervalMs: 1000,
+                readyMessage: '77chat 已重启：http://127.0.0.1:90/',
+                timeoutMessage: '77chat 重启命令已发出，但未检测到 :90 就绪。',
+              },
+            },
+            {
+              action: 'service', op: 'stop', type: '77chat',
+              id: 'chat77-stop-btn', label: '停止',
+              api: '/api/77chat/stop', className: 'danger', errorState: 'green',
+              wait: {
+                field: 'chat77_running', expect: false,
+                timeoutMs: 15000, intervalMs: 800,
+                readyMessage: '77chat 已停止。',
+              },
+            },
+          ],
+        },
       ],
     }],
   },
@@ -289,7 +384,7 @@ window.CONTROL_STATION_LAYERS = [
             title: {
               text: 'Grok2API 前端',
               i18n: 'label.grok2apiFrontendGroup',
-              href: 'http://127.0.0.1:5173/',
+              href: 'http://127.0.0.1:5173/accounts',
               id: 'grok2api-title-link', // refreshStatus 会按实际 URL 改 href
             },
             indicator: {

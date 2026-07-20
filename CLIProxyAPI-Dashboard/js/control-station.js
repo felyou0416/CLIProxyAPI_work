@@ -41,6 +41,14 @@ function renderTitle(title = {}) {
     // 站内导航：阻止默认 hash，改走 showSection
     return `<a href="${escapeHtml(title.href || `#${title.section}`)}" class="control-group-title-link"${id}${i18n}${titleAttr} data-cs-section="${escapeHtml(title.section)}">${text}</a>`;
   }
+  if (title.hrefs && Array.isArray(title.hrefs)) {
+    return `<div style="display: flex; flex-direction: row; gap: 8px; align-items: center; white-space: nowrap;">` +
+      title.hrefs.map((link, idx) => {
+        const linkId = idx === 0 ? id : '';
+        const linkText = escapeHtml(link.text || '');
+        return `<a href="${escapeHtml(link.href)}" target="_blank" class="control-group-title-link"${linkId}${titleAttr}>${linkText}</a>`;
+      }).join(' <span style="opacity: 0.3;">/</span> ') + `</div>`;
+  }
   if (title.href) {
     return `<a href="${escapeHtml(title.href)}" target="_blank" class="control-group-title-link"${id}${i18n}${titleAttr}>${text}</a>`;
   }

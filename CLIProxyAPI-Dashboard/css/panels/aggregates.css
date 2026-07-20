@@ -445,7 +445,8 @@
   top: 0;
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 128px);
+  max-height: calc(var(--app-height, 100vh) - 128px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+  max-height: calc(100dvh - 128px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
   overflow: hidden;
 }
 .aggregate-source-sidebar-card .provider-model-map-tabs-vertical {

@@ -5,7 +5,7 @@
       "name": "dashboard",
       "runtimeExecutable": "python",
       "runtimeArgs": ["CLIProxyAPI-Dashboard/app.py"],
-      "port": 8765
+      "autoPort": true
     }
   ]
 }

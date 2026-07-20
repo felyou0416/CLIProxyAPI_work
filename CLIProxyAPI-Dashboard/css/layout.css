@@ -18,12 +18,20 @@
   padding-bottom: 4px;
   scrollbar-width: thin;
 }
+html {
+  height: 100%;
+}
+body {
+  min-height: var(--app-height, 100vh);
+  min-height: 100dvh;
+}
 .app-shell {
   display: grid;
   grid-template-columns: var(--sidebar-width, 220px) minmax(0, 1fr);
   width: 100%;
   min-width: 0;
-  height: 100vh;
+  height: var(--app-height, 100vh);
+  height: 100dvh;
   min-height: 0;
   transition: grid-template-columns 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -36,7 +44,8 @@
   position: sticky;
   top: 0;
   align-self: start;
-  height: 100vh;
+  height: var(--app-height, 100vh);
+  height: 100dvh;
   min-height: 0;
   overflow: hidden;
   border-right: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
@@ -45,6 +54,9 @@
       color-mix(in srgb, var(--panel) 96%, var(--bg)) 0%,
       color-mix(in srgb, var(--panel) 90%, var(--bg)) 100%);
   padding: 16px 12px 14px;
+  padding-top: max(16px, var(--safe-top, 0px));
+  padding-bottom: max(14px, var(--safe-bottom, 0px));
+  padding-left: max(12px, var(--safe-left, 0px));
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -309,7 +321,8 @@
 }
 /* 主工作区：全局 full-bleed，不再给内容区套限宽卡片框架 */
 .workspace {
-  height: 100vh;
+  height: var(--app-height, 100vh);
+  height: 100dvh;
   min-width: 0;
   min-height: 0;
   padding: 0;
@@ -509,8 +522,8 @@
     align-items: center;
     gap: 8px;
     position: fixed;
-    top: 10px;
-    left: 10px;
+    top: calc(10px + var(--safe-top, 0px));
+    left: calc(10px + var(--safe-left, 0px));
     z-index: 80;
     min-height: 36px;
     padding: 0 12px 0 10px;
@@ -581,9 +594,13 @@
     top: 0;
     left: 0;
     width: min(72vw, 230px);
-    height: 100vh;
+    height: var(--app-height, 100vh);
+    height: 100dvh;
     max-height: none;
     padding: 12px 10px 10px;
+    padding-top: max(12px, var(--safe-top, 0px));
+    padding-bottom: max(10px, var(--safe-bottom, 0px));
+    padding-left: max(10px, var(--safe-left, 0px));
     gap: 10px;
     background: color-mix(in srgb, var(--panel) 96%, var(--bg));
     border-right: 1px solid var(--border);
@@ -673,7 +690,15 @@
   }
 
   .workspace {
-    padding-top: 52px;
+    /* 顶：菜单钮占位 + 浏览器上栏安全区；底：Home 指示条 / 工具栏安全区 */
+    padding-top: calc(52px + var(--safe-top, 0px));
+    padding-bottom: var(--safe-bottom, 0px);
+    padding-left: var(--safe-left, 0px);
+    padding-right: var(--safe-right, 0px);
+    height: auto;
+    min-height: calc(var(--app-height, 100vh) - env(safe-area-inset-top, 0px));
+    min-height: calc(100dvh - env(safe-area-inset-top, 0px));
+    box-sizing: border-box;
   }
 
   /* 页内筛选：侧滑抽屉（与主导航同交互） */
@@ -739,11 +764,11 @@
   /* 手机端：页内筛选栏侧滑弹出（限宽限高，避免占满整屏） */
   .filter-rail {
     position: fixed !important;
-    top: 56px;
-    left: 10px;
+    top: calc(56px + var(--safe-top, 0px));
+    left: calc(10px + var(--safe-left, 0px));
     width: min(68vw, 220px);
     height: auto;
-    max-height: min(72vh, 520px) !important;
+    max-height: min(72dvh, 520px) !important;
     margin: 0 !important;
     padding: 10px 10px 12px !important;
     border-radius: 14px !important;

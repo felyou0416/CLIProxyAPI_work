@@ -14,6 +14,14 @@
   --radius: 8px;
   --radius-sm: 6px;
   --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  /* 浏览器上下栏 / 刘海安全区（iOS Safari、Android Chrome） */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  /* 可见视口高度：优先动态视口，避免 100vh 被地址栏顶出底部 */
+  --app-height: 100vh;
+  --app-height: 100dvh;
 }
 [data-theme="dark"] {
   color-scheme: dark;

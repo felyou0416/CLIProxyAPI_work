@@ -316,8 +316,17 @@ function selectPreferredVideoModel() {
   }
 }
 
-function isChatMobileLayout() {
+function isChatSessionsDrawerLayout() {
   return window.matchMedia('(max-width: 820px)').matches;
+}
+
+function isChatOptionsDrawerLayout() {
+  return window.matchMedia('(max-width: 1100px)').matches;
+}
+
+// 兼容旧调用：会话抽屉断点
+function isChatMobileLayout() {
+  return isChatSessionsDrawerLayout();
 }
 
 function getChatLayoutEl() {
@@ -346,15 +355,34 @@ function closeChatDrawers() {
   const layout = getChatLayoutEl();
   if (!layout) return;
   layout.classList.remove('chat-sessions-open', 'chat-options-open');
+  closeChatSessionMenus();
   syncChatDrawerChrome();
 }
 
+function closeChatSessionMenus(exceptId) {
+  document.querySelectorAll('.chat-session-menu-wrap.open').forEach((el) => {
+    if (exceptId && el.dataset.sessionId === exceptId) return;
+    el.classList.remove('open');
+  });
+}
+
+function toggleChatSessionMenu(event, id) {
+  event.stopPropagation();
+  const wrap = event.currentTarget?.closest?.('.chat-session-menu-wrap');
+  if (!wrap) return;
+  const willOpen = !wrap.classList.contains('open');
+  closeChatSessionMenus(willOpen ? id : null);
+  wrap.classList.toggle('open', willOpen);
+}
+
 function toggleChatSessions() {
+  if (!isChatSessionsDrawerLayout()) return;
   const layout = getChatLayoutEl();
   if (!layout) return;
   const next = !layout.classList.contains('chat-sessions-open');
   layout.classList.toggle('chat-sessions-open', next);
   if (next) layout.classList.remove('chat-options-open');
+  closeChatSessionMenus();
   syncChatDrawerChrome();
 }
 
@@ -363,11 +391,12 @@ function toggleChatOptions() {
   const layout = getChatLayoutEl();
   const optionsSidebar = document.getElementById('chat-options-sidebar');
   if (!layout || !optionsSidebar || optionsSidebar.hidden) return;
-  // 桌面宽屏参数侧栏已可见，不必再开抽屉
-  if (!isChatMobileLayout()) return;
+  // 宽屏参数侧栏常驻，不必再开抽屉
+  if (!isChatOptionsDrawerLayout()) return;
   const next = !layout.classList.contains('chat-options-open');
   layout.classList.toggle('chat-options-open', next);
   if (next) layout.classList.remove('chat-sessions-open');
+  closeChatSessionMenus();
   syncChatDrawerChrome();
 }
 
@@ -394,9 +423,9 @@ function syncChatModeUI() {
     optionsToggle.hidden = !isMediaMode();
     if (!isMediaMode()) optionsToggle.classList.remove('active');
   }
-  // 切到非媒体模式时关掉参数抽屉；媒体模式默认收起，点按钮再开
+  // 切到非媒体模式时关掉参数抽屉；≤1100 默认收起，点按钮再开
   const layout = getChatLayoutEl();
-  if (layout && (!isMediaMode() || !isChatMobileLayout())) {
+  if (layout && (!isMediaMode() || !isChatOptionsDrawerLayout())) {
     layout.classList.remove('chat-options-open');
   }
 
@@ -793,23 +822,23 @@ function renderChatHistoryList() {
     return;
   }
 
-  // Render in reverse-chronological order
+  // 主行标题 · 次行模型/时间 · 操作收进 ⋯ 菜单
   container.innerHTML = modeSessions.map(s => {
     const active = s.id === activeSessionId ? 'active' : '';
-    const msgCount = s.messages.filter(m => m.role !== 'system').length;
     const timeStr = new Date(s.ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const modelLabel = s.model ? escapeHtml(s.model).split('-').slice(0, 3).join('-') : 'No model';
+    const running = isSessionRunning(s);
     return `<div class="chat-session-item ${active}" data-id="${s.id}" onclick="switchToSession('${s.id}'); closeChatDrawers()">
       <div class="chat-session-info">
-        <div class="chat-session-title">${escapeHtml(s.title)}${isSessionRunning(s) ? ' · …' : ''}</div>
-        <div class="chat-session-meta">${s.model ? escapeHtml(s.model).split('-').slice(0,3).join('-') : 'No model'} · ${msgCount} msg${isSessionRunning(s) ? ' · running' : ''} · ${timeStr}</div>
+        <div class="chat-session-title">${escapeHtml(s.title)}${running ? ' · …' : ''}</div>
+        <div class="chat-session-meta">${modelLabel}${running ? ' · running' : ''} · ${timeStr}</div>
       </div>
-      <div class="chat-session-actions">
-        <button class="msg-action-btn" onclick="event.stopPropagation();renameSession('${s.id}')" title="Rename">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-        </button>
-        <button class="msg-action-btn" onclick="event.stopPropagation();deleteSession('${s.id}')" title="Delete">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-        </button>
+      <div class="chat-session-menu-wrap" data-session-id="${s.id}">
+        <button class="chat-icon-btn chat-session-more" type="button" title="更多" aria-label="更多" onclick="toggleChatSessionMenu(event, '${s.id}')">⋯</button>
+        <div class="chat-session-menu" role="menu">
+          <button type="button" role="menuitem" onclick="event.stopPropagation(); renameSession('${s.id}'); closeChatSessionMenus()">重命名</button>
+          <button type="button" role="menuitem" class="danger" onclick="event.stopPropagation(); deleteSession('${s.id}'); closeChatSessionMenus()">删除</button>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -1166,16 +1195,30 @@ function bindChatControls() {
     window.__chatMobileChromeBound = true;
     document.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
+      const openMenu = document.querySelector('.chat-session-menu-wrap.open');
+      if (openMenu) {
+        closeChatSessionMenus();
+        return;
+      }
       const layout = getChatLayoutEl();
       if (!layout) return;
       if (layout.classList.contains('chat-sessions-open') || layout.classList.contains('chat-options-open')) {
         closeChatDrawers();
       }
     });
-    window.matchMedia('(max-width: 820px)').addEventListener('change', (event) => {
-      if (!event.matches) closeChatDrawers();
-      else syncChatDrawerChrome();
+    document.addEventListener('click', (event) => {
+      if (event.target?.closest?.('.chat-session-menu-wrap')) return;
+      closeChatSessionMenus();
     });
+    const onDrawerBpChange = () => {
+      const layout = getChatLayoutEl();
+      if (!layout) return;
+      if (!isChatSessionsDrawerLayout()) layout.classList.remove('chat-sessions-open');
+      if (!isChatOptionsDrawerLayout()) layout.classList.remove('chat-options-open');
+      syncChatDrawerChrome();
+    };
+    window.matchMedia('(max-width: 820px)').addEventListener('change', onDrawerBpChange);
+    window.matchMedia('(max-width: 1100px)').addEventListener('change', onDrawerBpChange);
   }
 
   syncChatModeUI();

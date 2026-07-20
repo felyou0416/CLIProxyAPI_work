@@ -1,11 +1,9 @@
 <section id="section-clients" class="panel panel-scroll section-view" hidden>
   <div class="panel-head clients-hero">
     <div>
-      <div class="section-kicker" data-i18n="section.clientsKicker">Observability</div>
       <h2 class="section-title" data-i18n="section.clientsTitle">客户端 / API Key</h2>
-      <p class="clients-subtitle">按 API Key 汇总客户端请求质量、模型使用、Token 与延迟；同一 Key 的不同来源 IP 会合并统计，无 Key 时归入默认 Key。</p>
     </div>
-    <div class="action-row">
+    <div class="action-row toolbar-scroll">
       <button class="secondary" type="button" onclick="loadClientsPanel(true)" data-i18n="btn.refresh">刷新</button>
       <span class="auth-chip" id="request-clients-meta">-</span>
     </div>

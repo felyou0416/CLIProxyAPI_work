@@ -15,10 +15,12 @@ from backend.request_metrics.cumulative import update_cumulative_stats
 
 
 _OBSERVABILITY_CACHE_LOCK = threading.Lock()
+_OBSERVABILITY_CACHE_COND = threading.Condition(_OBSERVABILITY_CACHE_LOCK)
 _OBSERVABILITY_CACHE = {
     'ready': False,
     'refreshing': False,
     'refreshed_at': 0.0,
+    'generation': 0,
     'events': [],
     'clients': [],
     'auth_health': [],
@@ -26,6 +28,7 @@ _OBSERVABILITY_CACHE = {
 _OBSERVABILITY_REFRESH_INTERVAL_SECONDS = 15.0
 _OBSERVABILITY_EVENT_LIMIT = 300
 _OBSERVABILITY_SUMMARY_LIMIT = 200
+_OBSERVABILITY_REFRESH_WAIT_SECONDS = 45.0
 
 
 def build_observability_snapshot(event_limit: int = _OBSERVABILITY_EVENT_LIMIT, summary_limit: int = _OBSERVABILITY_SUMMARY_LIMIT) -> dict:
@@ -66,37 +69,77 @@ def build_observability_snapshot(event_limit: int = _OBSERVABILITY_EVENT_LIMIT, 
     }
 
 
-def refresh_observability_cache() -> dict:
-    with _OBSERVABILITY_CACHE_LOCK:
+def _cache_view() -> dict:
+    return {
+        'ready': bool(_OBSERVABILITY_CACHE.get('ready')),
+        'refreshing': bool(_OBSERVABILITY_CACHE.get('refreshing')),
+        'refreshed_at': float(_OBSERVABILITY_CACHE.get('refreshed_at') or 0.0),
+        'generation': int(_OBSERVABILITY_CACHE.get('generation') or 0),
+        'events': list(_OBSERVABILITY_CACHE.get('events') or []),
+        'clients': list(_OBSERVABILITY_CACHE.get('clients') or []),
+        'auth_health': list(_OBSERVABILITY_CACHE.get('auth_health') or []),
+    }
+
+
+def _wait_for_refresh_unlock(started_generation: int) -> dict:
+    deadline = time.time() + _OBSERVABILITY_REFRESH_WAIT_SECONDS
+    with _OBSERVABILITY_CACHE_COND:
+        while _OBSERVABILITY_CACHE.get('refreshing'):
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            _OBSERVABILITY_CACHE_COND.wait(timeout=remaining)
+            if int(_OBSERVABILITY_CACHE.get('generation') or 0) > started_generation:
+                break
+        return _cache_view()
+
+
+def refresh_observability_cache(force: bool = False) -> dict:
+    """Rebuild the observability cache.
+
+    Concurrent callers no longer receive a stale snapshot mid-refresh.
+    Background refresh waits for the in-flight rebuild; forced refresh waits
+    for it and then rebuilds once more so the button always re-reads logs.
+    """
+    with _OBSERVABILITY_CACHE_COND:
+        started_generation = int(_OBSERVABILITY_CACHE.get('generation') or 0)
         if _OBSERVABILITY_CACHE.get('refreshing'):
-            return dict(_OBSERVABILITY_CACHE)
-        _OBSERVABILITY_CACHE['refreshing'] = True
+            should_run = False
+        else:
+            _OBSERVABILITY_CACHE['refreshing'] = True
+            should_run = True
+
+    if not should_run:
+        waited = _wait_for_refresh_unlock(started_generation)
+        if not force:
+            return waited
+        with _OBSERVABILITY_CACHE_COND:
+            if _OBSERVABILITY_CACHE.get('refreshing'):
+                return _cache_view()
+            _OBSERVABILITY_CACHE['refreshing'] = True
+
     try:
         snapshot = build_observability_snapshot()
-        with _OBSERVABILITY_CACHE_LOCK:
+        with _OBSERVABILITY_CACHE_COND:
             _OBSERVABILITY_CACHE['events'] = snapshot.get('events') or []
             _OBSERVABILITY_CACHE['clients'] = snapshot.get('clients') or []
             _OBSERVABILITY_CACHE['auth_health'] = snapshot.get('auth_health') or []
             _OBSERVABILITY_CACHE['refreshed_at'] = float(snapshot.get('refreshed_at') or time.time())
             _OBSERVABILITY_CACHE['ready'] = True
+            _OBSERVABILITY_CACHE['generation'] = int(_OBSERVABILITY_CACHE.get('generation') or 0) + 1
             _OBSERVABILITY_CACHE['refreshing'] = False
-            return dict(_OBSERVABILITY_CACHE)
+            _OBSERVABILITY_CACHE_COND.notify_all()
+            return _cache_view()
     except Exception:
-        with _OBSERVABILITY_CACHE_LOCK:
+        with _OBSERVABILITY_CACHE_COND:
             _OBSERVABILITY_CACHE['refreshing'] = False
-            return dict(_OBSERVABILITY_CACHE)
+            _OBSERVABILITY_CACHE_COND.notify_all()
+            return _cache_view()
 
 
 def get_observability_cache() -> dict:
     with _OBSERVABILITY_CACHE_LOCK:
-        return {
-            'ready': bool(_OBSERVABILITY_CACHE.get('ready')),
-            'refreshing': bool(_OBSERVABILITY_CACHE.get('refreshing')),
-            'refreshed_at': float(_OBSERVABILITY_CACHE.get('refreshed_at') or 0.0),
-            'events': list(_OBSERVABILITY_CACHE.get('events') or []),
-            'clients': list(_OBSERVABILITY_CACHE.get('clients') or []),
-            'auth_health': list(_OBSERVABILITY_CACHE.get('auth_health') or []),
-        }
+        return _cache_view()
 
 
 def ensure_observability_cache() -> dict:

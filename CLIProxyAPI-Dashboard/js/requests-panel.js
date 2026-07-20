@@ -136,9 +136,15 @@ function getRequestEventsPageSize() {
   return Math.max(10, Math.min(500, Math.round(value)));
 }
 
-function setRequestEventsMeta(data, shownCount, append) {
+function setRequestEventsMeta(data, shownCount, append, loading = false) {
   const meta = document.getElementById('request-events-meta');
   if (!meta) return;
+  if (loading) {
+    meta.textContent = typeof getLanguage === 'function' && getLanguage() === 'en'
+      ? 'Refreshing…'
+      : '刷新中…';
+    return;
+  }
   const copy = requestEventsCopy();
   const total = Number(data?.total || 0);
   const refreshedAt = Number(data?.refreshed_at || 0);
@@ -146,6 +152,17 @@ function setRequestEventsMeta(data, shownCount, append) {
   const cachedLabel = data?.cached ? copy.cache : copy.notCached;
   const modeLabel = append ? copy.appended : copy.refreshed;
   meta.textContent = `${cachedLabel} · ${modeLabel} · ${shownCount}/${total || shownCount} · ${freshness}`;
+}
+
+function setRequestEventsBusy(busy) {
+  const buttons = [
+    document.querySelector('#section-requests button[data-i18n="btn.refresh"]'),
+    document.querySelector('#section-requests button[data-i18n="btn.loadMore"]'),
+  ];
+  buttons.forEach((btn) => {
+    if (!btn) return;
+    btn.disabled = !!busy;
+  });
 }
 
 function getRequestModelPlaceholder(item) {
@@ -271,10 +288,14 @@ async function loadRequestEventsPanel(force = false, append = false) {
   }
 
   const currentOffset = append ? requestEventsServerOffset : 0;
-  if (!append && requestEventsLoaded && requestEventsLastQueryKey === queryKey) return;
+  if (!force && !append && requestEventsLoaded && requestEventsLastQueryKey === queryKey) return;
 
   if (table && (!append || currentOffset === 0)) {
     table.innerHTML = '<tr><td colspan="6">loading...</td></tr>';
+  }
+  if (!append) {
+    setRequestEventsBusy(true);
+    setRequestEventsMeta(null, 0, false, true);
   }
 
   try {
@@ -319,6 +340,9 @@ async function loadRequestEventsPanel(force = false, append = false) {
     if (table && (!append || currentOffset === 0)) {
       table.innerHTML = `<tr><td colspan="6">${escapeHtml(error.message || 'load failed')}</td></tr>`;
     }
+    setRequestEventsMeta(null, requestEventsOffset, append);
+  } finally {
+    if (!append) setRequestEventsBusy(false);
   }
 }
 
