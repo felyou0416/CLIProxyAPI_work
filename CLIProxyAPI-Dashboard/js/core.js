@@ -814,6 +814,9 @@ const SECTION_ASSETS = {
       '/js/terminals.js?v=20260720-lazy-assets',
     ],
   },
+  'data-transfer': {
+    scripts: ['/js/data-transfer.js?v=20260720-env-aware'],
+  },
 };
 
 function loadStylesheet(href) {
@@ -1037,6 +1040,9 @@ async function showSection(name, options = {}) {
   }
   if (name === 'docker-deploy' && typeof loadDockerDeploy === 'function') {
     loadDockerDeploy();
+  }
+  if (name === 'data-transfer' && typeof loadDataTransferPanel === 'function') {
+    loadDataTransferPanel();
   }
   if (name === 'settings' && typeof loadSettings === 'function') {
     loadSettings();

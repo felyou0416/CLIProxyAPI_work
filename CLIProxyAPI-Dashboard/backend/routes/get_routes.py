@@ -640,6 +640,13 @@ def handle_get(handler, parsed):
             'home_disable_cluster_discovery': state.get('home_disable_cluster_discovery', False),
         }})
         return True
+    if parsed.path == '/api/data/environment':
+        try:
+            from backend.data_transfer import detect_environment
+            send_json(handler, {'ok': True, 'item': detect_environment()})
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': f'Environment probe failed: {e}'}, status=500)
+        return True
     if parsed.path == '/api/data/export':
         try:
             from backend.data_transfer import export_all

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] - 2026-07-20
+### Added
+- Cross-environment data transfer (export v3) with dev vs packaged-user profile detection.
+- `/api/data/environment` probe and UI banner showing storage layout / runtime profile.
+- YAML path rewrite on import so `auth-dir` and related absolute paths land on the target machine.
+- Merge/replace import modes that skip machine-local runtime state keys and block auth path traversal.
+
+### Fixed
+- Data transfer between monorepo dev installs and Electron user installs no longer keeps source-machine storage paths.
+- Lazy-load data-transfer panel assets with the rest of heavy system-center pages.
+
+### Changed
+- Sidebar config tab label `API Key` → `接入`.
+- Export package includes environment metadata and item summary for safer cross-profile imports.
+
 ## [1.0.6] - 2026-07-20
 ### Added
 - create-grok control-station service (start/restart/stop) with status indicator on port 3780.

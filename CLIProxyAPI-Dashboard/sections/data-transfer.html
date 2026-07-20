@@ -1,7 +1,12 @@
 <section class="section-view" id="section-data-transfer">
   <div class="section-card">
     <h2>数据导入导出</h2>
-    <p class="section-desc">导出当前全部配置用于备份或迁移，或从导出文件恢复。包含以下数据：</p>
+    <p class="section-desc">
+      导出当前全部配置用于备份或迁移，或从导出文件恢复。
+      兼容<strong>开发版</strong>与<strong>用户端/安装版</strong>：导入时会自动改写 <code>auth-dir</code> 等绝对路径到本机 storage。
+    </p>
+
+    <div id="data-transfer-env" class="dt-env-banner" hidden></div>
 
     <div class="data-type-list">
       <div class="data-type-group">
@@ -9,25 +14,22 @@
         <ul>
           <li>认证文件 (OAuth / API Key 凭证)</li>
           <li>虚拟 API Key (密钥管理)</li>
-          <li>API Key 列表 (api-keys 配置)</li>
         </ul>
       </div>
       <div class="data-type-group">
         <div class="data-type-group-title">模型配置</div>
         <ul>
-          <li>运行时配置 (active config, 含 provider / alias / openai-compatibility)</li>
-          <li>模型映射覆写 (provider_model_overrides)</li>
-          <li>聚合模型别名 (aggregate_model_aliases)</li>
-          <li>模型代理设置 (model_proxy_settings)</li>
-          <li>Thinking 配置 (model_thinking_configs)</li>
+          <li>运行时配置 (active config)</li>
+          <li>模型映射 / 聚合别名</li>
+          <li>模型代理 / Thinking 配置</li>
         </ul>
       </div>
       <div class="data-type-group">
         <div class="data-type-group-title">系统配置</div>
         <ul>
-          <li>基础配置文件 (base-config.yaml)</li>
-          <li>认证源配置 (sources.json)</li>
-          <li>面板设置 &amp; 运行时状态 (state.json)</li>
+          <li>基础配置 (base-config.yaml)</li>
+          <li>认证源 (sources.json)</li>
+          <li>面板设置 &amp; 状态 (state.json，跳过本机 PID 等)</li>
         </ul>
       </div>
     </div>
@@ -35,19 +37,19 @@
     <div class="card-row" style="margin-top:20px;">
       <div class="card" style="flex:1; min-width:280px;">
         <h3>导出数据</h3>
-        <p>导出上述所有数据到一个 JSON 文件中。</p>
+        <p>导出到 JSON（含环境元数据，便于跨开发/安装版迁移）。</p>
         <button class="btn primary" id="export-btn" onclick="exportData()">导出 JSON</button>
         <div id="export-status" class="status-line" style="margin-top:8px;"></div>
         <div id="export-detail" class="detail-block" style="margin-top:4px; display:none;"></div>
       </div>
       <div class="card" style="flex:1; min-width:280px;">
         <h3>导入数据</h3>
-        <p>从 JSON 文件导入配置数据。</p>
+        <p>支持 v1–v3 导出文件。替换模式会先清空可导入数据。</p>
         <div style="margin-bottom:8px;">
           <label><input type="radio" name="import-mode" value="merge" checked> 合并（保留已有，仅补充缺失）</label>
           <label style="margin-left:12px;"><input type="radio" name="import-mode" value="replace"> 替换（清空后导入）</label>
         </div>
-        <input type="file" id="import-file-input" accept=".json" style="display:none;" onchange="handleImportFile(event)">
+        <input type="file" id="import-file-input" accept=".json,application/json" style="display:none;" onchange="handleImportFile(event)">
         <button class="btn" id="import-btn" onclick="document.getElementById('import-file-input').click()">选择文件并导入</button>
         <div id="import-status" class="status-line" style="margin-top:8px;"></div>
         <div id="import-detail" class="detail-block" style="margin-top:4px; display:none;"></div>
@@ -56,6 +58,24 @@
   </div>
 
   <style>
+    .dt-env-banner {
+      margin: 10px 0 14px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--text);
+      background: color-mix(in srgb, var(--panel) 90%, var(--accent));
+      border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+    }
+    .dt-env-banner code {
+      font-size: 11px;
+      word-break: break-all;
+    }
+    .dt-hint {
+      margin-top: 4px;
+      color: var(--muted);
+    }
     .data-type-list {
       display: flex;
       gap: 24px;
