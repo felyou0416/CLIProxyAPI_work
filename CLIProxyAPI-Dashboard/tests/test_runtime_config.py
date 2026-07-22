@@ -78,7 +78,7 @@ class RuntimeConfigRequestLogTests(unittest.TestCase):
             self.assertEqual(normalized['provider'], 'codex')
             self.assertEqual(normalized['access_token'], 'access-token')
             runtime_text = runtime_config.read_text(encoding='utf-8')
-            self.assertIn(str(active_auth_dir).replace('\\', '/'), runtime_text)
+            self.assertIn(pathlib.Path(active_auth_dir).resolve().as_posix(), runtime_text)
 
 class RuntimeConfigLocalPluginTests(unittest.TestCase):
     def test_agnes_media_models_use_media_proxy_group(self):
