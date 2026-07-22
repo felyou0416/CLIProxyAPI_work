@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-07-22
+### Added
+- Synced CPA Go proxy kernel to official v7.2.94 (`UPSTREAM_VERSION`).
+- Expanded Dashboard advanced runtime controls: routing strategy, force model prefix, retry/cooldown, quota switches, streaming keepalives, logging/usage, Codex identity isolation, and image-generation `passthrough` mode.
+- Runtime YAML rewrite path (`rewrite_core_runtime_options`) so Dashboard state maps into CPA core options on rebuild.
+
+### Changed
+- Advanced config UI rebuilt as structured runtime control cards with validation and dirty-state feedback.
+
 ## [1.1.1] - 2026-07-22
 ### Fixed
 - Fixed Go test path resolution in local plugin `build.ps1` for CGO builds.
