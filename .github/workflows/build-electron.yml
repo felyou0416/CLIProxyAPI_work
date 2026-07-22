@@ -37,7 +37,7 @@ jobs:
       - name: Set up Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: '0.16.0'
+          version: '0.13.0'
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -107,7 +107,8 @@ jobs:
           $version = "${{ steps.version.outputs.VERSION }}"
           $json = Get-Content electron-app/package.json | ConvertFrom-Json
           $json.version = $version
-          $json | ConvertTo-Json -Depth 10 | Set-Content electron-app/package.json
+          $jsonString = $json | ConvertTo-Json -Depth 10
+          [System.IO.File]::WriteAllText("electron-app/package.json", $jsonString, (New-Object System.Text.UTF8Encoding($false)))
 
       - name: Build Electron app
         run: |
