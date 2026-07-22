@@ -131,7 +131,8 @@ class LocalProxyDetectTests(unittest.TestCase):
         self.assertEqual(result['proxy_url'], 'direct')
 
     def test_choose_best_egress_can_prefer_working_local_port(self):
-        with patch.object(local_proxy, 'list_listening_proxy_ports', return_value=[7897]):
+        with patch.object(local_proxy, 'list_listening_proxy_ports', return_value=[7897]), \
+             patch.object(local_proxy, '_port_is_listening', return_value=True):
             with patch.object(local_proxy, 'probe_target_via_proxy') as probe:
                 def _side_effect(target_url, proxy_url=None, timeout=4.0, headers=None):
                     proxy = str(proxy_url or 'direct')

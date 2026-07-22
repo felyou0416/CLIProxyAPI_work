@@ -34,7 +34,6 @@ const (
 	creditsUsedKey = "__antigravity_credits_used__"
 )
 
-
 // GinLogrusLogger returns a Gin middleware handler that logs HTTP requests and responses
 // using logrus. It captures request details including method, path, status code, latency,
 // client IP, and any error messages. Request ID is only added for AI API requests.
@@ -77,7 +76,7 @@ func GinLogrusLogger() gin.HandlerFunc {
 		}
 
 		statusCode := c.Writer.Status()
-		clientIP := ProxyAwareClientIP(c)
+		clientIP := c.ClientIP()
 		method := c.Request.Method
 		errorMessage := c.Errors.ByType(gin.ErrorTypePrivate).String()
 

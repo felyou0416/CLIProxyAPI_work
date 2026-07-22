@@ -24,6 +24,7 @@ from backend.paths import (
     MEDIA_PROXY_ROOT,
     ACCESS_GATEWAY_ROOT,
     ACCESS_GATEWAY_BINARY,
+    MEDIA_PROXY_BINARY,
     DASHBOARD_ROOT,
     STORAGE_DIR,
     RUNTIME_DIR,
@@ -2837,8 +2838,8 @@ def start_media_proxy():
         return {'ok': False, 'message': f'Media proxy directory was not found: {MEDIA_PROXY_ROOT}'}
     if not media_proxy_config_path().exists():
         return {'ok': False, 'message': f'Media proxy config was not found: {media_proxy_config_path()}'}
-    if not command_exists('go'):
-        return {'ok': False, 'message': 'Go runtime was not found in PATH. Install Go or build CLIProxyAPI-MediaProxy first.'}
+    if not MEDIA_PROXY_BINARY.is_file():
+        return {'ok': False, 'message': f'Media proxy binary was not found: {MEDIA_PROXY_BINARY}. Run CLIProxyAPI-MediaProxy/build.ps1 first.'}
     auth_files = list_auth_files()
     if not auth_files:
         return {'ok': False, 'message': 'storage/auth is empty. Add Agnes auth files before starting media proxy.'}
@@ -2849,7 +2850,7 @@ def start_media_proxy():
         stdout = open(MEDIA_PROXY_STDOUT, 'a', encoding='utf-8', errors='ignore')
         stderr = open(MEDIA_PROXY_STDERR, 'a', encoding='utf-8', errors='ignore')
         proc = subprocess.Popen(
-            ['go', 'run', '.', '-config', str(media_proxy_config_path())],
+            [str(MEDIA_PROXY_BINARY), '-config', str(media_proxy_config_path())],
             cwd=str(MEDIA_PROXY_ROOT),
             stdout=stdout,
             stderr=stderr,

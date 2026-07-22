@@ -12,6 +12,7 @@ import (
 	_ "github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/claude"
 	_ "github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/codex"
 	_ "github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/gemini"
+	_ "github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/interactions"
 	_ "github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/kimi"
 	_ "github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/openai"
 	_ "github.com/router-for-me/CLIProxyAPI/v7/internal/thinking/provider/xai"
@@ -833,7 +834,8 @@ func TestThinkingE2EMatrix_Suffix(t *testing.T) {
 			to:          "openai",
 			model:       "user-defined-model(0)",
 			inputJSON:   `{"model":"user-defined-model(0)","contents":[{"role":"user","parts":[{"text":"hi"}]}]}`,
-			expectField: "",
+			expectField: "reasoning_effort",
+			expectValue: "none",
 			expectErr:   false,
 		},
 		// Case 70: Budget -1 → passthrough logic → auto
@@ -887,7 +889,8 @@ func TestThinkingE2EMatrix_Suffix(t *testing.T) {
 			to:          "codex",
 			model:       "user-defined-model(0)",
 			inputJSON:   `{"model":"user-defined-model(0)","messages":[{"role":"user","content":"hi"}]}`,
-			expectField: "",
+			expectField: "reasoning.effort",
+			expectValue: "none",
 			expectErr:   false,
 		},
 		// Case 75: Budget -1 → passthrough logic → auto
@@ -1929,7 +1932,8 @@ func TestThinkingE2EMatrix_Body(t *testing.T) {
 			to:          "openai",
 			model:       "user-defined-model",
 			inputJSON:   `{"model":"user-defined-model","contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"thinkingConfig":{"thinkingBudget":0}}}`,
-			expectField: "",
+			expectField: "reasoning_effort",
+			expectValue: "none",
 			expectErr:   false,
 		},
 		// Case 70: thinkingBudget=-1 → auto
@@ -1983,7 +1987,8 @@ func TestThinkingE2EMatrix_Body(t *testing.T) {
 			to:          "codex",
 			model:       "user-defined-model",
 			inputJSON:   `{"model":"user-defined-model","messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","budget_tokens":0}}`,
-			expectField: "",
+			expectField: "reasoning.effort",
+			expectValue: "none",
 			expectErr:   false,
 		},
 		// Case 75: thinking.budget_tokens=-1 → auto
@@ -2311,7 +2316,8 @@ func TestThinkingE2ENewProviderTargets(t *testing.T) {
 			to:          "xai",
 			model:       "xai-level-model(0)",
 			inputJSON:   `{"model":"xai-level-model(0)","messages":[{"role":"user","content":"hi"}]}`,
-			expectField: "",
+			expectField: "reasoning.effort",
+			expectValue: "none",
 		},
 		{
 			name:        "X6",
@@ -2346,7 +2352,8 @@ func TestThinkingE2ENewProviderTargets(t *testing.T) {
 			to:          "xai",
 			model:       "xai-level-model",
 			inputJSON:   `{"model":"xai-level-model","messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","budget_tokens":0}}`,
-			expectField: "",
+			expectField: "reasoning.effort",
+			expectValue: "none",
 		},
 		{
 			name:        "X10",
@@ -2356,6 +2363,30 @@ func TestThinkingE2ENewProviderTargets(t *testing.T) {
 			inputJSON:   `{"model":"xai-level-model","messages":[{"role":"user","content":"hi"}],"thinking":{"type":"adaptive"},"output_config":{"effort":"max"}}`,
 			expectField: "reasoning.effort",
 			expectValue: "high",
+		},
+
+		// Interactions target: native API uses generation_config.thinking_level and thinking_summaries.
+		{
+			name:         "I1",
+			from:         "interactions",
+			to:           "interactions",
+			model:        "gemini-zero-mixed-model",
+			inputJSON:    `{"model":"gemini-zero-mixed-model","generation_config":{"thinking_level":"high","thinking_summaries":"auto"},"input":"hi"}`,
+			expectField:  "generation_config.thinking_level",
+			expectValue:  "high",
+			expectField2: "generation_config.thinking_summaries",
+			expectValue2: "auto",
+		},
+		{
+			name:         "I2",
+			from:         "interactions",
+			to:           "interactions",
+			model:        "gemini-zero-mixed-model(8192)",
+			inputJSON:    `{"model":"gemini-zero-mixed-model(8192)","input":"hi"}`,
+			expectField:  "generation_config.thinking_level",
+			expectValue:  "medium",
+			expectField2: "generation_config.thinking_summaries",
+			expectValue2: "auto",
 		},
 	}
 
@@ -2856,6 +2887,33 @@ func TestThinkingE2EClaudeAdaptive_Body(t *testing.T) {
 			inputJSON: `{"model":"claude-sonnet-4-6-model","messages":[{"role":"user","content":"hi"}],"thinking":{"type":"adaptive"},"output_config":{"effort":"xhigh"}}`,
 			expectErr: true,
 		},
+		// Kimi models exposed via Claude-compatible /v1/messages keep wire format
+		// claude→claude, but the model type is kimi. Claude Code often sends
+		// effort=max; clamp to the highest Kimi-supported level (high).
+		{
+			name:         "C28",
+			from:         "claude",
+			to:           "claude",
+			model:        "kimi-level-model",
+			inputJSON:    `{"model":"kimi-level-model","messages":[{"role":"user","content":"hi"}],"thinking":{"type":"adaptive"},"output_config":{"effort":"max"}}`,
+			expectField:  "thinking.type",
+			expectValue:  "adaptive",
+			expectField2: "output_config.effort",
+			expectValue2: "high",
+			expectErr:    false,
+		},
+		{
+			name:         "C29",
+			from:         "claude",
+			to:           "claude",
+			model:        "kimi-level-model",
+			inputJSON:    `{"model":"kimi-level-model","messages":[{"role":"user","content":"hi"}],"thinking":{"type":"adaptive"},"output_config":{"effort":"xhigh"}}`,
+			expectField:  "thinking.type",
+			expectValue:  "adaptive",
+			expectField2: "output_config.effort",
+			expectValue2: "high",
+			expectErr:    false,
+		},
 	}
 
 	runThinkingTests(t, cases)
@@ -3043,7 +3101,7 @@ func runThinkingTests(t *testing.T, cases []thinkingTestCase) {
 				case "openai":
 					hasThinking = gjson.GetBytes(body, "reasoning_effort").Exists()
 				case "codex":
-					hasThinking = gjson.GetBytes(body, "reasoning.effort").Exists()
+					hasThinking = gjson.GetBytes(body, "reasoning.effort").Exists() || gjson.GetBytes(body, "reasoning").Exists()
 				}
 				if hasThinking {
 					t.Fatalf("expected no thinking field but found one, body=%s", string(body))

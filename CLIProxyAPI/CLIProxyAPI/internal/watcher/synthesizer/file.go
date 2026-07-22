@@ -76,26 +76,9 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) []
 		return nil
 	}
 	t, _ := metadata["type"].(string)
-	if t == "" {
-		if content, ok := metadata["content"].(map[string]any); ok {
-			t, _ = content["type"].(string)
-		}
-	}
 	provider := strings.ToLower(strings.TrimSpace(t))
 	if provider == "gemini" {
 		provider = "gemini-cli"
-	}
-	// Normalize generic "oauth" or "api_key" type to the actual provider name.
-	if provider == "oauth" || provider == "api_key" {
-		var p string
-		if val, ok := metadata["provider"].(string); ok && val != "" {
-			p = val
-		} else if content, ok := metadata["content"].(map[string]any); ok {
-			p, _ = content["provider"].(string)
-		}
-		if p != "" {
-			provider = strings.ToLower(strings.TrimSpace(p))
-		}
 	}
 	if ctx.PluginAuthParser != nil {
 		auths, handled, errParse := parsePluginFileAuths(ctx.PluginAuthParser, pluginapi.AuthParseRequest{
@@ -111,6 +94,7 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) []
 			}
 			perAccountExcluded := extractExcludedModelsFromMetadata(metadata)
 			perAccountModelAliases := extractOAuthModelAliasesFromMetadata(metadata)
+			disabled, _ := metadata["disabled"].(bool)
 			for index, auth := range auths {
 				if auth == nil {
 					continue
@@ -126,6 +110,14 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) []
 				auth.Attributes[coreauth.AttributePath] = fullPath
 				auth.Attributes[coreauth.AttributeSource] = fullPath
 				auth.Attributes[coreauth.AttributeSourceBackend] = coreauth.AuthSourceFile
+				if disabled {
+					auth.Disabled = true
+					auth.Status = coreauth.StatusDisabled
+					if auth.Metadata == nil {
+						auth.Metadata = make(map[string]any)
+					}
+					auth.Metadata["disabled"] = true
+				}
 				coreauth.SetOAuthModelAliasesAttribute(auth, perAccountModelAliases)
 				ApplyAuthExcludedModelsMeta(auth, cfg, perAccountExcluded, "oauth")
 				coreauth.ApplyCustomHeadersFromMetadata(auth)
@@ -225,7 +217,6 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) []
 			}
 		}
 	}
-	ApplyCustomApiKeyAttributes(a, t, metadata, provider)
 	return []*coreauth.Auth{a}
 }
 

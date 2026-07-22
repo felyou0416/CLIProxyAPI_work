@@ -49,6 +49,7 @@ PROJECT_ROOT = PROXY_ROOT
 APP_DIR = PROXY_ROOT
 MEDIA_PROXY_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI-MediaProxy'
 ACCESS_GATEWAY_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI-AccessGateway'
+LOCAL_PLUGIN_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI-LocalPlugin'
 
 
 def _resolve_grok2api_root() -> Path:
@@ -63,8 +64,24 @@ def _resolve_grok2api_root() -> Path:
     return DASHBOARD_ROOT.parent / 'grok2api'
 
 
+def _resolve_media_proxy_binary() -> Path:
+    raw = os.environ.get('CLIPROXYAPI_MEDIA_PROXY_BINARY', '').strip()
+    if raw:
+        return Path(raw).expanduser()
+    return MEDIA_PROXY_ROOT / ('cli-media-proxy.exe' if os.name == 'nt' else 'cli-media-proxy')
+
+
+def _resolve_local_plugin_dir() -> Path:
+    raw = os.environ.get('CLIPROXYAPI_PLUGIN_DIR', '').strip()
+    if raw:
+        return Path(raw).expanduser()
+    return LOCAL_PLUGIN_ROOT / 'dist' / 'windows-amd64'
+
+
 GROK2API_ROOT = _resolve_grok2api_root()
 ACCESS_GATEWAY_BINARY = Path(os.environ.get('CLIPROXYAPI_ACCESS_GATEWAY_BINARY', '')).expanduser() if os.environ.get('CLIPROXYAPI_ACCESS_GATEWAY_BINARY', '').strip() else ACCESS_GATEWAY_ROOT / ('cli-access-gateway.exe' if os.name == 'nt' else 'cli-access-gateway')
+LOCAL_PLUGIN_DIR = _resolve_local_plugin_dir()
+MEDIA_PROXY_BINARY = _resolve_media_proxy_binary()
 
 LEGACY_DEV_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI_dev'
 LEGACY_APP_DIR = LEGACY_DEV_ROOT / 'app'

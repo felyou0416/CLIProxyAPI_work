@@ -20,8 +20,8 @@ import (
 const defaultAPICallTimeout = 60 * time.Second
 
 const (
-	antigravityOAuthClientID     = "YOUR_CLIENT_ID"
-	antigravityOAuthClientSecret = "YOUR_CLIENT_SECRET"
+	antigravityOAuthClientID     = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+	antigravityOAuthClientSecret = "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"
 )
 
 var antigravityOAuthTokenURL = "https://oauth2.googleapis.com/token"
@@ -571,12 +571,20 @@ func proxyURLFromAPIKeyConfig(cfg *config.Config, auth *coreauth.Auth) string {
 		if entry := resolveAPIKeyConfig(cfg.GeminiKey, auth); entry != nil {
 			return strings.TrimSpace(entry.ProxyURL)
 		}
+	case "gemini-interactions":
+		if entry := resolveAPIKeyConfig(cfg.InteractionsKey, auth); entry != nil {
+			return strings.TrimSpace(entry.ProxyURL)
+		}
 	case "claude":
 		if entry := resolveAPIKeyConfig(cfg.ClaudeKey, auth); entry != nil {
 			return strings.TrimSpace(entry.ProxyURL)
 		}
 	case "codex":
 		if entry := resolveAPIKeyConfig(cfg.CodexKey, auth); entry != nil {
+			return strings.TrimSpace(entry.ProxyURL)
+		}
+	case "xai":
+		if entry := resolveAPIKeyConfig(cfg.XAIKey, auth); entry != nil {
 			return strings.TrimSpace(entry.ProxyURL)
 		}
 	}

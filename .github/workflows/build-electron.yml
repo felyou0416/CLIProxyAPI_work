@@ -28,10 +28,16 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version-file: CLIProxyAPI/CLIProxyAPI/go.mod
           cache-dependency-path: |
             CLIProxyAPI/CLIProxyAPI/go.sum
             CLIProxyAPI-AccessGateway/go.sum
+            CLIProxyAPI-LocalPlugin/go.sum
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: '0.16.0'
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -55,11 +61,31 @@ jobs:
           New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
           .\CLIProxyAPI-AccessGateway\build.ps1 -Output (Join-Path $outputDir 'cli-access-gateway.exe')
 
+      - name: Build local plugin
+        shell: pwsh
+        run: |
+          .\CLIProxyAPI-LocalPlugin\build.ps1
+          New-Item -ItemType Directory -Path electron-app\resources\plugins -Force | Out-Null
+          Copy-Item CLIProxyAPI-LocalPlugin\dist\windows-amd64\cliproxy-local.dll electron-app\resources\plugins\cliproxy-local.dll -Force
+
+      - name: Build media proxy
+        shell: pwsh
+        run: |
+          $outputDir = 'electron-app\resources\CLIProxyAPI-MediaProxy'
+          New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+          .\CLIProxyAPI-MediaProxy\build.ps1 -Output (Join-Path $outputDir 'cli-media-proxy.exe')
+          Copy-Item CLIProxyAPI-MediaProxy\config.example.json (Join-Path $outputDir 'config.example.json') -Force
+
       - name: Install Python dependencies
         run: |
           cd CLIProxyAPI-Dashboard
           python -m pip install --upgrade pip
           pip install pyinstaller psutil pywinpty
+
+      - name: Test Dashboard runtime integration
+        run: |
+          cd CLIProxyAPI-Dashboard
+          python -m unittest tests.test_runtime_config tests.test_media_proxy_process
 
       - name: Build Dashboard with PyInstaller
         run: |

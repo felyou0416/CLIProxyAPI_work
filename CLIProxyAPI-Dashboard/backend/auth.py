@@ -10,7 +10,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
-from backend.paths import AUTH_SOURCE_DIRS, MANUAL_AUTH_SAVE_DIR, SOURCE_AUTH_DIR, ACTIVE_AUTH_DIR, BASE_CONFIG, RUNTIME_CONFIG, MODEL_MAPPING_OVERRIDES_FILE, AGGREGATE_MODEL_ALIASES_FILE, PROVIDER_MODEL_TEST_STATE_FILE, MODEL_PROXY_SETTINGS_FILE, QUOTA_CACHE_FILE, APP_DIR, AUTH_DIR, POOL_AUTH_DIR, BACKUPS_DIR, STORAGE_DIR
+from backend.paths import AUTH_SOURCE_DIRS, MANUAL_AUTH_SAVE_DIR, SOURCE_AUTH_DIR, ACTIVE_AUTH_DIR, BASE_CONFIG, RUNTIME_CONFIG, MODEL_MAPPING_OVERRIDES_FILE, AGGREGATE_MODEL_ALIASES_FILE, PROVIDER_MODEL_TEST_STATE_FILE, MODEL_PROXY_SETTINGS_FILE, MODEL_THINKING_CONFIGS_FILE, QUOTA_CACHE_FILE, APP_DIR, AUTH_DIR, POOL_AUTH_DIR, BACKUPS_DIR, STORAGE_DIR, LOCAL_PLUGIN_DIR
 from backend.state import load_state, normalize_route_strategy, get_proxy_bind_host, get_proxy_api_key
 
 
@@ -3746,22 +3746,31 @@ def build_openai_compatibility_block(entries):
                 alias_name = str(model.get('alias') or '').strip()
                 if not model_name or not alias_name:
                     continue
+
+                is_agnes_media = (
+                    str(provider).strip().lower() == 'agnes'
+                    and any(token in model_name.lower() for token in ('image', 'video'))
+                )
+                group_provider = 'agnes-media' if is_agnes_media else provider
+                group_base_url = 'http://127.0.0.1:8320/v1' if is_agnes_media else str(entry['base_url'])
+                group_headers = {} if is_agnes_media else headers
+                group_proxy_url = '' if is_agnes_media else model_proxy_url
                 proxy_group_key = (
-                    provider,
-                    str(entry["base_url"]),
-                    json.dumps(headers, ensure_ascii=False, sort_keys=True),
-                    model_proxy_url,
+                    group_provider,
+                    group_base_url,
+                    json.dumps(group_headers, ensure_ascii=False, sort_keys=True),
+                    group_proxy_url,
                 )
                 proxy_group = grouped_entries.setdefault(proxy_group_key, {
-                    'provider': provider,
-                    'base_url': str(entry['base_url']),
-                    'headers': headers,
+                    'provider': group_provider,
+                    'base_url': group_base_url,
+                    'headers': group_headers,
                     'api_keys': [],
                     'models': [],
                     'seen_models': set(),
-                    'proxy_url': model_proxy_url,
+                    'proxy_url': group_proxy_url,
                 })
-                api_key = str(entry.get('api_key') or '').strip()
+                api_key = 'cliproxyapi' if is_agnes_media else str(entry.get('api_key') or '').strip()
                 if api_key and api_key not in proxy_group['api_keys']:
                     proxy_group['api_keys'].append(api_key)
                 model_key = (model_name, alias_name)
@@ -3771,6 +3780,7 @@ def build_openai_compatibility_block(entries):
                 proxy_group['models'].append({
                     'name': model_name,
                     'alias': alias_name,
+                    'image': is_agnes_media and 'image' in model_name.lower(),
                 })
 
     lines = ['openai-compatibility:']
@@ -3795,6 +3805,8 @@ def build_openai_compatibility_block(entries):
                 f'      - name: "{model["name"]}"',
                 f'        alias: "{model["alias"]}"',
             ])
+            if model.get('image'):
+                lines.append('        image: true')
     return '\n'.join(lines) + '\n'
 
 
@@ -3804,6 +3816,28 @@ def rewrite_openai_compatibility(config_text: str, entries):
     if not block:
         return cleaned
     return cleaned.rstrip() + '\n\n' + block
+
+
+def rewrite_local_plugin_config(config_text: str):
+    cleaned = _strip_top_level_block(config_text, 'plugins')
+    plugin_dir = str(LOCAL_PLUGIN_DIR.resolve()).replace('\\', '/')
+    thinking_file = str(MODEL_THINKING_CONFIGS_FILE.resolve()).replace('\\', '/')
+    lines = [
+        'plugins:',
+        '  enabled: true',
+        f'  dir: "{plugin_dir}"',
+        '  configs:',
+        '    cliproxy-local:',
+        '      enabled: true',
+        '      priority: 100',
+        f'      thinking_config_file: "{thinking_file}"',
+        '      media_provider: "openai-compatible-agnes-media"',
+        '      media_models:',
+        '        - "agnes-agnes-image-2.0-flash"',
+        '        - "agnes-agnes-image-2.1-flash"',
+        '        - "agnes-agnes-video-v2.0"',
+    ]
+    return cleaned.rstrip() + '\n\n' + '\n'.join(lines) + '\n'
 
 
 def build_claude_api_key_block(entries):
@@ -4826,6 +4860,7 @@ def build_runtime_config(
     runtime_text = rewrite_oauth_model_aliases(runtime_text, providers, auth_refs=None)
     runtime_text = rewrite_claude_api_key(runtime_text, claude_compat_entries)
     runtime_text = rewrite_openai_compatibility(runtime_text, openai_compat_entries)
+    runtime_text = rewrite_local_plugin_config(runtime_text)
 
     # New advanced config rewrites
     runtime_text = rewrite_disable_cooling(runtime_text, current_state.get('disable_cooling', False))

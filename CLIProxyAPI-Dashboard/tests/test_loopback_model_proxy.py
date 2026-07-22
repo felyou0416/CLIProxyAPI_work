@@ -82,7 +82,7 @@ class LoopbackModelProxyTests(unittest.TestCase):
             'provider': 'agnes',
             'base_url': 'https://apihub.agnes-ai.com/v1',
             'api_key': 'sk-agnes-test',
-            'models': ['agnes-video-v2.0'],
+            'models': ['custom-model-v1'],
             'headers': {},
         }]
         with patch.object(auth, '_load_model_mapping_overrides', return_value={}):

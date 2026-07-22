@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/api"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/constant"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/homeplugins"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
@@ -986,7 +987,8 @@ func baselineExecutorAuths() []*coreauth.Auth {
 	providers := []string{
 		"codex",
 		"claude",
-		"gemini",
+		constant.Gemini,
+		constant.GeminiInteractions,
 		"vertex",
 		"aistudio",
 		"antigravity",
@@ -1062,8 +1064,10 @@ func (s *Service) registerExecutorForAuth(a *coreauth.Auth, forceReplace bool) {
 		return
 	}
 	switch strings.ToLower(a.Provider) {
-	case "gemini":
+	case constant.Gemini:
 		s.coreManager.RegisterExecutor(executor.NewGeminiExecutor(s.cfg))
+	case constant.GeminiInteractions:
+		s.coreManager.RegisterExecutor(executor.NewGeminiInteractionsExecutor(s.cfg))
 	case "vertex":
 		s.coreManager.RegisterExecutor(executor.NewGeminiVertexExecutor(s.cfg))
 	case "aistudio":
@@ -1940,9 +1944,20 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 	}
 	var models []*ModelInfo
 	switch provider {
-	case "gemini":
+	case constant.Gemini:
 		models = registry.GetGeminiModels()
 		if entry := s.resolveConfigGeminiKey(a); entry != nil {
+			if len(entry.Models) > 0 {
+				models = buildGeminiConfigModels(entry)
+			}
+			if authKind == "apikey" {
+				excluded = entry.ExcludedModels
+			}
+		}
+		models = applyExcludedModels(models, excluded)
+	case constant.GeminiInteractions:
+		models = registry.GetGeminiModels()
+		if entry := s.resolveConfigInteractionsKey(a); entry != nil {
 			if len(entry.Models) > 0 {
 				models = buildGeminiConfigModels(entry)
 			}
@@ -2012,6 +2027,14 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 		models = applyExcludedModels(models, excluded)
 	case "xai":
 		models = registry.GetXAIModels()
+		if entry := s.resolveConfigXAIKey(a); entry != nil {
+			if len(entry.Models) > 0 {
+				models = buildXAIConfigModels(entry)
+			}
+			if authKind == "apikey" {
+				excluded = entry.ExcludedModels
+			}
+		}
 		models = applyExcludedModels(models, excluded)
 	default:
 		// Handle OpenAI-compatibility providers by name using config
@@ -2051,9 +2074,6 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 					providerKey = strings.ToLower(v)
 					isCompatAuth = true
 				}
-			}
-			if isCompatAuth {
-				providerKey = util.OpenAICompatibleProviderKey(providerKey)
 			}
 			if cached, ok := compatCache.lookup(compatName); ok {
 				isCompatAuth = true
@@ -2109,10 +2129,8 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 				if len(models) > 0 {
 					s.registerResolvedModelsForAuth(a, providerKey, applyModelPrefixes(models, a.Prefix, s.cfg != nil && s.cfg.ForceModelPrefix))
 				} else {
-					if !s.TryRegisterModelsFromMetadata(a, providerKey, compatName) {
-						// Otherwise, drop any prior registration.
-						GlobalModelRegistry().UnregisterClient(a.ID)
-					}
+					// No matching provider found or models removed entirely; drop any prior registration.
+					GlobalModelRegistry().UnregisterClient(a.ID)
 				}
 				return
 			}
@@ -2226,6 +2244,20 @@ func (s *Service) resolveConfigClaudeKey(auth *coreauth.Auth) *config.ClaudeKey 
 }
 
 func (s *Service) resolveConfigGeminiKey(auth *coreauth.Auth) *config.GeminiKey {
+	if s == nil || s.cfg == nil {
+		return nil
+	}
+	return s.resolveConfigGeminiKeyEntry(auth, s.cfg.GeminiKey)
+}
+
+func (s *Service) resolveConfigInteractionsKey(auth *coreauth.Auth) *config.GeminiKey {
+	if s == nil || s.cfg == nil {
+		return nil
+	}
+	return s.resolveConfigGeminiKeyEntry(auth, s.cfg.InteractionsKey)
+}
+
+func (s *Service) resolveConfigGeminiKeyEntry(auth *coreauth.Auth, entries []config.GeminiKey) *config.GeminiKey {
 	if auth == nil || s.cfg == nil {
 		return nil
 	}
@@ -2234,8 +2266,8 @@ func (s *Service) resolveConfigGeminiKey(auth *coreauth.Auth) *config.GeminiKey 
 		attrKey = strings.TrimSpace(auth.Attributes["api_key"])
 		attrBase = strings.TrimSpace(auth.Attributes["base_url"])
 	}
-	for i := range s.cfg.GeminiKey {
-		entry := &s.cfg.GeminiKey[i]
+	for i := range entries {
+		entry := &entries[i]
 		cfgKey := strings.TrimSpace(entry.APIKey)
 		cfgBase := strings.TrimSpace(entry.BaseURL)
 		if attrKey != "" && strings.EqualFold(cfgKey, attrKey) {
@@ -2286,7 +2318,21 @@ func (s *Service) resolveConfigVertexCompatKey(auth *coreauth.Auth) *config.Vert
 }
 
 func (s *Service) resolveConfigCodexKey(auth *coreauth.Auth) *config.CodexKey {
-	if auth == nil || s.cfg == nil {
+	if s == nil || s.cfg == nil {
+		return nil
+	}
+	return resolveConfigCodexStyleKey(auth, s.cfg.CodexKey)
+}
+
+func (s *Service) resolveConfigXAIKey(auth *coreauth.Auth) *config.XAIKey {
+	if s == nil || s.cfg == nil {
+		return nil
+	}
+	return resolveConfigCodexStyleKey(auth, s.cfg.XAIKey)
+}
+
+func resolveConfigCodexStyleKey(auth *coreauth.Auth, entries []config.CodexKey) *config.CodexKey {
+	if auth == nil {
 		return nil
 	}
 	var attrKey, attrBase string
@@ -2294,8 +2340,8 @@ func (s *Service) resolveConfigCodexKey(auth *coreauth.Auth) *config.CodexKey {
 		attrKey = strings.TrimSpace(auth.Attributes["api_key"])
 		attrBase = strings.TrimSpace(auth.Attributes["base_url"])
 	}
-	for i := range s.cfg.CodexKey {
-		entry := &s.cfg.CodexKey[i]
+	for i := range entries {
+		entry := &entries[i]
 		cfgKey := strings.TrimSpace(entry.APIKey)
 		cfgBase := strings.TrimSpace(entry.BaseURL)
 		if attrKey != "" && strings.EqualFold(cfgKey, attrKey) {
@@ -2448,6 +2494,34 @@ func matchWildcard(pattern, value string) bool {
 type modelEntry interface {
 	GetName() string
 	GetAlias() string
+	GetDisplayName() string
+}
+
+func buildConfiguredModelInfo(model modelEntry, ownedBy, modelType string, created int64, fallbackDisplayName string, userDefined bool) *ModelInfo {
+	name := strings.TrimSpace(model.GetName())
+	alias := strings.TrimSpace(model.GetAlias())
+	if alias == "" {
+		alias = name
+	}
+	if alias == "" {
+		return nil
+	}
+	displayName := strings.TrimSpace(model.GetDisplayName())
+	if displayName == "" {
+		displayName = fallbackDisplayName
+	}
+	if displayName == "" {
+		displayName = alias
+	}
+	return &ModelInfo{
+		ID:          alias,
+		Object:      "model",
+		Created:     created,
+		OwnedBy:     ownedBy,
+		Type:        modelType,
+		DisplayName: displayName,
+		UserDefined: userDefined,
+	}
 }
 
 func buildOpenAICompatibilityConfigModels(compat *config.OpenAICompatibility) []*ModelInfo {
@@ -2458,35 +2532,47 @@ func buildOpenAICompatibilityConfigModels(compat *config.OpenAICompatibility) []
 	models := make([]*ModelInfo, 0, len(compat.Models))
 	for i := range compat.Models {
 		model := compat.Models[i]
-		modelID := strings.TrimSpace(model.Alias)
-		if modelID == "" {
-			modelID = strings.TrimSpace(model.Name)
-		}
-		if modelID == "" {
-			continue
-		}
 		modelType := "openai-compatibility"
-		if model.Image || isImageModelName(modelID) {
+		if model.Image {
 			modelType = registry.OpenAIImageModelType
-		} else if isVideoModelName(modelID) {
-			modelType = "openai-video"
+		}
+		info := buildConfiguredModelInfo(model, compat.Name, modelType, now, strings.TrimSpace(model.Alias), false)
+		if info == nil {
+			continue
 		}
 		thinking := model.Thinking
 		if thinking == nil && !model.Image {
 			thinking = &registry.ThinkingSupport{Levels: []string{"low", "medium", "high"}}
 		}
-		models = append(models, &ModelInfo{
-			ID:          modelID,
-			Object:      "model",
-			Created:     now,
-			OwnedBy:     compat.Name,
-			Type:        modelType,
-			DisplayName: modelID,
-			UserDefined: false,
-			Thinking:    thinking,
-		})
+		info.Thinking = thinking
+		info.SupportedInputModalities = normalizeCompatConfigModalities(model.InputModalities)
+		info.SupportedOutputModalities = normalizeCompatConfigModalities(model.OutputModalities)
+		models = append(models, info)
 	}
 	return models
+}
+
+func normalizeCompatConfigModalities(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, item := range raw {
+		modality := strings.ToLower(strings.TrimSpace(item))
+		if modality == "" {
+			continue
+		}
+		if _, exists := seen[modality]; exists {
+			continue
+		}
+		seen[modality] = struct{}{}
+		out = append(out, modality)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func buildConfigModels[T modelEntry](models []T, ownedBy, modelType string) []*ModelInfo {
@@ -2499,31 +2585,16 @@ func buildConfigModels[T modelEntry](models []T, ownedBy, modelType string) []*M
 	for i := range models {
 		model := models[i]
 		name := strings.TrimSpace(model.GetName())
-		alias := strings.TrimSpace(model.GetAlias())
-		if alias == "" {
-			alias = name
-		}
-		if alias == "" {
+		info := buildConfiguredModelInfo(model, ownedBy, modelType, now, name, true)
+		if info == nil {
 			continue
 		}
+		alias := info.ID
 		key := strings.ToLower(alias)
 		if _, exists := seen[key]; exists {
 			continue
 		}
 		seen[key] = struct{}{}
-		display := name
-		if display == "" {
-			display = alias
-		}
-		info := &ModelInfo{
-			ID:          alias,
-			Object:      "model",
-			Created:     now,
-			OwnedBy:     ownedBy,
-			Type:        modelType,
-			DisplayName: display,
-			UserDefined: true,
-		}
 		if name != "" {
 			if upstream := registry.LookupStaticModelInfo(name); upstream != nil && upstream.Thinking != nil {
 				info.Thinking = upstream.Thinking
@@ -2555,11 +2626,50 @@ func buildClaudeConfigModels(entry *config.ClaudeKey) []*ModelInfo {
 	return buildConfigModels(entry.Models, "anthropic", "claude")
 }
 
+func buildXAIConfigModels(entry *config.XAIKey) []*ModelInfo {
+	if entry == nil {
+		return nil
+	}
+	return buildConfigModels(entry.Models, "xai", "xai")
+}
+
 func buildCodexConfigModels(entry *config.CodexKey) []*ModelInfo {
 	if entry == nil {
 		return nil
 	}
-	return registry.WithCodexBuiltins(buildConfigModels(entry.Models, "openai", "openai"))
+
+	models := registry.WithCodexBuiltins(buildConfigModels(entry.Models, "openai", "openai"))
+	configuredDisplayNames := make(map[string]string, len(entry.Models))
+	seenConfiguredModels := make(map[string]struct{}, len(entry.Models))
+	for i := range entry.Models {
+		model := entry.Models[i]
+		alias := strings.TrimSpace(model.Alias)
+		if alias == "" {
+			alias = strings.TrimSpace(model.Name)
+		}
+		if alias == "" {
+			continue
+		}
+		key := strings.ToLower(alias)
+		if _, exists := seenConfiguredModels[key]; exists {
+			continue
+		}
+		seenConfiguredModels[key] = struct{}{}
+
+		displayName := strings.TrimSpace(model.DisplayName)
+		if displayName != "" {
+			configuredDisplayNames[key] = displayName
+		}
+	}
+	for _, model := range models {
+		if model == nil {
+			continue
+		}
+		if displayName, ok := configuredDisplayNames[strings.ToLower(model.ID)]; ok {
+			model.DisplayName = displayName
+		}
+	}
+	return models
 }
 
 func rewriteModelInfoName(name, oldID, newID string) string {
@@ -2731,7 +2841,3 @@ func applyOAuthModelAliasEntries(aliases []config.OAuthModelAlias, models []*Mod
 	}
 	return out
 }
-
-
-
-

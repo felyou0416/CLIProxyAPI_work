@@ -60,7 +60,6 @@ func setAgnesEnableThinking(body []byte, enabled bool) ([]byte, error) {
 	result, _ = sjson.DeleteBytes(result, "reasoning_effort")
 	return result, nil
 }
-
 // Apply applies thinking configuration to OpenAI request body.
 //
 // Expected output format:
@@ -90,7 +89,8 @@ func (a *Applier) Apply(body []byte, config thinking.ThinkingConfig, modelInfo *
 	}
 
 	if config.Mode == thinking.ModeLevel {
-		return setOrStripReasoningEffort(body, string(config.Level))
+		result, _ := sjson.SetBytes(body, "reasoning_effort", string(config.Level))
+		return result, nil
 	}
 
 	effort := ""
@@ -110,7 +110,8 @@ func (a *Applier) Apply(body []byte, config thinking.ThinkingConfig, modelInfo *
 		return body, nil
 	}
 
-	return setOrStripReasoningEffort(body, effort)
+	result, _ := sjson.SetBytes(body, "reasoning_effort", effort)
+	return result, nil
 }
 
 func applyCompatibleOpenAI(body []byte, config thinking.ThinkingConfig, modelInfo *registry.ModelInfo) ([]byte, error) {
@@ -148,5 +149,6 @@ func applyCompatibleOpenAI(body []byte, config thinking.ThinkingConfig, modelInf
 		return body, nil
 	}
 
-	return setOrStripReasoningEffort(body, effort)
+	result, _ := sjson.SetBytes(body, "reasoning_effort", effort)
+	return result, nil
 }

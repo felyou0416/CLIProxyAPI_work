@@ -66,6 +66,27 @@ func TestLookupAPIKeyUpstreamModel(t *testing.T) {
 	}
 }
 
+func TestLookupAPIKeyUpstreamModel_InteractionsKey(t *testing.T) {
+	cfg := &internalconfig.Config{
+		InteractionsKey: []internalconfig.GeminiKey{{
+			APIKey:  "interactions-key",
+			BaseURL: "https://interactions.example.com",
+			Models:  []internalconfig.GeminiModel{{Name: "gemini-2.5-flash", Alias: "native-flash"}},
+		}},
+	}
+
+	mgr := NewManager(nil, nil, nil)
+	mgr.SetConfig(cfg)
+
+	ctx := context.Background()
+	_, _ = mgr.Register(ctx, &Auth{ID: "interactions-auth", Provider: "gemini-interactions", Attributes: map[string]string{"api_key": "interactions-key", "base_url": "https://interactions.example.com"}})
+
+	resolved := mgr.lookupAPIKeyUpstreamModel("interactions-auth", "native-flash")
+	if resolved != "gemini-2.5-flash" {
+		t.Fatalf("lookupAPIKeyUpstreamModel() = %q, want gemini-2.5-flash", resolved)
+	}
+}
+
 func TestAPIKeyModelAlias_ConfigHotReload(t *testing.T) {
 	cfg := &internalconfig.Config{
 		GeminiKey: []internalconfig.GeminiKey{
@@ -108,6 +129,7 @@ func TestAPIKeyModelAlias_MultipleProviders(t *testing.T) {
 		GeminiKey: []internalconfig.GeminiKey{{APIKey: "gemini-key", Models: []internalconfig.GeminiModel{{Name: "gemini-2.5-pro", Alias: "gp"}}}},
 		ClaudeKey: []internalconfig.ClaudeKey{{APIKey: "claude-key", Models: []internalconfig.ClaudeModel{{Name: "claude-sonnet-4", Alias: "cs4"}}}},
 		CodexKey:  []internalconfig.CodexKey{{APIKey: "codex-key", Models: []internalconfig.CodexModel{{Name: "o3", Alias: "o"}}}},
+		XAIKey:    []internalconfig.XAIKey{{APIKey: "xai-key", Models: []internalconfig.XAIModel{{Name: "grok-4.5", Alias: "grok-latest"}}}},
 	}
 
 	mgr := NewManager(nil, nil, nil)
@@ -117,6 +139,7 @@ func TestAPIKeyModelAlias_MultipleProviders(t *testing.T) {
 	_, _ = mgr.Register(ctx, &Auth{ID: "gemini-auth", Provider: "gemini", Attributes: map[string]string{"api_key": "gemini-key"}})
 	_, _ = mgr.Register(ctx, &Auth{ID: "claude-auth", Provider: "claude", Attributes: map[string]string{"api_key": "claude-key"}})
 	_, _ = mgr.Register(ctx, &Auth{ID: "codex-auth", Provider: "codex", Attributes: map[string]string{"api_key": "codex-key"}})
+	_, _ = mgr.Register(ctx, &Auth{ID: "xai-auth", Provider: "xai", Attributes: map[string]string{"api_key": "xai-key"}})
 
 	tests := []struct {
 		authID, input, want string
@@ -124,6 +147,7 @@ func TestAPIKeyModelAlias_MultipleProviders(t *testing.T) {
 		{"gemini-auth", "gp", "gemini-2.5-pro"},
 		{"claude-auth", "cs4", "claude-sonnet-4"},
 		{"codex-auth", "o", "o3"},
+		{"xai-auth", "grok-latest", "grok-4.5"},
 	}
 
 	for _, tt := range tests {
