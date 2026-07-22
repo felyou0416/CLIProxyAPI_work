@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-07-22
+### Fixed
+- Fixed Go test path resolution in local plugin `build.ps1` for CGO builds.
+- Fixed Zig cross-compilation version pinning and UTF-8 encoding for `package.json` in CI workflow.
+- Fixed `test_runtime_config.py` path normalization to use resolved POSIX paths.
+
 ## [1.1.0] - 2026-07-22
 ### Added
 - Upgraded CPA Go proxy server kernel to official v7.2.74 with clean zero-patch architecture.
