@@ -32,7 +32,7 @@ New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 Push-Location $Root
 try {
     if (-not $SkipTests) {
-        go test ./...
+        go test .
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
     go build -buildmode=c-shared -o $output .
