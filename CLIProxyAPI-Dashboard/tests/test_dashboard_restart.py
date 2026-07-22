@@ -35,7 +35,10 @@ class TestDashboardRestart(unittest.TestCase):
             return MagicMock()
 
         mock_thread.side_effect = mock_thread_init
-        mock_popen.return_value = MagicMock()
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None  # still running after spawn
+        mock_proc.pid = 99901
+        mock_popen.return_value = mock_proc
 
         ps_path = processes.DASHBOARD_ROOT / 'start_dashboard.ps1'
 
@@ -54,22 +57,30 @@ class TestDashboardRestart(unittest.TestCase):
         mock_popen.assert_called_once()
         args, kwargs = mock_popen.call_args
         cmd_args = args[0]
-        self.assertIn('powershell', cmd_args)
-        self.assertIn('-EncodedCommand', cmd_args)
-        encoded = cmd_args[cmd_args.index('-EncodedCommand') + 1]
-        decoded = base64.b64decode(encoded).decode('utf-16le')
+        # Windows relauncher is now a on-disk .ps1 started with -File (not EncodedCommand).
+        self.assertTrue(any('powershell' in str(part).lower() for part in cmd_args))
+        self.assertIn('-File', cmd_args)
+        waiter = Path(cmd_args[cmd_args.index('-File') + 1])
+        self.assertTrue(waiter.exists())
+        decoded = waiter.read_text(encoding='utf-8')
         # Must wait for PID and abort (not force-start) on timeout.
         self.assertIn('4242', decoded)
         self.assertIn('aborting relaunch', decoded)
         self.assertNotIn('forcing start anyway', decoded)
-        self.assertTrue(kwargs.get('close_fds'))
+        self.assertFalse(kwargs.get('close_fds'))
+        self.assertTrue(result.get('relauncher_pid'))
 
-        mock_sleep.assert_called_once_with(0.4)  # settle floor
+        # exit delay uses min(settle, 2.0); poll confirmation also sleeps 0.15
+        self.assertGreaterEqual(mock_sleep.call_count, 1)
         mock_exit.assert_called_once_with(0)
 
         stamp = processes._read_dashboard_restart_stamp()
         self.assertIsNotNone(stamp)
         self.assertEqual(stamp.get('token'), result.get('token'))
+        try:
+            waiter.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     @patch('backend.processes.time.sleep')
     @patch('backend.processes.os._exit')
@@ -83,7 +94,10 @@ class TestDashboardRestart(unittest.TestCase):
             return MagicMock()
 
         mock_thread.side_effect = mock_thread_init
-        mock_popen.return_value = MagicMock()
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.pid = 99902
+        mock_popen.return_value = mock_proc
 
         bat_path = processes.DASHBOARD_ROOT / 'start_dashboard.bat'
 
@@ -97,11 +111,16 @@ class TestDashboardRestart(unittest.TestCase):
         mock_popen.assert_called_once()
         args, _kwargs = mock_popen.call_args
         cmd_args = args[0]
-        encoded = cmd_args[cmd_args.index('-EncodedCommand') + 1]
-        decoded = base64.b64decode(encoded).decode('utf-16le')
+        self.assertIn('-File', cmd_args)
+        waiter = Path(cmd_args[cmd_args.index('-File') + 1])
+        decoded = waiter.read_text(encoding='utf-8')
         self.assertIn('start_dashboard.bat', decoded)
         self.assertIn('5151', decoded)
         mock_exit.assert_called_once_with(0)
+        try:
+            waiter.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     @patch('backend.processes.subprocess.Popen')
     @patch('backend.processes.threading.Thread')
@@ -126,7 +145,10 @@ class TestDashboardRestart(unittest.TestCase):
             return MagicMock()
 
         mock_thread.side_effect = mock_thread_init
-        mock_popen.return_value = MagicMock()
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.pid = 99903
+        mock_popen.return_value = mock_proc
         ps_path = processes.DASHBOARD_ROOT / 'start_dashboard.ps1'
 
         def exists_side_effect(self):

@@ -35,6 +35,9 @@ _PUBLIC_STATIC_FILES = {
     '/',
     '/index.html',
     '/dashboard.css',
+    '/favicon.ico',
+    '/favicon.svg',
+    '/favicon.png',
 }
 
 

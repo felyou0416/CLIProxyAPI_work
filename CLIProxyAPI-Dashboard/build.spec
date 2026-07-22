@@ -11,6 +11,9 @@ a = Analysis(
     datas=[
         (os.path.join(ROOT, 'index.html'), '.'),
         (os.path.join(ROOT, 'dashboard.css'), '.'),
+        (os.path.join(ROOT, 'favicon.ico'), '.'),
+        (os.path.join(ROOT, 'favicon.svg'), '.'),
+        (os.path.join(ROOT, 'favicon.png'), '.'),
         (os.path.join(ROOT, 'sections'), 'sections'),
         (os.path.join(ROOT, 'js'), 'js'),
         (os.path.join(ROOT, 'css'), 'css'),

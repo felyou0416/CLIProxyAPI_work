@@ -5,6 +5,8 @@ let requestEventsServerOffset = 0;
 let requestEventsTotal = 0;
 
 let requestEventsPageSize = 50;
+let _requestGroupSeq = 0;
+let _requestGroupClickInit = false;
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -175,25 +177,162 @@ function getRequestModelPlaceholder(item) {
   return '未记录模型';
 }
 
-function requestEventRowHtml(item) {
-  const statusCode = Number(item.status_code || 0);
-  const success = !!item.success;
-  const statusClass = success ? 'ok' : (statusCode >= 500 ? 'warn' : 'off');
-  const tokenText = item.total_tokens != null ? `${item.total_tokens}` : '-';
-  const tokenTitle = item.total_tokens != null
-    ? `prompt ${item.prompt_tokens ?? 0} / completion ${item.completion_tokens ?? 0} / total ${item.total_tokens}`
-    : '';
-  const routeSource = getRequestEventRouteSource(item);
-  const routeConfidence = getRequestEventRouteConfidence(item);
-  const requestedModel = getRequestEventModelLabel(item);
-  const modelPlaceholder = getRequestModelPlaceholder(item);
-  const routedModel = getRequestEventModelLabel({
+function getRequestEventRoutedModelLabel(item) {
+  const requested = getRequestEventModelLabel(item);
+  return getRequestEventModelLabel({
     requested_model: item?.routed_model,
     routed_model: item?.actual_model,
     actual_model: item?.actual_model,
     model: item?.model,
     model_id: item?.model_id,
-  }) || requestedModel;
+  }) || requested;
+}
+
+function requestEventFingerprint(item) {
+  // Collapse when status + request path + model route match (consecutive).
+  // Errors also key on error text so different failures don't merge.
+  const path = String(item?.path || '').trim().split('?')[0];
+  const status = Number(item?.status_code || 0);
+  const success = !!item?.success;
+  const requested = getRequestEventModelLabel(item);
+  const routed = getRequestEventRoutedModelLabel(item);
+  const provider = requestProviderLabel(item);
+  const error = success ? '' : String(item?.error_summary || '').trim();
+  return [path, status, success ? 1 : 0, requested, routed, provider, error].join('|');
+}
+
+function sumRequestGroupUsage(items) {
+  let prompt = 0;
+  let completion = 0;
+  let total = 0;
+  let hasTokens = false;
+  let latencySum = 0;
+  let latencyCount = 0;
+  for (const item of items || []) {
+    const p = item?.prompt_tokens;
+    const c = item?.completion_tokens;
+    const t = item?.total_tokens;
+    if (p != null || c != null || t != null) {
+      hasTokens = true;
+      const pv = Number(p || 0);
+      const cv = Number(c || 0);
+      prompt += Number.isFinite(pv) ? pv : 0;
+      completion += Number.isFinite(cv) ? cv : 0;
+      if (t != null && Number.isFinite(Number(t))) {
+        total += Number(t);
+      } else {
+        total += (Number.isFinite(pv) ? pv : 0) + (Number.isFinite(cv) ? cv : 0);
+      }
+    }
+    if (item?.latency_ms != null && Number.isFinite(Number(item.latency_ms))) {
+      latencySum += Number(item.latency_ms);
+      latencyCount += 1;
+    }
+  }
+  return {
+    prompt_tokens: hasTokens ? prompt : null,
+    completion_tokens: hasTokens ? completion : null,
+    total_tokens: hasTokens ? total : null,
+    latency_ms: latencyCount ? Math.round(latencySum / latencyCount) : null,
+    latency_sum_ms: latencyCount ? Math.round(latencySum) : null,
+  };
+}
+
+function groupConsecutiveRequestEvents(items) {
+  const groups = [];
+  for (const item of items) {
+    const fp = requestEventFingerprint(item);
+    const last = groups[groups.length - 1];
+    if (last && last.fingerprint === fp) {
+      last.count += 1;
+      last.items.push(item);
+    } else {
+      groups.push({ fingerprint: fp, count: 1, items: [item] });
+    }
+  }
+  return groups;
+}
+
+function toggleRequestGroup(gid) {
+  const badge = document.querySelector(`.req-dup-badge[data-gid="${gid}"]`);
+  const children = document.querySelectorAll(`tr.req-group-child[data-gid="${gid}"]`);
+  const expanded = badge?.classList.contains('expanded');
+  children.forEach((tr) => { tr.style.display = expanded ? 'none' : ''; });
+  if (badge) {
+    badge.classList.toggle('expanded', !expanded);
+    badge.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+  }
+}
+
+function initRequestGroupClickHandler() {
+  if (_requestGroupClickInit) return;
+  _requestGroupClickInit = true;
+  document.addEventListener('click', (e) => {
+    const badge = e.target.closest('.req-dup-badge');
+    if (!badge) return;
+    e.stopPropagation();
+    toggleRequestGroup(badge.dataset.gid);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const badge = e.target.closest?.('.req-dup-badge');
+    if (!badge) return;
+    e.preventDefault();
+    toggleRequestGroup(badge.dataset.gid);
+  });
+}
+
+function renderRequestEventsItems(items) {
+  initRequestGroupClickHandler();
+  const groups = groupConsecutiveRequestEvents(items);
+  const rows = [];
+  for (const group of groups) {
+    if (group.count < 2) {
+      rows.push(requestEventRowHtml(group.items[0]));
+      continue;
+    }
+    _requestGroupSeq += 1;
+    const gid = 'rg' + _requestGroupSeq;
+    const aggregateUsage = sumRequestGroupUsage(group.items);
+    rows.push(requestEventRowHtml(group.items[0], {
+      groupId: gid,
+      badgeCount: group.count,
+      aggregateUsage,
+    }));
+    for (let i = 1; i < group.items.length; i++) {
+      rows.push(requestEventRowHtml(group.items[i], { groupId: gid, isChild: true }));
+    }
+  }
+  return rows.join('');
+}
+
+function requestEventRowHtml(item, opts = {}) {
+  const statusCode = Number(item.status_code || 0);
+  const success = !!item.success;
+  const statusClass = success ? 'ok' : (statusCode >= 500 ? 'warn' : 'off');
+  const aggregateUsage = opts.aggregateUsage || null;
+  const isAggregated = !!aggregateUsage && Number(opts.badgeCount || 0) >= 2;
+  const promptTokens = isAggregated ? aggregateUsage.prompt_tokens : item.prompt_tokens;
+  const completionTokens = isAggregated ? aggregateUsage.completion_tokens : item.completion_tokens;
+  const totalTokens = isAggregated ? aggregateUsage.total_tokens : item.total_tokens;
+  const latencyMs = isAggregated
+    ? (aggregateUsage.latency_ms != null ? aggregateUsage.latency_ms : item.latency_ms)
+    : item.latency_ms;
+  const tokenText = totalTokens != null
+    ? (isAggregated ? `Σ ${totalTokens}` : `${totalTokens}`)
+    : '-';
+  let tokenTitle = '';
+  if (totalTokens != null || promptTokens != null || completionTokens != null) {
+    const base = `prompt ${promptTokens ?? 0} / completion ${completionTokens ?? 0} / total ${totalTokens ?? 0}`;
+    tokenTitle = isAggregated
+      ? `${typeof getLanguage === 'function' && getLanguage() === 'en' ? 'Sum of' : '合计'} ${opts.badgeCount} ${typeof getLanguage === 'function' && getLanguage() === 'en' ? 'entries' : '条'}: ${base}`
+      : base;
+  }
+  const routeSource = getRequestEventRouteSource(item);
+  const routeConfidence = getRequestEventRouteConfidence(item);
+  const requestedModel = getRequestEventModelLabel(item);
+  const modelPlaceholder = getRequestModelPlaceholder(item);
+  const routedModel = getRequestEventRoutedModelLabel(item);
   const displayTime = formatDashboardTs(item.timestamp);
   const day = typeof displayTime === 'string' ? displayTime : displayTime.day;
   const time = typeof displayTime === 'string' ? '' : displayTime.time;
@@ -207,11 +346,25 @@ function requestEventRowHtml(item) {
   }
   const hasActualRoute = routedModel && routedModel !== requestedModel;
   const errorText = String(item.error_summary || '').trim();
-  const latencyText = item.latency_ms != null ? `${item.latency_ms} ms` : '';
+  const latencyText = latencyMs != null
+    ? (isAggregated ? `avg ${latencyMs} ms` : `${latencyMs} ms`)
+    : '';
+  const groupId = opts.groupId || '';
+  const isChild = !!opts.isChild;
+  const badgeCount = Number(opts.badgeCount || 0);
+  const groupAttr = groupId ? ` data-gid="${groupId}"` : '';
+  const childClass = isChild ? ' req-group-child' : '';
+  const childStyle = isChild ? ' style="display:none;"' : '';
+  const en = typeof getLanguage === 'function' && getLanguage() === 'en';
+  const badgeTone = success ? 'is-ok' : 'is-error';
+  const badgeHtml = badgeCount >= 2
+    ? `<span class="req-dup-badge ${badgeTone}" data-gid="${groupId}" title="${en ? 'Click to expand ' + badgeCount + ' entries' : '点击展开 ' + badgeCount + ' 条'}" role="button" tabindex="0" aria-expanded="false">×${badgeCount}</span>`
+    : '';
   return `
-    <tr class="request-row ${success ? 'is-ok' : 'is-error'}">
+    <tr class="request-row ${success ? 'is-ok' : 'is-error'}${childClass}${isAggregated ? ' req-group-head' : ''}"${groupAttr}${childStyle}>
       <td class="request-time-cell">
         <div style="display: flex; align-items: center; gap: 6px;">
+          ${badgeHtml}
           <div class="request-time">${escapeHtml(time || day)}</div>
           ${time ? `<span class="request-day" style="font-size: 11px; opacity: 0.6;">${escapeHtml(day)}</span>` : ''}
         </div>
@@ -323,10 +476,10 @@ async function loadRequestEventsPanel(force = false, append = false) {
     if (table) {
       if (!append || currentOffset === 0) {
         table.innerHTML = items.length
-          ? items.map(requestEventRowHtml).join('')
+          ? renderRequestEventsItems(items)
           : '<tr><td colspan="6">暂无请求记录</td></tr>';
       } else if (items.length) {
-        table.insertAdjacentHTML('beforeend', items.map(requestEventRowHtml).join(''));
+        table.insertAdjacentHTML('beforeend', renderRequestEventsItems(items));
       }
     }
 

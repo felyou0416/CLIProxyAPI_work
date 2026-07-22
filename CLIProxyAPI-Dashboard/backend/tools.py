@@ -6,6 +6,7 @@ import urllib.request
 import urllib.error
 import json
 import sys
+import os
 import time
 import tempfile
 import shutil
@@ -15,7 +16,7 @@ import mimetypes
 import re
 from urllib.parse import urlparse
 from pathlib import Path
-from backend.paths import ROOT, PROJECT_ROOT, CLI_EXE, BASE_CONFIG, TOOL_LOGS_DIR, PROVIDER_MODEL_TEST_STATE_FILE, TEMP_DIR, GENERATED_IMAGES_DIR
+from backend.paths import ROOT, PROJECT_ROOT, CLI_EXE, BASE_CONFIG, TOOL_LOGS_DIR, PROVIDER_MODEL_TEST_STATE_FILE, TEMP_DIR, GENERATED_IMAGES_DIR, GENERATED_VIDEOS_DIR
 from backend.processes import process_lock, tool_processes, tool_states, process_alive, kill_process, read_tail, _set_tool_state, _tool_log_path
 from backend.processes import find_proxy_listener_pid, media_proxy_port, start_media_proxy, wait_for_media_proxy_ready
 from backend.processes import probe_socket_stack
@@ -633,6 +634,8 @@ def _ensure_media_proxy_running():
 
 IMAGE_URL_RE = re.compile(r'https?://[^\s)"\']+\.(?:png|jpe?g|webp)(?:\?[^\s)"\']*)?', re.IGNORECASE)
 MAX_GENERATED_IMAGES = 50
+MAX_GENERATED_VIDEOS = 30
+MAX_MEDIA_PROXY_BYTES = 120 * 1024 * 1024
 
 
 def _generated_image_ext(url: str, content_type: str = ''):
@@ -642,6 +645,268 @@ def _generated_image_ext(url: str, content_type: str = ''):
         return ext
     guessed = mimetypes.guess_extension((content_type or '').split(';', 1)[0].strip())
     return guessed if guessed in ('.png', '.jpg', '.jpeg', '.webp') else '.png'
+
+
+def _generated_video_ext(url: str, content_type: str = ''):
+    parsed = urlparse(url)
+    ext = Path(parsed.path).suffix.lower()
+    if ext in ('.mp4', '.webm', '.mov', '.m4v', '.mkv'):
+        return ext
+    ctype = (content_type or '').split(';', 1)[0].strip().lower()
+    mapping = {
+        'video/mp4': '.mp4',
+        'video/webm': '.webm',
+        'video/quicktime': '.mov',
+        'video/x-m4v': '.m4v',
+        'video/x-matroska': '.mkv',
+    }
+    if ctype in mapping:
+        return mapping[ctype]
+    guessed = mimetypes.guess_extension(ctype)
+    return guessed if guessed in ('.mp4', '.webm', '.mov', '.m4v', '.mkv') else '.mp4'
+
+
+def validate_remote_media_url(url: str) -> str:
+    value = str(url or '').strip()
+    if not value:
+        raise ValueError('Media URL is required.')
+    parsed = urlparse(value)
+    if parsed.scheme not in ('http', 'https'):
+        raise ValueError('Only http(s) media URLs are allowed.')
+    if not parsed.netloc:
+        raise ValueError('Media URL host is missing.')
+    return value
+
+
+def _cleanup_generated_videos(limit: int = MAX_GENERATED_VIDEOS):
+    try:
+        files = [
+            path for path in GENERATED_VIDEOS_DIR.iterdir()
+            if path.is_file() and path.suffix.lower() in ('.mp4', '.webm', '.mov', '.m4v', '.mkv')
+        ]
+    except FileNotFoundError:
+        return
+    overflow = len(files) - max(0, int(limit))
+    if overflow <= 0:
+        return
+    files.sort(key=lambda path: path.stat().st_mtime)
+    for path in files[:overflow]:
+        try:
+            path.unlink()
+        except Exception:
+            pass
+
+
+def fetch_remote_media(url: str, *, timeout: int = 120) -> dict:
+    remote = validate_remote_media_url(url)
+    req = urllib.request.Request(
+        remote,
+        headers={
+            'User-Agent': 'CLIProxyAPI-Dashboard/1.0',
+            'Accept': 'video/*,application/octet-stream,*/*',
+        },
+        method='GET',
+    )
+    try:
+        with _LOCAL_URL_OPENER.open(req, timeout=timeout) as resp:
+            content_type = resp.headers.get('Content-Type', '') or 'application/octet-stream'
+            chunks = []
+            total = 0
+            while True:
+                chunk = resp.read(1024 * 256)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_MEDIA_PROXY_BYTES:
+                    raise ValueError(f'Media exceeds {MAX_MEDIA_PROXY_BYTES} bytes.')
+                chunks.append(chunk)
+            data = b''.join(chunks)
+    except urllib.error.HTTPError as exc:
+        raise ValueError(f'Upstream media HTTP {exc.code}') from exc
+    except Exception as exc:
+        raise ValueError(f'Failed to fetch media: {exc}') from exc
+    if not data:
+        raise ValueError('Upstream media response was empty.')
+    return {
+        'url': remote,
+        'data': data,
+        'content_type': content_type,
+        'ext': _generated_video_ext(remote, content_type),
+    }
+
+
+def materialize_generated_video(url: str) -> dict:
+    remote = validate_remote_media_url(url)
+    GENERATED_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(remote.encode('utf-8')).hexdigest()[:16]
+    existing = sorted(GENERATED_VIDEOS_DIR.glob(f'*-{digest}.*'))
+    for path in existing:
+        if path.is_file() and path.stat().st_size > 0:
+            content_type = mimetypes.guess_type(path.name)[0] or 'video/mp4'
+            return {
+                'ok': True,
+                'remote_url': remote,
+                'local_url': f'/generated/videos/{path.name}',
+                'path': path,
+                'absolute_path': str(path),
+                'content_type': content_type,
+                'filename': path.name,
+                'cached': True,
+            }
+    fetched = fetch_remote_media(remote)
+    stamp = time.strftime('%Y%m%d-%H%M%S')
+    filename = f'{stamp}-{digest}{fetched["ext"]}'
+    target = GENERATED_VIDEOS_DIR / filename
+    target.write_bytes(fetched['data'])
+    _cleanup_generated_videos()
+    content_type = fetched.get('content_type') or (mimetypes.guess_type(filename)[0] or 'video/mp4')
+    return {
+        'ok': True,
+        'remote_url': remote,
+        'local_url': f'/generated/videos/{filename}',
+        'path': target,
+        'absolute_path': str(target),
+        'content_type': content_type,
+        'filename': filename,
+        'cached': False,
+        'bytes': len(fetched['data']),
+    }
+
+
+def resolve_generated_media_path(path_or_url: str) -> Path:
+    value = str(path_or_url or '').strip()
+    if not value:
+        raise ValueError('Media path is required.')
+
+    # Allow bare storage roots / prefixes for "open save folder".
+    normalized = value.rstrip('/')
+    if value in ('/generated/images', '/generated/images/') or normalized == '/generated/images':
+        return GENERATED_IMAGES_DIR.resolve()
+    if value in ('/generated/videos', '/generated/videos/') or normalized == '/generated/videos':
+        return GENERATED_VIDEOS_DIR.resolve()
+
+    roots = (
+        ('/generated/images/', GENERATED_IMAGES_DIR),
+        ('/generated/videos/', GENERATED_VIDEOS_DIR),
+    )
+    for prefix, root in roots:
+        if value.startswith(prefix):
+            rel = value[len(prefix):].split('?', 1)[0].split('#', 1)[0]
+            try:
+                from urllib.parse import unquote as _unquote
+                rel = _unquote(rel)
+            except Exception:
+                pass
+            rel = rel.replace('\\', '/').lstrip('/')
+            if not rel:
+                return root.resolve()
+            if '..' in Path(rel).parts:
+                raise ValueError('Invalid media path.')
+            target = (root / rel).resolve()
+            base = root.resolve()
+            try:
+                target.relative_to(base)
+            except ValueError as exc:
+                raise ValueError('Path is outside generated media storage.') from exc
+            return target
+
+    candidate = Path(value).expanduser()
+    try:
+        target = candidate.resolve()
+    except Exception as exc:
+        raise ValueError(f'Invalid local path: {exc}') from exc
+    for root in (GENERATED_IMAGES_DIR, GENERATED_VIDEOS_DIR):
+        base = root.resolve()
+        try:
+            target.relative_to(base)
+            return target
+        except ValueError:
+            continue
+    raise ValueError('Only generated image/video storage paths can be revealed.')
+
+
+def list_generated_media(kind: str = 'all', limit: int = 200) -> dict:
+    """List files under generated image/video storage for cross-client gallery."""
+    kind_value = str(kind or 'all').strip().lower()
+    if kind_value not in ('all', 'image', 'images', 'video', 'videos'):
+        kind_value = 'all'
+    try:
+        max_items = max(1, min(int(limit or 200), 500))
+    except (TypeError, ValueError):
+        max_items = 200
+
+    image_exts = {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.svg'}
+    video_exts = {'.mp4', '.webm', '.mov', '.m4v', '.mkv'}
+    items = []
+
+    def collect(root: Path, media_kind: str, url_prefix: str, exts: set[str]):
+        try:
+            entries = [path for path in root.iterdir() if path.is_file() and path.suffix.lower() in exts]
+        except FileNotFoundError:
+            return
+        for path in entries:
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            items.append({
+                'kind': media_kind,
+                'filename': path.name,
+                'url': f'{url_prefix}{path.name}',
+                'bytes': int(stat.st_size),
+                'mtime': int(stat.st_mtime),
+                'absolute_path': str(path.resolve()),
+            })
+
+    if kind_value in ('all', 'image', 'images'):
+        collect(GENERATED_IMAGES_DIR, 'image', '/generated/images/', image_exts)
+    if kind_value in ('all', 'video', 'videos'):
+        collect(GENERATED_VIDEOS_DIR, 'video', '/generated/videos/', video_exts)
+
+    items.sort(key=lambda item: (int(item.get('mtime') or 0), str(item.get('filename') or '')), reverse=True)
+    trimmed = items[:max_items]
+    return {
+        'ok': True,
+        'kind': kind_value,
+        'count': len(trimmed),
+        'total': len(items),
+        'items': trimmed,
+        'images_dir': str(GENERATED_IMAGES_DIR.resolve()),
+        'videos_dir': str(GENERATED_VIDEOS_DIR.resolve()),
+    }
+
+
+def reveal_generated_media(path_or_url: str) -> dict:
+    target = resolve_generated_media_path(path_or_url)
+    if not target.exists():
+        # Allow opening storage roots even if empty; only fail for missing files.
+        if target.suffix:
+            raise ValueError('Media file not found on disk.')
+        target.mkdir(parents=True, exist_ok=True)
+    folder = target if target.is_dir() else target.parent
+    if not folder.exists():
+        folder.mkdir(parents=True, exist_ok=True)
+    try:
+        if os.name == 'nt':
+            if target.is_file():
+                subprocess.Popen(['explorer', f'/select,{str(target)}'])
+            else:
+                subprocess.Popen(['explorer', str(folder)])
+        elif sys.platform == 'darwin':
+            if target.is_file():
+                subprocess.Popen(['open', '-R', str(target)])
+            else:
+                subprocess.Popen(['open', str(folder)])
+        else:
+            subprocess.Popen(['xdg-open', str(folder)])
+    except Exception as exc:
+        raise ValueError(f'Failed to open folder: {exc}') from exc
+    return {
+        'ok': True,
+        'path': str(target),
+        'folder': str(folder),
+        'exists': target.exists(),
+    }
 
 
 def _cleanup_generated_images(limit: int = MAX_GENERATED_IMAGES):
@@ -1114,6 +1379,18 @@ def _generic_probe_skip_reason(model_id: str):
     return None
 
 
+def _video_probe_model_id(model_id: str):
+    model_value = str(model_id or '').strip()
+    if not model_value:
+        return ''
+    if _raw_media_model_kind(model_value) == 'video':
+        return model_value
+    resolved = _resolve_provider_media_model(model_value, desired_kind='video')
+    if resolved:
+        return str(resolved.get('call_id') or model_value).strip() or model_value
+    return ''
+
+
 def _candidate_checks_for_model(model_id: str):
     image_model = _image_probe_model_id(model_id)
     if image_model:
@@ -1124,6 +1401,16 @@ def _candidate_checks_for_model(model_id: str):
                 'prompt': 'blue circle',
                 'n': 1,
                 'size': '256x256',
+            },
+        }]
+    video_model = _video_probe_model_id(model_id)
+    if video_model:
+        return [{
+            'path': '/v1/videos',
+            'payload': {
+                'model': video_model,
+                'prompt': 'a cat walking',
+                'seconds': '4',
             },
         }]
     common_messages = [{'role': 'user', 'content': 'Say OK only.'}]

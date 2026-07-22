@@ -88,6 +88,80 @@ class LocalProxyDetectTests(unittest.TestCase):
         self.assertEqual(info['mixed_port'], 0)
         self.assertEqual(info['detected_proxy_url'], '')
 
+    def test_choose_best_egress_includes_direct_and_picks_fastest_ok(self):
+        with patch.object(local_proxy, 'list_listening_proxy_ports', return_value=[10090, 7897]):
+            with patch.object(local_proxy, 'probe_target_via_proxy') as probe:
+                def _side_effect(target_url, proxy_url=None, timeout=4.0, headers=None):
+                    proxy = str(proxy_url or 'direct')
+                    if proxy.endswith('10090'):
+                        return {
+                            'ok': False,
+                            'proxy_url': proxy,
+                            'target_url': target_url,
+                            'status': 0,
+                            'latency_ms': 80,
+                            'error': 'ssl_eof',
+                        }
+                    if proxy.endswith('7897'):
+                        return {
+                            'ok': True,
+                            'proxy_url': proxy,
+                            'target_url': target_url,
+                            'status': 200,
+                            'latency_ms': 120,
+                            'error': '',
+                        }
+                    return {
+                        'ok': True,
+                        'proxy_url': 'direct',
+                        'target_url': target_url,
+                        'status': 200,
+                        'latency_ms': 40,
+                        'error': '',
+                    }
+
+                probe.side_effect = _side_effect
+                result = local_proxy.choose_best_egress(
+                    'https://apihub.agnes-ai.com/v1',
+                    include_direct=True,
+                    prefer_proxy_url='http://127.0.0.1:10090',
+                )
+        self.assertTrue(result['ok'])
+        # direct is faster than 7897; dead 10090 is only preferred, not forced
+        self.assertEqual(result['proxy_url'], 'direct')
+
+    def test_choose_best_egress_can_prefer_working_local_port(self):
+        with patch.object(local_proxy, 'list_listening_proxy_ports', return_value=[7897]):
+            with patch.object(local_proxy, 'probe_target_via_proxy') as probe:
+                def _side_effect(target_url, proxy_url=None, timeout=4.0, headers=None):
+                    proxy = str(proxy_url or 'direct')
+                    if proxy == 'direct':
+                        return {
+                            'ok': False,
+                            'proxy_url': 'direct',
+                            'target_url': target_url,
+                            'status': 0,
+                            'latency_ms': 30,
+                            'error': 'timeout',
+                        }
+                    return {
+                        'ok': True,
+                        'proxy_url': proxy,
+                        'target_url': target_url,
+                        'status': 200,
+                        'latency_ms': 55,
+                        'error': '',
+                    }
+
+                probe.side_effect = _side_effect
+                result = local_proxy.choose_best_egress(
+                    'https://apihub.agnes-ai.com/v1',
+                    include_direct=True,
+                    prefer_proxy_url='http://127.0.0.1:7897',
+                )
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['proxy_url'], 'http://127.0.0.1:7897')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -32,6 +32,10 @@ _CACHE_LOCK = threading.Lock()
 _CACHE: dict[str, object] = {'ts': 0.0, 'key': None, 'result': None}
 _CACHE_TTL_SECONDS = 8.0
 
+# Egress failure tracking — when a proxy fails for a target, skip it briefly.
+_EGRESS_FAILURE_TTL = 15.0  # seconds to avoid a failed egress path
+_EGRESS_FAILURES: dict[str, float] = {}  # key → monotonic timestamp of failure
+
 
 def _unique_ports(values) -> list[int]:
     out: list[int] = []
@@ -468,3 +472,277 @@ def remap_local_proxy_url(proxy_url: str | None, detected_proxy_url: str | None)
     if not is_local_proxy_url(raw):
         return raw
     return detected
+
+
+def list_listening_proxy_ports(extra_ports: list[int] | None = None) -> list[int]:
+    """Homepage-aligned candidate ports that are currently listening."""
+    ports: list[int] = []
+    for item in collect_candidate_ports(extra_ports=extra_ports):
+        try:
+            port = int(item.get('port') or 0)
+        except Exception:
+            continue
+        if port <= 0 or port in ports or port in _CONTROL_PORT_HINTS:
+            continue
+        if item.get('listening') is False:
+            continue
+        if _port_is_listening(port):
+            ports.append(port)
+    for port in DEFAULT_CANDIDATE_PORTS:
+        if port in ports or port in _CONTROL_PORT_HINTS:
+            continue
+        if _port_is_listening(port):
+            ports.append(port)
+    return ports
+
+
+def _normalize_egress_proxy_url(proxy_url: str | None) -> str:
+    raw = str(proxy_url or '').strip()
+    if not raw or raw.lower() in {'none', 'off', 'disabled'}:
+        return 'direct'
+    if raw.lower() == 'direct':
+        return 'direct'
+    if '://' not in raw:
+        raw = f'http://{raw}'
+    return raw
+
+
+def _proxy_handler_for_egress(proxy_url: str | None) -> ProxyHandler:
+    normalized = _normalize_egress_proxy_url(proxy_url)
+    if normalized == 'direct':
+        return ProxyHandler({})
+    return ProxyHandler({'http': normalized, 'https': normalized})
+
+
+def probe_target_via_proxy(
+    target_url: str,
+    proxy_url: str | None = None,
+    timeout: float = 4.0,
+    headers: dict | None = None,
+) -> dict:
+    """Probe a concrete upstream URL via direct or a local mixed-port proxy."""
+    target = str(target_url or '').strip()
+    normalized_proxy = _normalize_egress_proxy_url(proxy_url)
+    result = {
+        'ok': False,
+        'proxy_url': normalized_proxy,
+        'target_url': target,
+        'status': 0,
+        'latency_ms': None,
+        'error': '',
+    }
+    if not target:
+        result['error'] = 'missing_target'
+        return result
+
+    opener = build_opener(_proxy_handler_for_egress(normalized_proxy))
+    req_headers = {'User-Agent': 'cliproxyapi-dashboard-egress-probe'}
+    if isinstance(headers, dict):
+        for key, value in headers.items():
+            if str(key).strip() and value is not None:
+                req_headers[str(key)] = str(value)
+    request = Request(target, headers=req_headers, method='GET')
+    started = time.monotonic()
+    try:
+        with opener.open(request, timeout=timeout) as resp:
+            status = int(getattr(resp, 'status', 0) or 0)
+            try:
+                resp.read(512)
+            except Exception:
+                pass
+            result['status'] = status
+            result['latency_ms'] = int((time.monotonic() - started) * 1000)
+            # Any HTTP response means the egress path itself works.
+            result['ok'] = 100 <= status < 600
+            if not result['ok']:
+                result['error'] = f'http_{status}'
+            return result
+    except Exception as exc:
+        result['latency_ms'] = int((time.monotonic() - started) * 1000)
+        msg = str(exc)
+        # urllib HTTPError still proves the TCP/TLS path is usable.
+        code = getattr(exc, 'code', None)
+        try:
+            code = int(code) if code is not None else None
+        except Exception:
+            code = None
+        if code is not None:
+            result['status'] = code
+            result['ok'] = 100 <= code < 600
+            if not result['ok']:
+                result['error'] = f'http_{code}'
+            return result
+        result['error'] = msg[:180]
+        return result
+
+
+def _egress_probe_url(target_url: str) -> str:
+    raw = str(target_url or '').strip()
+    if not raw:
+        return ''
+    parsed = urlparse(raw if '://' in raw else f'http://{raw}')
+    if not parsed.scheme or not parsed.netloc:
+        return raw
+    path = (parsed.path or '').rstrip('/')
+    # OpenAI-compatible providers expose /v1/models cheaply.
+    if path.endswith('/v1'):
+        path = f'{path}/models'
+    elif path.endswith('/v1/models'):
+        pass
+    elif not path or path == '/':
+        path = '/v1/models'
+    return f'{parsed.scheme}://{parsed.netloc}{path}'
+
+
+def report_egress_failure(target_url: str, proxy_url: str | None = None) -> None:
+    """Mark an egress path as failed so it is briefly avoided on next probe."""
+    key = f'{_egress_probe_url(target_url)}|{_normalize_egress_proxy_url(proxy_url)}'
+    _EGRESS_FAILURES[key] = time.monotonic()
+
+
+def _is_egress_failed(target_url: str, proxy_url: str) -> bool:
+    key = f'{_egress_probe_url(target_url)}|{proxy_url}'
+    failed_at = _EGRESS_FAILURES.get(key)
+    if failed_at is None:
+        return False
+    if (time.monotonic() - failed_at) > _EGRESS_FAILURE_TTL:
+        _EGRESS_FAILURES.pop(key, None)
+        return False
+    return True
+
+
+def choose_best_egress(
+    target_url: str,
+    *,
+    include_direct: bool = True,
+    prefer_proxy_url: str | None = None,
+    headers: dict | None = None,
+    timeout: float = 2.5,
+    extra_ports: list[int] | None = None,
+) -> dict:
+    """Pick the best current egress the same way the homepage compares ports.
+
+    Candidates = listening local mixed-ports (+ optional direct). Preference only
+    reorders ties; the winner is always a working path to target_url. Probes run
+    in parallel so rebuilds stay cheap when several providers share a host.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    probe_url = _egress_probe_url(target_url)
+    prefer = _normalize_egress_proxy_url(prefer_proxy_url)
+
+    candidates: list[str] = []
+    if prefer and prefer != 'direct' and prefer not in candidates:
+        candidates.append(prefer)
+    for port in list_listening_proxy_ports(extra_ports=extra_ports):
+        url = f'http://127.0.0.1:{int(port)}'
+        if url not in candidates:
+            candidates.append(url)
+    if include_direct and 'direct' not in candidates:
+        if prefer == 'direct':
+            candidates.insert(0, 'direct')
+        else:
+            candidates.append('direct')
+    if prefer == 'direct' and 'direct' in candidates:
+        candidates = ['direct'] + [item for item in candidates if item != 'direct']
+
+    probes: list[dict] = []
+    pending: list[str] = []
+    for proxy_url in candidates:
+        # Skip recently-failed egress paths (unless it's the only candidate).
+        if proxy_url != 'direct' and _is_egress_failed(probe_url, proxy_url):
+            if len(candidates) > 1:
+                probes.append({
+                    'ok': False,
+                    'proxy_url': proxy_url,
+                    'target_url': probe_url,
+                    'status': 0,
+                    'latency_ms': None,
+                    'error': 'recently_failed',
+                })
+                continue
+        if proxy_url != 'direct' and is_local_proxy_url(proxy_url):
+            try:
+                port = int(urlparse(proxy_url).port or 0)
+            except Exception:
+                port = 0
+            if port and not _port_is_listening(port):
+                probes.append({
+                    'ok': False,
+                    'proxy_url': proxy_url,
+                    'target_url': probe_url,
+                    'status': 0,
+                    'latency_ms': None,
+                    'error': 'not_listening',
+                })
+                continue
+        pending.append(proxy_url)
+
+    if pending:
+        workers = min(6, len(pending))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(
+                    probe_target_via_proxy,
+                    probe_url,
+                    proxy_url=proxy_url,
+                    timeout=timeout,
+                    headers=headers,
+                ): proxy_url
+                for proxy_url in pending
+            }
+            for future in as_completed(futures):
+                proxy_url = futures[future]
+                try:
+                    probe = future.result()
+                except Exception as exc:
+                    probe = {
+                        'ok': False,
+                        'proxy_url': proxy_url,
+                        'target_url': probe_url,
+                        'status': 0,
+                        'latency_ms': None,
+                        'error': str(exc)[:180],
+                    }
+                probes.append(probe)
+
+    best = None
+    for probe in probes:
+        if not probe.get('ok'):
+            continue
+        if best is None:
+            best = probe
+            continue
+        best_latency = best.get('latency_ms')
+        probe_latency = probe.get('latency_ms')
+        if best_latency is None or (probe_latency is not None and probe_latency < best_latency):
+            best = probe
+            continue
+        # Prefer homepage/user preference only when latency is essentially tied.
+        if (
+            prefer
+            and probe_latency is not None
+            and best_latency is not None
+            and abs(int(probe_latency) - int(best_latency)) <= 30
+            and str(probe.get('proxy_url') or '') == prefer
+        ):
+            best = probe
+
+    if not best:
+        return {
+            'ok': False,
+            'proxy_url': prefer if prefer else 'direct',
+            'target_url': probe_url,
+            'probes': probes,
+            'message': 'No working egress path to target.',
+        }
+
+    return {
+        'ok': True,
+        'proxy_url': str(best.get('proxy_url') or 'direct'),
+        'target_url': probe_url,
+        'status': best.get('status'),
+        'latency_ms': best.get('latency_ms'),
+        'probes': probes,
+        'message': f'Chose egress {best.get("proxy_url")} for {probe_url}',
+    }

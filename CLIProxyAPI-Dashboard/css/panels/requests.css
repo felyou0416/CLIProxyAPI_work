@@ -248,3 +248,49 @@
 .request-error-cell:empty {
   color: var(--text-muted);
 }
+.req-dup-badge {
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  border: 1px solid transparent;
+}
+.req-dup-badge.is-error {
+  background: color-mix(in srgb, #f59e0b 22%, var(--panel));
+  color: #92400e;
+  border-color: color-mix(in srgb, #f59e0b 40%, var(--border));
+}
+.req-dup-badge.is-error:hover {
+  background: color-mix(in srgb, #f59e0b 40%, var(--panel));
+}
+.req-dup-badge.is-ok {
+  background: color-mix(in srgb, #3b82f6 18%, var(--panel));
+  color: #1d4ed8;
+  border-color: color-mix(in srgb, #3b82f6 36%, var(--border));
+}
+.req-dup-badge.is-ok:hover {
+  background: color-mix(in srgb, #3b82f6 32%, var(--panel));
+}
+.req-dup-badge.expanded {
+  background: color-mix(in srgb, #22c55e 22%, var(--panel));
+  color: #15803d;
+  border-color: color-mix(in srgb, #22c55e 40%, var(--border));
+}
+tr.req-group-head .request-time-cell {
+  font-weight: 600;
+}
+tr.req-group-child {
+  opacity: 0.85;
+}
+tr.req-group-child td:first-child {
+  padding-left: 1.4rem;
+}

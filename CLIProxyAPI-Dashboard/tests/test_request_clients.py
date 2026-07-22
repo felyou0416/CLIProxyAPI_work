@@ -2,6 +2,7 @@ import json
 import pathlib
 import sys
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -36,10 +37,13 @@ Status: 200
         self.assertEqual(item['client_ip_source'], 'x-forwarded-for')
 
     def test_summarize_clients_adds_status_and_error_rate(self):
-        rows = summarize_clients([
-            {'client_ip': '127.0.0.1', 'success': True, 'status_code': 200, 'timestamp': 10, 'latency_ms': 12, 'path': '/v1/models', 'requested_model': '', 'total_tokens': 0},
-            {'client_ip': '127.0.0.1', 'success': False, 'status_code': 500, 'timestamp': 11, 'latency_ms': 24, 'path': '/v1/messages', 'requested_model': 'test', 'total_tokens': 5},
-        ])
+        # Isolate from live virtual keys / default key so only the two events form one group.
+        with patch('backend.request_metrics.summary._build_api_key_label_map', return_value={}), \
+             patch('backend.request_metrics.summary._get_default_api_key_masked', return_value='clip...yapi'):
+            rows = summarize_clients([
+                {'client_ip': '127.0.0.1', 'success': True, 'status_code': 200, 'timestamp': 10, 'latency_ms': 12, 'path': '/v1/models', 'requested_model': '', 'total_tokens': 0},
+                {'client_ip': '127.0.0.1', 'success': False, 'status_code': 500, 'timestamp': 11, 'latency_ms': 24, 'path': '/v1/messages', 'requested_model': 'test', 'total_tokens': 5},
+            ])
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]['ip_type'], 'loopback')
         self.assertEqual(rows[0]['failure_count'], 1)

@@ -800,7 +800,7 @@ const SECTION_ASSETS = {
     scripts: [
       '/js/marked.min.js',
       '/js/highlight.min.js',
-      '/js/chat.js?v=20260720-lazy-assets',
+      '/js/chat.js?v=20260721-disk-media',
     ],
   },
   aggregates: {
@@ -1088,11 +1088,27 @@ async function api(path, method = 'GET', body) {
   if (sensKey) {
     headers['X-Sensitive-Auth-Key'] = sensKey;
   }
-  const res = await fetch(path, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    // Browser surface: TypeError "Failed to fetch" when the dashboard process is
+    // down, restarted, or the connection is reset mid long-running start API.
+    const raw = String(err && (err.message || err) || '');
+    const isNetwork = /failed to fetch|networkerror|load failed|network request failed/i.test(raw);
+    if (isNetwork) {
+      throw new Error(
+        getLanguage() === 'en'
+          ? `Network error calling ${path}. The dashboard may be restarting, busy, or offline — wait a few seconds and retry.`
+          : `无法连接面板接口 ${path}（Failed to fetch）。常见原因：面板进程重启中、启动时占用过久、或服务未就绪。请等几秒后重试；若持续失败请重启面板服务。`
+      );
+    }
+    throw err;
+  }
   if (res.status === 401) {
     clearAuthToken();
     if (path !== '/api/auth/login' && path !== '/api/auth/check') {
@@ -1120,6 +1136,10 @@ async function api(path, method = 'GET', body) {
     throw new Error('敏感操作授权已失效。');
   }
   if (!res.ok) throw new Error(data.message || t('common.requestFailed', 'Request failed'));
+  // Many dashboard routes return HTTP 200 with {ok:false,message}; surface that as error.
+  if (data && data.ok === false && data.message) {
+    throw new Error(data.message);
+  }
   return data;
 }
 

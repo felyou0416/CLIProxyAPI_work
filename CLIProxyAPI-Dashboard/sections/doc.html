@@ -282,21 +282,21 @@
       </div>
     </div>
 
-    <!-- Row 7: POST /v1/videos/generations -->
+    <!-- Row 7: POST /v1/videos -->
     <div class="doc-api-row">
       <div class="doc-api-meta">
         <span class="doc-method-badge doc-method-post">POST</span>
-        <span class="doc-api-path">/v1/videos/generations</span>
-        <button class="doc-copy-btn-inline" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/videos/generations')">复制 URL</button>
+        <span class="doc-api-path">/v1/videos</span>
+        <button class="doc-copy-btn-inline" type="button" onclick="copyDocText(this, 'http://127.0.0.1:8317/v1/videos')">复制 URL</button>
       </div>
       <div class="doc-api-desc">
-        <p>视频生成接口（系统根据模型名称包含 <code>video</code> 自动归类为视频模型，支持原生的 <code>/v1/videos</code> 或 <code>/v1/videos/generations</code>）。</p>
+        <p>视频生成接口。Agnes / OpenAI 兼容视频请优先 <code>POST /v1/videos</code>；部分 xAI 原生路径才用 <code>/v1/videos/generations</code>。完成后用 <code>GET /v1/videos/:id</code> 轮询，Agnes 结果 URL 通常在 <code>metadata.url</code>。</p>
         <details>
           <summary>展开示例 Payload</summary>
           <pre class="doc-code">{
   "model": "agnes-agnes-video-v2.0",
   "prompt": "a beautiful forest",
-  "size": "1280x704"
+  "seconds": "4"
 }</pre>
         </details>
       </div>

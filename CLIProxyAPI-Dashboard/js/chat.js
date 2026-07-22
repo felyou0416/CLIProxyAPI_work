@@ -129,7 +129,12 @@ function markSessionDraft(session, requestId, draftText, forceSave = false) {
   session.pendingDraftText = draftText || '';
   session.ts = Date.now();
   const view = chatRequestViews[requestId];
-  if (view?.contentDiv?.isConnected) {
+  if (view?.mediaCard) {
+    // Media gallery refreshes as a whole when draft/status changes.
+    if (isMediaMode() && isSessionVisible(session)) {
+      renderMediaWorkspace(session);
+    }
+  } else if (view?.contentDiv?.isConnected) {
     if (session.pendingDraftText) updateBotMessageContent(view.contentDiv, session.pendingDraftText, false);
     else view.contentDiv.innerHTML = `<div class="typing-indicator"><span></span><span></span><span></span></div>`;
     if (view.history?.isConnected) {
@@ -165,6 +170,13 @@ function finalizeSessionReply(session, requestId, replyText) {
   session.ts = Date.now();
   saveChatSessions();
   delete chatRequestViews[requestId];
+  if (normalizeChatMode(session.mode) !== 'chat' && isMediaMode() && normalizeChatMode(session.mode) === chatMode) {
+    renderMediaWorkspace(session);
+    renderChatHistoryList();
+    updateChatGeneratingState();
+    updateChatSendState();
+    return;
+  }
   if (isSessionVisible(session)) {
     restoreChatSessionView(session);
     renderChatHistoryList();
@@ -178,6 +190,13 @@ function markSessionFailed(session, requestId, message) {
   session.ts = Date.now();
   saveChatSessions();
   delete chatRequestViews[requestId];
+  if (normalizeChatMode(session.mode) !== 'chat' && isMediaMode() && normalizeChatMode(session.mode) === chatMode) {
+    renderMediaWorkspace(session);
+    renderChatHistoryList();
+    updateChatGeneratingState();
+    updateChatSendState();
+    return;
+  }
   if (isSessionVisible(session)) {
     restoreChatSessionView(session);
     renderChatHistoryList();
@@ -185,7 +204,12 @@ function markSessionFailed(session, requestId, message) {
 }
 
 function updateChatGeneratingState() {
-  isGenerating = isCurrentSessionRunning();
+  // Media mode allows concurrent jobs; only block chat-mode when the active session is running.
+  isGenerating = isMediaMode() ? false : isCurrentSessionRunning();
+}
+
+function countRunningModeJobs(mode = chatMode) {
+  return getModeSessions(mode).filter(isSessionRunning).length;
 }
 
 function getModeSessions(mode = chatMode) {
@@ -460,7 +484,16 @@ function syncChatModeUI() {
   if (isVideoMode()) selectPreferredVideoModel();
 
   const history = document.getElementById('chat-history');
-  if (history && history.querySelector('.chat-welcome')) renderChatWelcome();
+  if (isMediaMode()) {
+    renderMediaWorkspace(getActiveSession());
+  } else if (history) {
+    history.classList.remove('media-history');
+    if (history.querySelector('.chat-welcome') || history.querySelector('.media-workbench')) {
+      const session = getActiveSession();
+      if (session) restoreChatSessionView(session);
+      else renderChatWelcome();
+    }
+  }
   renderChatHistoryList();
   updateChatSendState();
   syncChatDrawerChrome();
@@ -591,9 +624,31 @@ function extractVideoResultFromPayload(payload) {
     }
     return typeof current === 'string' || typeof current === 'number' ? String(current).trim() : '';
   };
-  for (const path of ['video.url', 'video_url', 'url', 'data.url', 'output.video.url']) {
+  const looksUrl = (value) => {
+    const text = String(value || '').trim().toLowerCase();
+    return text.startsWith('http://') || text.startsWith('https://');
+  };
+  for (const path of [
+    // Agnes completed videos expose the playable file here.
+    'metadata.url',
+    'metadata.video_url',
+    'metadata.video.url',
+    'video.url',
+    'video_url',
+    'url',
+    'data.url',
+    'data.metadata.url',
+    'output.video.url',
+    'output.url',
+  ]) {
     const url = pick(root, path);
-    if (url) return { url, id: '' };
+    if (looksUrl(url)) {
+      return {
+        url,
+        id: pick(root, 'id') || pick(root, 'video_id') || pick(root, 'task_id') || '',
+        status: String(root.status || '').trim(),
+      };
+    }
   }
   if (Array.isArray(root.data)) {
     for (const item of root.data) {
@@ -603,13 +658,55 @@ function extractVideoResultFromPayload(payload) {
   }
   for (const path of ['video_id', 'request_id', 'task_id', 'id', 'data.id']) {
     const id = pick(root, path);
-    if (id) return { url: '', id };
+    if (id) return { url: '', id, status: String(root.status || '').trim() };
   }
-  return { url: '', id: '' };
+  return { url: '', id: '', status: String(root.status || '').trim() };
 }
 
 function chatCompletionText(response) {
   return response?.choices?.[0]?.message?.content || '';
+}
+
+async function pollVideoResult(model, taskId, { attempts = 45, intervalMs = 3000 } = {}) {
+  let lastError = null;
+  let lastStatus = '';
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      const retrieved = await chatFetchJson(
+        `/v1/videos/${encodeURIComponent(taskId)}`,
+        'GET'
+      );
+      const result = extractVideoResultFromPayload(retrieved);
+      const status = String(result.status || retrieved?.status || '').toLowerCase();
+      lastStatus = status || lastStatus;
+      // Agnes puts the playable URL under metadata.url once status=completed.
+      if (result.url) return { ...result, id: result.id || taskId, status: status || result.status || 'completed' };
+      if (['failed', 'error', 'cancelled', 'canceled'].includes(status)) {
+        throw new Error(retrieved?.error?.message || `Video task ${taskId} ${status || 'failed'}`);
+      }
+    } catch (err) {
+      lastError = err;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  if (lastError) throw lastError;
+  return { url: '', id: taskId, status: lastStatus || 'timeout' };
+}
+
+function looksLikeEgressFailure(err) {
+  const msg = String(err?.message || '').toLowerCase();
+  return /econnreset|econnaborted|eof|ssl|timeout|503|auth_unavailable|connect/i.test(msg);
+}
+
+function reportVideoEgressFailure(model, err) {
+  if (!looksLikeEgressFailure(err)) return;
+  try {
+    fetch('/api/egress/report-failure', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'agnes', base_url: 'https://apihub.agnes-ai.com/v1' }),
+    }).catch(() => {});
+  } catch {}
 }
 
 async function requestVideoGenerationFallback(model, prompt, options) {
@@ -619,20 +716,40 @@ async function requestVideoGenerationFallback(model, prompt, options) {
     stream: false,
     ...options
   };
-  const response = await chatFetchFirstJson(['/api/video-generation', '/v1/videos/generations'], 'POST', directPayload);
-  const result = extractVideoResultFromPayload(response);
-  if (result.url) return `[video](${result.url})`;
-  if (result.id) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const retrieved = await chatFetchJson(`/v1/videos/${encodeURIComponent(result.id)}?model=${encodeURIComponent(model)}`, 'GET');
-      const retrievedResult = extractVideoResultFromPayload(retrieved);
-      if (retrievedResult.url) return `[video](${retrievedResult.url})`;
+      const response = await chatFetchFirstJson(
+        ['/api/video-generation', '/v1/videos', '/v1/videos/generations'],
+        'POST',
+        directPayload
+      );
+      const result = extractVideoResultFromPayload(response);
+      if (result.url) return `[video](${result.url})`;
+      if (result.id) {
+        try {
+          const polled = await pollVideoResult(model, result.id);
+          if (polled.url) return `[video](${polled.url})`;
+          if (polled.status && polled.status !== 'timeout') {
+            return `Video generation task ${result.id} finished with status \`${polled.status}\`, but no playable URL was returned.`;
+          }
+        } catch (err) {
+          console.warn('Video retrieve fallback failed', err);
+          throw err;
+        }
+        return `Video generation task created: ${result.id}\n\nStill waiting for a playable URL under metadata.url (Agnes) / video.url (xAI).`;
+      }
+      throw new Error('Video response did not include a playable URL or task id.');
     } catch (err) {
-      console.warn('Video retrieve fallback failed', err);
+      lastErr = err;
+      if (attempt === 0 && looksLikeEgressFailure(err)) {
+        reportVideoEgressFailure(model, err);
+        continue; // retry once after marking egress as failed
+      }
+      throw err;
     }
-    return `Video generation task created: ${result.id}\n\nThe provider returned a task id but no playable URL yet.`;
   }
-  throw new Error('Video response did not include a playable URL or task id.');
+  throw lastErr || new Error('Video generation failed');
 }
 
 function modelsFromProviderItems(items) {
@@ -661,7 +778,7 @@ function createNewSession(silent) {
   const id = generateSessionId();
   const session = {
     id,
-    title: 'New Chat',
+    title: isImageMode() ? 'New Image Task' : isVideoMode() ? 'New Video Task' : 'New Chat',
     model: document.getElementById('chat-model-select')?.value || '',
     mode: chatMode,
     systemPrompt: '',
@@ -702,12 +819,19 @@ function restoreChatSessionView(session) {
   if (sp) sp.value = session.systemPrompt || '';
 
   chatContext = [];
+  if (isMediaMode()) {
+    renderMediaWorkspace(session);
+    updateChatGeneratingState();
+    updateChatSendState();
+    return;
+  }
+
   clearChatView();
   session.messages.forEach(m => {
     appendMessage(m.role, m.content, true);
-    if (!isMediaMode()) chatContext.push({ role: m.role, content: m.content });
+    chatContext.push({ role: m.role, content: m.content });
   });
-  if (!isMediaMode() && session.systemPrompt) {
+  if (session.systemPrompt) {
     chatContext.unshift({ role: 'system', content: session.systemPrompt });
   }
   renderPendingSessionState(session);
@@ -717,6 +841,10 @@ function restoreChatSessionView(session) {
 
 function renderPendingSessionState(session) {
   if (!session || (!isSessionRunning(session) && session.status !== 'error')) return;
+  if (isMediaMode()) {
+    renderMediaWorkspace(session);
+    return;
+  }
   const history = document.getElementById('chat-history');
   if (!history) return;
   const welcome = history.querySelector('.chat-welcome');
@@ -813,7 +941,10 @@ function renderChatHistoryList() {
   const modeStatusEl = document.getElementById('chat-mode-status');
   if (modeStatusEl) {
     const unit = chatMode === 'chat' ? '个会话' : '个任务';
-    modeStatusEl.textContent = `当前模式 ${modeSessions.length} ${unit}`;
+    const running = countRunningModeJobs(chatMode);
+    modeStatusEl.textContent = running
+      ? `当前模式 ${modeSessions.length} ${unit} · ${running} 运行中`
+      : `当前模式 ${modeSessions.length} ${unit}`;
   }
 
   if (modeSessions.length === 0) {
@@ -922,16 +1053,12 @@ async function loadChatPanel() {
 function renderChatWelcome() {
   const hist = document.getElementById('chat-history');
   if (!hist) return;
-  const welcomeText = isImageMode()
-    ? '描述你想生成的图片'
-    : isVideoMode()
-      ? '描述你想生成的视频'
-      : '选择模型，开始对话';
-  const welcomeHint = isImageMode()
-    ? 'Enter 生成 · 在右侧设置尺寸与风格'
-    : isVideoMode()
-      ? 'Enter 生成 · 视频可能需要一分钟'
-      : 'Enter 发送 · Shift+Enter 换行';
+  if (isMediaMode()) {
+    renderMediaWorkspace(getActiveSession());
+    return;
+  }
+  const welcomeText = '选择模型，开始对话';
+  const welcomeHint = 'Enter 发送 · Shift+Enter 换行';
   hist.innerHTML = `<div class="chat-welcome">
     <div class="chat-welcome-icon">
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
@@ -943,6 +1070,7 @@ function renderChatWelcome() {
 
 function clearChatView() {
   const hist = document.getElementById('chat-history');
+  if (hist && !isMediaMode()) hist.classList.remove('media-history');
   if (hist) renderChatWelcome();
   const inp = document.getElementById('chat-input');
   if (inp) { inp.value = ''; inp.style.height = ''; }
@@ -954,7 +1082,11 @@ function clearChat() {
     const session = getActiveSession();
     if (session) {
       session.messages = [];
-      session.title = 'New Chat';
+      session.title = isMediaMode()
+        ? (isImageMode() ? 'New Image Task' : 'New Video Task')
+        : 'New Chat';
+      session.status = 'idle';
+      clearSessionPending(session);
       session.ts = Date.now();
       saveChatSessions();
     }
@@ -962,6 +1094,492 @@ function clearChat() {
   chatContext = [];
   clearChatView();
   renderChatHistoryList();
+}
+
+function extractMediaAssets(content) {
+  const text = String(content || '');
+  const assets = [];
+  const seen = new Set();
+
+  const pushAsset = (url, kind) => {
+    const value = String(url || '').trim();
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    assets.push({ url: value, kind });
+  };
+
+  const mdImageRe = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  let match;
+  while ((match = mdImageRe.exec(text)) !== null) {
+    pushAsset(match[1], 'image');
+  }
+
+  const mdLinkRe = /\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  while ((match = mdLinkRe.exec(text)) !== null) {
+    const label = match[1] || '';
+    const href = match[2] || '';
+    if (looksLikeVideoUrl(href, label)) pushAsset(href, 'video');
+    else if (looksLikeImageUrl(href, label)) pushAsset(href, 'image');
+  }
+
+  const bareUrlRe = /(https?:\/\/[^\s<>"']+|\/generated\/(?:images|videos)\/[^\s<>"')]+)/g;
+  while ((match = bareUrlRe.exec(text)) !== null) {
+    const href = match[1].replace(/[),.;]+$/, '');
+    if (looksLikeVideoUrl(href)) pushAsset(href, 'video');
+    else if (looksLikeImageUrl(href)) pushAsset(href, 'image');
+  }
+
+  // Prefer video assets in video mode, image assets in image mode, but keep mixed results.
+  if (isVideoMode()) {
+    assets.sort((a, b) => (a.kind === 'video' ? 0 : 1) - (b.kind === 'video' ? 0 : 1));
+  } else if (isImageMode()) {
+    assets.sort((a, b) => (a.kind === 'image' ? 0 : 1) - (b.kind === 'image' ? 0 : 1));
+  }
+  return assets;
+}
+
+function looksLikeImageUrl(href, label = '') {
+  const raw = String(href || '').trim();
+  if (!raw) return false;
+  if (raw.startsWith('/generated/images/')) return true;
+  if (raw.startsWith('data:image/')) return true;
+  const lower = raw.toLowerCase();
+  const pathOnly = lower.split('?')[0].split('#')[0];
+  const labelText = String(label || '').trim().toLowerCase();
+  if (/\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(pathOnly)) return true;
+  if (labelText === 'image' || labelText.includes('image') || labelText.includes('图片') || labelText.includes('图')) return true;
+  if (/\/(images?|img|media|content|download)\b/i.test(pathOnly)) return true;
+  return false;
+}
+
+function localDownloadUrl(url) {
+  const value = String(url || '').trim();
+  if (!value) return '';
+  if (value.startsWith('/generated/')) {
+    return value.includes('?') ? `${value}&download=1` : `${value}?download=1`;
+  }
+  if (looksLikeVideoUrl(value)) return mediaProxyUrl(value, { mode: 'local', download: true });
+  return value;
+}
+
+// Shared disk-media cache so every browser/client can show the same local files.
+let diskMediaCache = { image: null, video: null, fetchedAt: 0 };
+const DISK_MEDIA_TTL_MS = 15_000;
+
+async function fetchDiskMedia(kind, { force = false } = {}) {
+  const key = kind === 'video' ? 'video' : 'image';
+  const now = Date.now();
+  if (!force && diskMediaCache[key] && (now - diskMediaCache.fetchedAt) < DISK_MEDIA_TTL_MS) {
+    return diskMediaCache[key];
+  }
+  try {
+    const response = await fetch(`/api/generated-media?kind=${encodeURIComponent(key)}&limit=200`, {
+      credentials: 'same-origin',
+    });
+    if (!response.ok) throw new Error(`list failed (${response.status})`);
+    const data = await response.json();
+    const items = Array.isArray(data?.items) ? data.items : [];
+    diskMediaCache[key] = items;
+    diskMediaCache.fetchedAt = now;
+    return items;
+  } catch (err) {
+    console.warn('Failed to list generated media', err);
+    return diskMediaCache[key] || [];
+  }
+}
+
+function mediaUrlKey(url) {
+  const value = String(url || '').trim();
+  if (!value) return '';
+  try {
+    // Normalize /generated/... paths and strip query/hash.
+    if (value.startsWith('/generated/')) {
+      return value.split('?')[0].split('#')[0];
+    }
+    const parsed = new URL(value, window.location.origin);
+    if (parsed.pathname.startsWith('/generated/')) return parsed.pathname;
+    return parsed.href;
+  } catch {
+    return value.split('?')[0].split('#')[0];
+  }
+}
+
+function mediaPlayUrl(url, kind) {
+  const value = String(url || '').trim();
+  if (!value) return '';
+  if (isLocalMediaUrl(value)) return value;
+  if (kind === 'video' || looksLikeVideoUrl(value)) return mediaProxyUrl(value, { mode: 'stream' });
+  return value;
+}
+
+async function revealLocalMedia(pathOrUrl, button) {
+  const value = String(pathOrUrl || '').trim();
+  if (!value) return;
+  const original = button?.textContent;
+  if (button) {
+    button.textContent = '定位中…';
+    button.setAttribute('aria-busy', 'true');
+  }
+  try {
+    let target = value;
+    if (!isLocalMediaUrl(value) && looksLikeVideoUrl(value)) {
+      // Materialize remote video first so explorer can open a real local file.
+      const response = await fetch(mediaProxyUrl(value, { mode: 'local' }), { credentials: 'same-origin' });
+      if (!response.ok) throw new Error(`缓存视频失败 (${response.status})`);
+      // media-proxy local mode streams the file; derive local URL from Content-Disposition if possible.
+      const cd = response.headers.get('Content-Disposition') || '';
+      const nameMatch = cd.match(/filename="?([^"]+)"?/i);
+      if (nameMatch?.[1]) target = `/generated/videos/${nameMatch[1]}`;
+      else target = value;
+    }
+    const data = await fetch('/api/reveal-path', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ path: target, url: target }),
+    }).then(r => r.json());
+    if (!data?.ok) throw new Error(data?.message || '打开本地目录失败');
+  } catch (err) {
+    console.warn('Reveal media failed', err);
+    if (typeof showMessage === 'function') showMessage(err.message || '打开本地目录失败', true);
+    else alert(err.message || '打开本地目录失败');
+  } finally {
+    if (button) {
+      button.textContent = original || '打开本地';
+      button.removeAttribute('aria-busy');
+    }
+  }
+}
+
+function buildMediaCard({ kind, url, prompt, model, status, error, requestId, jobId }) {
+  const card = document.createElement('article');
+  card.className = `media-card media-card-${kind || 'image'}${status === 'running' ? ' is-running' : ''}${status === 'error' ? ' is-error' : ''}`;
+  if (requestId) card.dataset.requestId = requestId;
+  if (jobId) card.dataset.jobId = jobId;
+
+  const mediaWrap = document.createElement('div');
+  mediaWrap.className = 'media-card-preview';
+
+  if (status === 'running') {
+    mediaWrap.innerHTML = `<div class="media-card-loading"><div class="typing-indicator"><span></span><span></span><span></span></div><div>生成中…</div></div>`;
+  } else if (status === 'error') {
+    mediaWrap.innerHTML = `<div class="media-card-error">${escapeHtml(error || '生成失败')}</div>`;
+  } else if (url) {
+    if (kind === 'video' || looksLikeVideoUrl(url)) {
+      const video = document.createElement('video');
+      video.controls = true;
+      video.preload = 'metadata';
+      video.playsInline = true;
+      video.className = 'media-card-media';
+      video.src = mediaPlayUrl(url, 'video');
+      video.addEventListener('error', () => {
+        if (video.dataset.fallbackApplied === '1') return;
+        video.dataset.fallbackApplied = '1';
+        if (video.src !== url) video.src = url;
+      }, { once: true });
+      mediaWrap.appendChild(video);
+    } else {
+      const img = document.createElement('img');
+      img.className = 'media-card-media';
+      img.src = mediaPlayUrl(url, 'image');
+      img.alt = prompt || 'generated image';
+      img.loading = 'lazy';
+      mediaWrap.appendChild(img);
+    }
+  } else {
+    mediaWrap.innerHTML = `<div class="media-card-empty">暂无媒体结果</div>`;
+  }
+
+  const body = document.createElement('div');
+  body.className = 'media-card-body';
+
+  const promptEl = document.createElement('div');
+  promptEl.className = 'media-card-prompt';
+  promptEl.textContent = prompt || '（无提示词）';
+  body.appendChild(promptEl);
+
+  const meta = document.createElement('div');
+  meta.className = 'media-card-meta';
+  const bits = [];
+  if (model) bits.push(model);
+  if (status === 'running') bits.push('运行中');
+  if (status === 'error') bits.push('失败');
+  if (kind) bits.push(kind === 'video' ? '视频' : '图片');
+  meta.textContent = bits.join(' · ');
+  body.appendChild(meta);
+
+  const actions = document.createElement('div');
+  actions.className = 'media-card-actions';
+
+  if (url && status !== 'running') {
+    const downloadBtn = document.createElement('a');
+    downloadBtn.className = 'chat-video-action primary';
+    downloadBtn.href = localDownloadUrl(url);
+    downloadBtn.download = '';
+    downloadBtn.textContent = kind === 'video' ? '下载视频' : '下载图片';
+    downloadBtn.addEventListener('click', async (event) => {
+      if (isLocalMediaUrl(url) && url.startsWith('/generated/')) return;
+      event.preventDefault();
+      const original = downloadBtn.textContent;
+      downloadBtn.textContent = '下载中…';
+      downloadBtn.setAttribute('aria-busy', 'true');
+      try {
+        const response = await fetch(localDownloadUrl(url), { credentials: 'same-origin' });
+        if (!response.ok) throw new Error(`Download failed (${response.status})`);
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const temp = document.createElement('a');
+        const ctype = response.headers.get('Content-Type') || '';
+        const ext = kind === 'video'
+          ? (ctype.includes('webm') ? '.webm' : '.mp4')
+          : (ctype.includes('jpeg') || ctype.includes('jpg') ? '.jpg' : ctype.includes('webp') ? '.webp' : '.png');
+        temp.href = objectUrl;
+        temp.download = `generated-${kind || 'media'}-${Date.now()}${ext}`;
+        document.body.appendChild(temp);
+        temp.click();
+        temp.remove();
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+      } catch (err) {
+        console.warn('Media download failed', err);
+        window.open(url, '_blank', 'noopener,noreferrer');
+      } finally {
+        downloadBtn.textContent = original;
+        downloadBtn.removeAttribute('aria-busy');
+      }
+    });
+    actions.appendChild(downloadBtn);
+
+    const revealBtn = document.createElement('button');
+    revealBtn.type = 'button';
+    revealBtn.className = 'chat-video-action';
+    revealBtn.textContent = '打开本地';
+    revealBtn.addEventListener('click', () => revealLocalMedia(url, revealBtn));
+    actions.appendChild(revealBtn);
+
+    const openBtn = document.createElement('a');
+    openBtn.className = 'chat-video-action';
+    openBtn.href = url;
+    openBtn.target = '_blank';
+    openBtn.rel = 'noopener noreferrer';
+    openBtn.textContent = '原链';
+    actions.appendChild(openBtn);
+  }
+
+  body.appendChild(actions);
+  card.appendChild(mediaWrap);
+  card.appendChild(body);
+  return card;
+}
+
+function collectMediaJobs(session) {
+  const jobs = [];
+  const messages = Array.isArray(session?.messages) ? session.messages : [];
+  const running = isSessionRunning(session);
+  const errored = session?.status === 'error';
+  let lastUserIndex = -1;
+  for (let i = 0; i < messages.length; i += 1) {
+    if (messages[i].role === 'user') lastUserIndex = i;
+  }
+
+  for (let i = 0; i < messages.length; i += 1) {
+    const msg = messages[i];
+    if (msg.role !== 'user') continue;
+    const prompt = String(msg.content || '').trim();
+    const next = messages[i + 1];
+    // Running/error already represent the latest unanswered user turn.
+    if ((running || errored) && i === lastUserIndex && !(next && next.role === 'assistant')) {
+      continue;
+    }
+    if (next && next.role === 'assistant') {
+      const assets = extractMediaAssets(next.content);
+      if (assets.length) {
+        assets.forEach((asset, idx) => {
+          jobs.push({
+            id: `${session.id}_${i}_${idx}`,
+            prompt,
+            model: session.model || '',
+            status: 'done',
+            kind: asset.kind,
+            url: asset.url,
+            content: next.content,
+          });
+        });
+      } else {
+        jobs.push({
+          id: `${session.id}_${i}_text`,
+          prompt,
+          model: session.model || '',
+          status: 'done',
+          kind: isVideoMode() ? 'video' : 'image',
+          url: '',
+          content: next.content,
+          note: next.content,
+        });
+      }
+    }
+  }
+
+  if (running) {
+    jobs.unshift({
+      id: session.pendingRequestId || `${session.id}_running`,
+      prompt: session.messages?.filter(m => m.role === 'user').slice(-1)[0]?.content || session.title || '',
+      model: session.model || '',
+      status: 'running',
+      kind: isVideoMode() ? 'video' : 'image',
+      url: '',
+      requestId: session.pendingRequestId || '',
+      draft: session.pendingDraftText || '',
+    });
+  } else if (errored) {
+    jobs.unshift({
+      id: `${session.id}_error`,
+      prompt: session.messages?.filter(m => m.role === 'user').slice(-1)[0]?.content || session.title || '',
+      model: session.model || '',
+      status: 'error',
+      kind: isVideoMode() ? 'video' : 'image',
+      url: '',
+      error: session.pendingError || 'Request failed',
+    });
+  }
+
+  return jobs;
+}
+
+function paintMediaWorkspace(history, focusSession, diskItems = []) {
+  const modeSessions = getModeSessions(chatMode);
+  const runningCount = countRunningModeJobs(chatMode);
+  const kindLabel = isVideoMode() ? '视频' : '图片';
+  const expectedKind = isVideoMode() ? 'video' : 'image';
+
+  history.innerHTML = '';
+  history.classList.add('media-history');
+
+  const shell = document.createElement('div');
+  shell.className = 'media-workbench';
+
+  const allJobs = [];
+  modeSessions.forEach((session) => {
+    collectMediaJobs(session).forEach((job) => {
+      allJobs.push({ ...job, sessionId: session.id, sessionTitle: session.title, sessionTs: session.ts, source: 'session' });
+    });
+  });
+
+  // Disk files shared across browsers/clients — only add URLs not already in session jobs.
+  const seenUrls = new Set();
+  allJobs.forEach((job) => {
+    const key = mediaUrlKey(job.url);
+    if (key) seenUrls.add(key);
+  });
+  (Array.isArray(diskItems) ? diskItems : []).forEach((item) => {
+    if (!item || item.kind !== expectedKind) return;
+    const url = String(item.url || '').trim();
+    const key = mediaUrlKey(url);
+    if (!url || !key || seenUrls.has(key)) return;
+    seenUrls.add(key);
+    allJobs.push({
+      id: `disk_${item.filename || key}`,
+      prompt: item.filename || '本地文件',
+      model: '',
+      status: 'done',
+      kind: item.kind,
+      url,
+      sessionId: '',
+      sessionTitle: '',
+      sessionTs: Number(item.mtime || 0) * 1000,
+      source: 'disk',
+      bytes: item.bytes || 0,
+    });
+  });
+
+  // Prefer focused session, then running, then recency.
+  allJobs.sort((a, b) => {
+    const aFocus = focusSession && a.sessionId === focusSession.id ? 1 : 0;
+    const bFocus = focusSession && b.sessionId === focusSession.id ? 1 : 0;
+    if (aFocus !== bFocus) return bFocus - aFocus;
+    const aRun = a.status === 'running' ? 1 : 0;
+    const bRun = b.status === 'running' ? 1 : 0;
+    if (aRun !== bRun) return bRun - aRun;
+    return Number(b.sessionTs || 0) - Number(a.sessionTs || 0);
+  });
+
+  const header = document.createElement('div');
+  header.className = 'media-workbench-head';
+  const diskCount = allJobs.filter((job) => job.source === 'disk').length;
+  const totalDone = allJobs.filter((job) => job.status === 'done' && job.url).length;
+  header.innerHTML = `
+    <div class="media-workbench-title">
+      <strong>${kindLabel}工作台</strong>
+      <span>${modeSessions.length} 个任务${runningCount ? ` · ${runningCount} 运行中` : ''} · ${totalDone} 项本地结果${diskCount ? `（含 ${diskCount} 共享文件）` : ''} · 可并发生成</span>
+    </div>
+    <div class="media-workbench-actions">
+      <button type="button" class="chat-video-action" onclick="createNewSession()">新建任务</button>
+      <button type="button" class="chat-video-action" onclick="revealLocalMedia('${isVideoMode() ? '/generated/videos/' : '/generated/images/'}', this)">打开保存目录</button>
+    </div>
+  `;
+  shell.appendChild(header);
+
+  if (!allJobs.length) {
+    const empty = document.createElement('div');
+    empty.className = 'media-workbench-empty';
+    empty.innerHTML = `
+      <div class="chat-welcome-icon">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg>
+      </div>
+      <div class="chat-welcome-text">描述你想生成的${kindLabel}</div>
+      <div class="chat-welcome-hint">Enter 生成 · 支持多任务并发 · 结果可下载/打开本地目录 · 各浏览器共享本地文件</div>
+    `;
+    shell.appendChild(empty);
+  } else {
+    const cards = document.createElement('div');
+    cards.className = 'media-gallery';
+    allJobs.forEach((job) => {
+      const card = buildMediaCard({
+        kind: job.kind,
+        url: job.url,
+        prompt: job.prompt,
+        model: job.model || (job.source === 'disk' ? '本地文件' : ''),
+        status: job.status,
+        error: job.error || job.note || '',
+        requestId: job.requestId || '',
+        jobId: job.id,
+      });
+      if (job.source === 'disk') card.classList.add('is-disk');
+      if (job.status === 'running' && job.requestId) {
+        chatRequestViews[job.requestId] = {
+          history,
+          msgDiv: card,
+          contentDiv: card.querySelector('.media-card-preview') || card,
+          mediaCard: true,
+        };
+      }
+      card.addEventListener('click', (event) => {
+        if (event.target.closest('a,button,video,img')) return;
+        if (job.sessionId && job.sessionId !== activeSessionId) switchToSession(job.sessionId);
+      });
+      cards.appendChild(card);
+    });
+    shell.appendChild(cards);
+  }
+
+  history.appendChild(shell);
+}
+
+function renderMediaWorkspace(focusSession = null) {
+  const history = document.getElementById('chat-history');
+  if (!history) return;
+
+  const kind = isVideoMode() ? 'video' : 'image';
+  // Paint immediately with any cached disk list so UI doesn't flash empty.
+  paintMediaWorkspace(history, focusSession, diskMediaCache[kind] || []);
+  requestAnimationFrame(() => history.scrollTo({ top: 0, behavior: 'smooth' }));
+
+  // Refresh from disk so other browsers/clients always see shared local files.
+  fetchDiskMedia(kind).then((items) => {
+    // Bail if user left media mode / switched history root while we were loading.
+    if (document.getElementById('chat-history') !== history) return;
+    if (!isMediaMode() || (kind === 'video') !== isVideoMode()) return;
+    paintMediaWorkspace(history, focusSession, items);
+  });
 }
 
 // ─── SVG Icons ───
@@ -988,23 +1606,166 @@ function copyPreCode(btn) {
   }
 }
 
+function looksLikeVideoUrl(href, label = '') {
+  const raw = String(href || '').trim();
+  if (!raw) return false;
+  if (raw.startsWith('/generated/videos/')) return true;
+  if (raw.startsWith('/api/media-proxy')) return true;
+  const lower = raw.toLowerCase();
+  const pathOnly = lower.split('?')[0].split('#')[0];
+  const labelText = String(label || '').trim().toLowerCase();
+  if (pathOnly.endsWith('.mp4') || pathOnly.endsWith('.webm') || pathOnly.endsWith('.mov') || pathOnly.endsWith('.m4v') || pathOnly.endsWith('.mkv')) {
+    return true;
+  }
+  if (labelText === 'video' || labelText.includes('video') || labelText.includes('视频')) return true;
+  // Agnes / CDN links often omit a file extension.
+  if (/\/(videos?|media|stream|content|download)\b/i.test(pathOnly)) return true;
+  if (/\b(video|mp4|webm)\b/i.test(lower)) return true;
+  return false;
+}
+
+function mediaProxyUrl(remoteUrl, { download = false, mode = 'stream' } = {}) {
+  const params = new URLSearchParams();
+  params.set('url', remoteUrl);
+  if (mode && mode !== 'stream') params.set('mode', mode);
+  if (download) params.set('download', '1');
+  return `/api/media-proxy?${params.toString()}`;
+}
+
+function isLocalMediaUrl(url) {
+  const value = String(url || '').trim();
+  return value.startsWith('/generated/') || value.startsWith('/api/media-proxy');
+}
+
 function decorateMediaEmbeds(contentDiv) {
+  // Promote markdown images into downloadable cards.
+  contentDiv.querySelectorAll('img[src]').forEach(img => {
+    if (img.closest('.chat-image-card, .media-card, .chat-video-card')) return;
+    const src = img.getAttribute('src') || '';
+    if (!src || src.startsWith('data:')) return;
+    const card = document.createElement('div');
+    card.className = 'chat-image-card';
+    const preview = img.cloneNode(true);
+    preview.className = 'chat-generated-image';
+    preview.loading = 'lazy';
+    const actions = document.createElement('div');
+    actions.className = 'chat-video-actions';
+    const downloadBtn = document.createElement('a');
+    downloadBtn.className = 'chat-video-action primary';
+    downloadBtn.href = localDownloadUrl(src);
+    downloadBtn.download = '';
+    downloadBtn.textContent = '下载图片';
+    const revealBtn = document.createElement('button');
+    revealBtn.type = 'button';
+    revealBtn.className = 'chat-video-action';
+    revealBtn.textContent = '打开本地';
+    revealBtn.addEventListener('click', () => revealLocalMedia(src, revealBtn));
+    actions.appendChild(downloadBtn);
+    if (isLocalMediaUrl(src) || src.startsWith('/generated/')) actions.appendChild(revealBtn);
+    card.appendChild(preview);
+    card.appendChild(actions);
+    img.replaceWith(card);
+  });
+
   contentDiv.querySelectorAll('a[href]').forEach(link => {
+    if (link.closest('.chat-video-card, .chat-image-card, .media-card')) return;
     const href = link.getAttribute('href') || '';
-    const normalized = href.split('?')[0].toLowerCase();
-    const label = (link.textContent || '').trim().toLowerCase();
-    const looksVideo = normalized.endsWith('.mp4')
-      || normalized.endsWith('.webm')
-      || normalized.endsWith('.mov')
-      || label === 'video'
-      || label.includes('video');
-    if (!looksVideo) return;
+    const label = (link.textContent || '').trim();
+    if (!looksLikeVideoUrl(href, label)) return;
+
+    const remoteUrl = href;
+    const playUrl = isLocalMediaUrl(remoteUrl) ? remoteUrl : mediaProxyUrl(remoteUrl, { mode: 'stream' });
+    const downloadUrl = isLocalMediaUrl(remoteUrl)
+      ? (remoteUrl.includes('?') ? `${remoteUrl}&download=1` : `${remoteUrl}?download=1`)
+      : mediaProxyUrl(remoteUrl, { mode: 'local', download: true });
+
+    const card = document.createElement('div');
+    card.className = 'chat-video-card';
+    card.dataset.remoteUrl = remoteUrl;
+
     const video = document.createElement('video');
     video.controls = true;
     video.preload = 'metadata';
-    video.src = href;
+    video.playsInline = true;
     video.className = 'chat-generated-video';
-    link.replaceWith(video);
+    video.src = playUrl;
+    video.setAttribute('controlslist', 'nodownload');
+
+    const actions = document.createElement('div');
+    actions.className = 'chat-video-actions';
+
+    const openBtn = document.createElement('a');
+    openBtn.className = 'chat-video-action';
+    openBtn.href = remoteUrl;
+    openBtn.target = '_blank';
+    openBtn.rel = 'noopener noreferrer';
+    openBtn.textContent = '打开原链';
+
+    const downloadBtn = document.createElement('a');
+    downloadBtn.className = 'chat-video-action primary';
+    downloadBtn.href = downloadUrl;
+    downloadBtn.download = '';
+    downloadBtn.textContent = '下载视频';
+    downloadBtn.addEventListener('click', async (event) => {
+      // Prefer a same-origin blob download so browsers don't just navigate away.
+      if (isLocalMediaUrl(remoteUrl) && remoteUrl.startsWith('/generated/')) return;
+      event.preventDefault();
+      const original = downloadBtn.textContent;
+      downloadBtn.textContent = '下载中…';
+      downloadBtn.setAttribute('aria-busy', 'true');
+      try {
+        const response = await fetch(mediaProxyUrl(remoteUrl, { mode: 'local', download: true }), {
+          credentials: 'same-origin',
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || `Download failed (${response.status})`);
+        }
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const temp = document.createElement('a');
+        const extMatch = (response.headers.get('Content-Type') || '').includes('webm') ? '.webm' : '.mp4';
+        temp.href = objectUrl;
+        temp.download = `generated-video-${Date.now()}${extMatch}`;
+        document.body.appendChild(temp);
+        temp.click();
+        temp.remove();
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+      } catch (err) {
+        console.warn('Video download via proxy failed, falling back to direct link.', err);
+        window.open(remoteUrl, '_blank', 'noopener,noreferrer');
+      } finally {
+        downloadBtn.textContent = original;
+        downloadBtn.removeAttribute('aria-busy');
+      }
+    });
+
+    const revealBtn = document.createElement('button');
+    revealBtn.type = 'button';
+    revealBtn.className = 'chat-video-action';
+    revealBtn.textContent = '打开本地';
+    revealBtn.addEventListener('click', () => revealLocalMedia(remoteUrl, revealBtn));
+
+    actions.appendChild(downloadBtn);
+    actions.appendChild(revealBtn);
+    actions.appendChild(openBtn);
+
+    const caption = document.createElement('div');
+    caption.className = 'chat-video-caption';
+    caption.textContent = '生成视频';
+
+    card.appendChild(video);
+    card.appendChild(caption);
+    card.appendChild(actions);
+
+    // If the proxy stream fails (CORS-free path still bad), fall back to the remote URL.
+    video.addEventListener('error', () => {
+      if (video.dataset.fallbackApplied === '1') return;
+      video.dataset.fallbackApplied = '1';
+      if (video.src !== remoteUrl) video.src = remoteUrl;
+    }, { once: true });
+
+    link.replaceWith(card);
   });
 }
 
@@ -1265,8 +2026,13 @@ async function sendChatMessage() {
   const requestIsVideo = requestMode === 'video';
   const requestIsMedia = requestIsImage || requestIsVideo;
 
+  // Media: each generation is its own concurrent job/session so send is never blocked.
   let session = getActiveSession();
-  if (!session) {
+  if (requestIsMedia) {
+    if (!session || isSessionRunning(session) || (session.messages || []).length > 0 || normalizeChatMode(session.mode) !== requestMode) {
+      session = createNewSession(true);
+    }
+  } else if (!session) {
     session = createNewSession(true);
   } else if (normalizeChatMode(session.mode) !== requestMode) {
     session = createNewSession(true);
@@ -1283,7 +2049,9 @@ async function sendChatMessage() {
     });
   }
 
-  appendMessage('user', fullContentToSend);
+  if (!requestIsMedia) {
+    appendMessage('user', fullContentToSend);
+  }
 
   if (requestIsMedia) {
     chatContext = [];
@@ -1313,21 +2081,25 @@ async function sendChatMessage() {
   renderChatAttachedFiles();
 
   const history = document.getElementById('chat-history');
-  const botMsgDiv = document.createElement('div');
-  botMsgDiv.className = 'chat-message assistant';
-  botMsgDiv.id = `chat-bot-reply-${requestId}`;
-  const botMetaDiv = document.createElement('div');
-  botMetaDiv.className = 'chat-message-meta';
-  botMetaDiv.innerHTML = `${ICON.assistant}<span>${getSessionModeLabel(requestMode)}</span>`;
-  const botContentDiv = document.createElement('div');
-  botContentDiv.className = 'chat-message-content markdown-body';
-  botMsgDiv.appendChild(botMetaDiv);
-  botMsgDiv.appendChild(botContentDiv);
-  botContentDiv.innerHTML = `<div class="typing-indicator"><span></span><span></span><span></span></div>`;
-  if (history) {
-    history.appendChild(botMsgDiv);
-    chatRequestViews[requestId] = { history, msgDiv: botMsgDiv, contentDiv: botContentDiv };
-    requestAnimationFrame(() => history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' }));
+  if (requestIsMedia) {
+    renderMediaWorkspace(session);
+  } else {
+    const botMsgDiv = document.createElement('div');
+    botMsgDiv.className = 'chat-message assistant';
+    botMsgDiv.id = `chat-bot-reply-${requestId}`;
+    const botMetaDiv = document.createElement('div');
+    botMetaDiv.className = 'chat-message-meta';
+    botMetaDiv.innerHTML = `${ICON.assistant}<span>${getSessionModeLabel(requestMode)}</span>`;
+    const botContentDiv = document.createElement('div');
+    botContentDiv.className = 'chat-message-content markdown-body';
+    botMsgDiv.appendChild(botMetaDiv);
+    botMsgDiv.appendChild(botContentDiv);
+    botContentDiv.innerHTML = `<div class="typing-indicator"><span></span><span></span><span></span></div>`;
+    if (history) {
+      history.appendChild(botMsgDiv);
+      chatRequestViews[requestId] = { history, msgDiv: botMsgDiv, contentDiv: botContentDiv };
+      requestAnimationFrame(() => history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' }));
+    }
   }
 
   updateChatGeneratingState();
@@ -1460,6 +2232,9 @@ async function sendChatMessage() {
     updateChatGeneratingState();
     updateChatSendState();
     renderChatHistoryList();
+    if (requestIsMedia && chatMode === requestMode) {
+      renderMediaWorkspace(getActiveSession());
+    }
     if (document.activeElement !== inputEl) return;
     inputEl.focus();
   }

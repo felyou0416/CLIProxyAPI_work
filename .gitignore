@@ -64,3 +64,5 @@ CLIProxyAPI-MediaProxy/config.json
 *.bak
 *.orig
 *.rej
+*.lnk
+.workbuddy/

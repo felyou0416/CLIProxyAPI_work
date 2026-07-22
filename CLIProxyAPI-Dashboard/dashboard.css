@@ -7,12 +7,12 @@
 @import url('/css/panels/model-proxy.css');
 @import url('/css/panels/model-thinking.css?v=20260718-overflow-fix');
 @import url('/css/panels/aggregates.css?v=20260720-safe-area');
-@import url('/css/panels/chat.css?v=20260720-safe-area');
+@import url('/css/panels/chat.css?v=20260721-disk-media');
 @import url('/css/panels/virtual-keys.css');
 @import url('/css/panels/network-access.css');
 @import url('/css/panels/firewall-access.css');
 @import url('/css/panels/model-stats.css');
-@import url('/css/panels/requests.css');
+@import url('/css/panels/requests.css?v=20260721-success-collapse');
 @import url('/css/panels/token-usage.css');
 @import url('/css/panels/clients.css');
 @import url('/css/panels/providers.css?v=20260718-filter-drawer');

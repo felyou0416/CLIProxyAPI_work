@@ -1,16 +1,17 @@
-from backend.paths import ROOT, GENERATED_IMAGES_DIR
+from backend.paths import ROOT, GENERATED_IMAGES_DIR, GENERATED_VIDEOS_DIR
 from backend.api_keys import list_api_keys
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote
 from backend.auth import list_auth_files, get_configured_provider_models, get_model_route_preview, get_configured_aggregate_models, get_aggregate_route_health, get_manual_provider_presets, filter_provider_models_by_runtime, annotate_provider_models_runtime, canonicalize_auth_ref, get_model_proxy_settings, _current_route_strategy, derive_global_aggregate_aliases, _read_auth_payload
 from backend.state import load_state, normalize_route_strategy, save_state
 from backend.processes import current_status, firewall_access_status, custom_firewall_status, normalize_firewall_ports, normalize_firewall_protocols, port_binding_status, ip_helper_status, grok2api_port
 from backend.security import generate_security_report
-from backend.tools import get_tool_outputs, query_models, test_proxy, get_provider_model_test_state
+from backend.tools import get_tool_outputs, query_models, test_proxy, get_provider_model_test_state, materialize_generated_video, fetch_remote_media, validate_remote_media_url, list_generated_media
 from backend.model_thinking import load_model_thinking_configs, collect_thinking_candidates, collect_all_configured_models
 from backend.terminals import list_terminals, read_terminal
 from backend.request_metrics import parse_proxy_requests, parse_precise_request_events, parse_error_logs, merge_request_events, summarize_clients, summarize_models, summarize_model_test_stats, summarize_auth_health, ensure_observability_cache, refresh_observability_cache, get_cumulative_stats, merge_cumulative_model_test_stats
-from backend.routes.helpers import send_json, send_file
+from backend.routes.helpers import send_json, send_file, send_bytes
 from backend.system_proxy import get_system_proxy_status
+from pathlib import Path
 import time
 import mimetypes
 
@@ -94,7 +95,7 @@ def handle_get(handler, parsed):
                     from backend.settings import get_version_info
                     version_info = get_version_info()
                     version = version_info.get('item', {}).get('version', '1.0.0')
-                    compiled_text = re.sub(r'(\.js|\.css)\?v=[^\'\"\s>]+', f'\\1?v={version}', compiled_text)
+                    compiled_text = re.sub(r'(\.js|\.css|\.svg|\.ico|\.png)\?v=[^\'\"\s>]+', f'\\1?v={version}', compiled_text)
                 except Exception:
                     pass
                 compiled = compiled_text.encode('utf-8')
@@ -113,6 +114,13 @@ def handle_get(handler, parsed):
     if parsed.path == '/dashboard.css':
         send_file(handler, ROOT / 'dashboard.css', 'text/css; charset=utf-8', root=ROOT)
         return True
+    if parsed.path == '/favicon.svg':
+        send_file(handler, ROOT / 'favicon.svg', 'image/svg+xml', root=ROOT, extra_headers={'Cache-Control': 'no-cache, max-age=0'})
+        return True
+    if parsed.path in ('/favicon.ico', '/favicon.png'):
+        content_type = 'image/x-icon' if parsed.path == '/favicon.ico' else 'image/png'
+        send_file(handler, ROOT / parsed.path.lstrip('/'), content_type, root=ROOT, extra_headers={'Cache-Control': 'no-cache, max-age=0'})
+        return True
     if parsed.path.startswith('/js/'):
         send_file(handler, ROOT / parsed.path.lstrip('/'), 'application/javascript; charset=utf-8', root=ROOT)
         return True
@@ -123,9 +131,59 @@ def handle_get(handler, parsed):
         send_file(handler, ROOT / parsed.path.lstrip('/'), 'text/html; charset=utf-8', root=ROOT)
         return True
     if parsed.path.startswith('/generated/images/'):
-        rel_path = parsed.path.removeprefix('/generated/images/')
+        rel_path = unquote(parsed.path.removeprefix('/generated/images/'))
         content_type = mimetypes.guess_type(rel_path)[0] or 'application/octet-stream'
-        send_file(handler, GENERATED_IMAGES_DIR / rel_path, content_type, root=GENERATED_IMAGES_DIR)
+        as_download = str((params.get('download') or [''])[0] or '').strip().lower() in ('1', 'true', 'yes')
+        send_file(
+            handler,
+            GENERATED_IMAGES_DIR / rel_path,
+            content_type,
+            root=GENERATED_IMAGES_DIR,
+            download_name=Path(rel_path).name if as_download else None,
+        )
+        return True
+    if parsed.path.startswith('/generated/videos/'):
+        rel_path = unquote(parsed.path.removeprefix('/generated/videos/'))
+        content_type = mimetypes.guess_type(rel_path)[0] or 'video/mp4'
+        as_download = str((params.get('download') or [''])[0] or '').strip().lower() in ('1', 'true', 'yes')
+        send_file(
+            handler,
+            GENERATED_VIDEOS_DIR / rel_path,
+            content_type,
+            root=GENERATED_VIDEOS_DIR,
+            download_name=Path(rel_path).name if as_download else None,
+        )
+        return True
+    if parsed.path == '/api/media-proxy':
+        remote_url = unquote(str((params.get('url') or [''])[0] or '').strip())
+        mode = str((params.get('mode') or ['stream'])[0] or 'stream').strip().lower()
+        as_download = str((params.get('download') or [''])[0] or '').strip().lower() in ('1', 'true', 'yes') or mode == 'download'
+        try:
+            validate_remote_media_url(remote_url)
+            if mode in ('local', 'cache', 'materialize'):
+                item = materialize_generated_video(remote_url)
+                send_file(
+                    handler,
+                    item['path'],
+                    item.get('content_type') or 'video/mp4',
+                    root=GENERATED_VIDEOS_DIR,
+                    download_name=item.get('filename') if as_download else None,
+                    extra_headers={'X-Remote-Media-URL': remote_url, 'Cache-Control': 'private, max-age=3600'},
+                )
+            else:
+                fetched = fetch_remote_media(remote_url)
+                filename = f'video{fetched.get("ext") or ".mp4"}'
+                send_bytes(
+                    handler,
+                    fetched['data'],
+                    fetched.get('content_type') or 'video/mp4',
+                    download_name=filename if as_download else None,
+                    extra_headers={'X-Remote-Media-URL': remote_url, 'Cache-Control': 'private, max-age=300'},
+                )
+        except ValueError as exc:
+            send_json(handler, {'ok': False, 'message': str(exc)}, status=400)
+        except Exception as exc:
+            send_json(handler, {'ok': False, 'message': f'Media proxy failed: {exc}'}, status=502)
         return True
     if parsed.path == '/api/status':
         include_logs = str((params.get('include_logs') or ['0'])[0] or '').strip().lower() in ('1', 'true', 'yes')
@@ -658,6 +716,17 @@ def handle_get(handler, parsed):
     if parsed.path == '/api/settings':
         from backend.settings import get_settings
         send_json(handler, get_settings())
+        return True
+    if parsed.path == '/api/generated-media':
+        kind = str((params.get('kind') or ['all'])[0] or 'all').strip().lower()
+        try:
+            limit = int((params.get('limit') or ['200'])[0] or 200)
+        except (TypeError, ValueError):
+            limit = 200
+        try:
+            send_json(handler, list_generated_media(kind=kind, limit=limit))
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': str(e), 'items': []}, status=500)
         return True
     if parsed.path == '/api/version':
         from backend.settings import get_version_info

@@ -45,6 +45,27 @@ from backend.state import load_state, save_state, get_proxy_bind_host, get_proxy
 from backend.runtime_env import command_exists, is_windows, cli_binary_hint
 
 process_lock = threading.Lock()
+# Proxy start can take many seconds (config build + port wait). Keep that work
+# OUTSIDE process_lock so /api/status and other dashboard APIs stay responsive.
+# This flag only prevents concurrent start/restart of the same proxy stack.
+_proxy_start_state = {
+    'starting': False,
+    'restarting': False,
+    'started_at': 0.0,
+}
+
+
+def _set_proxy_starting(starting: bool):
+    with process_lock:
+        _proxy_start_state['starting'] = starting
+        if starting:
+            _proxy_start_state['started_at'] = time.time()
+
+
+def _set_proxy_restarting(restarting: bool):
+    with process_lock:
+        _proxy_start_state['restarting'] = restarting
+
 
 def get_process_name(pid):
     """Return the process name for a given PID using psutil, or None if unavailable."""
@@ -76,9 +97,9 @@ OAUTH_MANAGER_LEGACY_PORT_FILE = OAUTH_MANAGER_DIR / 'dashboard_port.txt'
 OAUTH_MANAGER_STDOUT = OAUTH_MANAGER_DIR / 'logs' / 'dashboard.stdout.log'
 OAUTH_MANAGER_STDERR = OAUTH_MANAGER_DIR / 'logs' / 'dashboard.stderr.log'
 OAUTH_MANAGER_DEFAULT_PORT = 1900
-# Grok 批量注册面板（create-grok Web UI，默认 :3780）
-CREATE_GROK_DIR = Path(r'E:\U_App\FlowPilot浏览器插件，批量codex账号注册\create-grok')
-CREATE_GROK_SERVER = CREATE_GROK_DIR / 'server.js'
+# Grok 批量注册面板（grok-register-mint Web UI，默认 :3780）
+CREATE_GROK_DIR = Path(r'E:\U_App\grok-register-mint')
+CREATE_GROK_ENTRY = CREATE_GROK_DIR / 'web_ui.py'
 CREATE_GROK_DEFAULT_PORT = 3780
 CREATE_GROK_STDOUT = LOGS_DIR / 'create-grok.stdout.log'
 CREATE_GROK_STDERR = LOGS_DIR / 'create-grok.stderr.log'
@@ -174,17 +195,17 @@ def process_alive(proc):
     return proc is not None and proc.poll() is None
 
 
-def kill_process(proc):
+def kill_process(proc, timeout=1.0):
     if not process_alive(proc):
         return False
     try:
         proc.terminate()
-        proc.wait(timeout=5)
+        proc.wait(timeout=timeout)
         return True
     except Exception:
         try:
             proc.kill()
-            proc.wait(timeout=5)
+            proc.wait(timeout=timeout)
             return True
         except Exception:
             return False
@@ -355,11 +376,31 @@ def _dashboard_relaunch_creationflags() -> int:
     if not is_windows():
         return 0
     flags = 0
-    # Detach from the dying dashboard process tree so the relauncher survives os._exit.
-    flags |= int(getattr(subprocess, 'DETACHED_PROCESS', 0) or 0)
+    # NOTE: Do NOT use DETACHED_PROCESS (0x8). With PowerShell -File it often exits
+    # immediately (code 0) and never runs the waiter — no relaunch log, panel stays dead.
+    # Windows children normally survive parent os._exit without DETACHED_PROCESS.
     flags |= int(getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) or 0)
     flags |= int(getattr(subprocess, 'CREATE_NO_WINDOW', 0) or 0)
+    # Break out of Job Objects (Electron/service hosts) that would kill children with parent.
+    flags |= 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
     return flags
+
+
+def _resolve_powershell_exe() -> str:
+    """Prefer absolute powershell.exe — bare 'powershell' can fail under detached PATH."""
+    candidates = []
+    system_root = os.environ.get('SystemRoot') or os.environ.get('WINDIR') or r'C:\Windows'
+    candidates.append(str(Path(system_root) / 'System32' / 'WindowsPowerShell' / 'v1.0' / 'powershell.exe'))
+    which = shutil.which('powershell.exe') or shutil.which('powershell')
+    if which:
+        candidates.append(which)
+    for path in candidates:
+        try:
+            if path and Path(path).exists():
+                return path
+        except Exception:
+            continue
+    return 'powershell.exe'
 
 
 def _spawn_dashboard_relauncher(delay_seconds: float = 0.8, token: str = '') -> dict:
@@ -370,6 +411,7 @@ def _spawn_dashboard_relauncher(delay_seconds: float = 0.8, token: str = '') -> 
     - never force-starts while the old process is still alive (avoids the
       start-script "already healthy → exit" short-circuit that leaves the panel dead)
     - stamp token is one-shot; relauncher clears it and exits after a single attempt
+    - Windows: write a real .ps1 file (EncodedCommand + DETACHED often dies silently)
     """
     script = _dashboard_start_script()
     if script is None:
@@ -393,14 +435,19 @@ def _spawn_dashboard_relauncher(delay_seconds: float = 0.8, token: str = '') -> 
     token = str(token or f'{pid}-{int(time.time())}')
 
     if is_windows():
-        # One-shot waiter: poll PID with deadline, start only after death, clear stamp, exit.
+        # Persist one-shot waiter as a file. EncodedCommand under DETACHED_PROCESS
+        # often never runs (no log, no start) — disk script + -File is reliable.
+        waiter_path = log_dir / f'dashboard-relaunch-{token}.ps1'
+        launcher_stdout = log_dir / 'dashboard.relaunch.launcher.stdout.log'
+        launcher_stderr = log_dir / 'dashboard.relaunch.launcher.stderr.log'
         ps = f"""
-$ErrorActionPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Continue'
 $log = {json.dumps(str(relaunch_log))}
 $stamp = {json.dumps(stamp_path)}
 $token = {json.dumps(token)}
 $targetPid = {int(pid)}
 $port = {int(port)}
+$selfScript = {json.dumps(str(waiter_path))}
 function Write-RelaunchLog([string]$msg) {{
   $line = "$((Get-Date).ToString('s')) [$token] $msg"
   try {{ Add-Content -LiteralPath $log -Value $line -Encoding utf8 }} catch {{}}
@@ -423,88 +470,164 @@ function Test-PidAlive([int]$ProcessId) {{
     return $false
   }}
 }}
-Write-RelaunchLog "relauncher started; waiting for pid=$targetPid port=$port (max {wait_budget}s)"
-$deadline = (Get-Date).AddSeconds({wait_budget})
-$released = $false
-while ((Get-Date) -lt $deadline) {{
-  if (-not (Test-PidAlive $targetPid)) {{
-    $released = $true
-    break
-  }}
-  Start-Sleep -Milliseconds 250
-}}
-if (-not $released) {{
-  Write-RelaunchLog "timed out waiting for pid=$targetPid; aborting relaunch (no force-start while old process is alive)"
-  Clear-RestartStamp
-  exit 2
-}}
-Write-RelaunchLog "pid=$targetPid exited; settle {settle_ms}ms then start"
-Start-Sleep -Milliseconds {settle_ms}
-# If something else already revived the panel, do not start a second copy.
-try {{
-  $req = [System.Net.HttpWebRequest]::Create("http://127.0.0.1:$port/")
-  $req.Method = 'GET'
-  $req.Timeout = 800
-  $req.ReadWriteTimeout = 800
-  $req.Proxy = [System.Net.GlobalProxySelection]::GetEmptyWebProxy()
-  $req.KeepAlive = $false
+function Remove-SelfScript {{
   try {{
-    $resp = $req.GetResponse()
-    $code = [int]$resp.StatusCode
-    $resp.Close()
-    if ($code -ge 200 -and $code -lt 500) {{
-      Write-RelaunchLog "port $port already healthy after exit; skip start"
-      Clear-RestartStamp
-      exit 0
+    if ($selfScript -and (Test-Path -LiteralPath $selfScript)) {{
+      Remove-Item -LiteralPath $selfScript -Force -ErrorAction SilentlyContinue
     }}
-  }} catch [System.Net.WebException] {{
-    $resp = $_.Exception.Response
-    if ($null -ne $resp) {{
+  }} catch {{}}
+}}
+try {{
+  Write-RelaunchLog "relauncher started; waiting for pid=$targetPid port=$port (max {wait_budget}s)"
+  $deadline = (Get-Date).AddSeconds({wait_budget})
+  $released = $false
+  while ((Get-Date) -lt $deadline) {{
+    if (-not (Test-PidAlive $targetPid)) {{
+      $released = $true
+      break
+    }}
+    Start-Sleep -Milliseconds 250
+  }}
+  if (-not $released) {{
+    Write-RelaunchLog "timed out waiting for pid=$targetPid; aborting relaunch (no force-start while old process is alive)"
+    Clear-RestartStamp
+    Remove-SelfScript
+    exit 2
+  }}
+  Write-RelaunchLog "pid=$targetPid exited; settle {settle_ms}ms then start"
+  Start-Sleep -Milliseconds {settle_ms}
+  # If something else already revived the panel, do not start a second copy.
+  try {{
+    $req = [System.Net.HttpWebRequest]::Create("http://127.0.0.1:$port/")
+    $req.Method = 'GET'
+    $req.Timeout = 800
+    $req.ReadWriteTimeout = 800
+    $req.Proxy = [System.Net.GlobalProxySelection]::GetEmptyWebProxy()
+    $req.KeepAlive = $false
+    try {{
+      $resp = $req.GetResponse()
       $code = [int]$resp.StatusCode
       $resp.Close()
       if ($code -ge 200 -and $code -lt 500) {{
-        Write-RelaunchLog "port $port already answering ($code); skip start"
+        Write-RelaunchLog "port $port already healthy after exit; skip start"
         Clear-RestartStamp
+        Remove-SelfScript
         exit 0
       }}
+    }} catch [System.Net.WebException] {{
+      $resp = $_.Exception.Response
+      if ($null -ne $resp) {{
+        $code = [int]$resp.StatusCode
+        $resp.Close()
+        if ($code -ge 200 -and $code -lt 500) {{
+          Write-RelaunchLog "port $port already answering ($code); skip start"
+          Clear-RestartStamp
+          Remove-SelfScript
+          exit 0
+        }}
+      }}
     }}
+  }} catch {{}}
+  $startScript = {json.dumps(str(script))}
+  $cwd = {json.dumps(root)}
+  $psExe = {json.dumps(_resolve_powershell_exe())}
+  try {{
+    if ($startScript.ToLower().EndsWith('.ps1')) {{
+      $p = Start-Process -FilePath $psExe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$startScript) -WorkingDirectory $cwd -WindowStyle Hidden -PassThru
+    }} else {{
+      $p = Start-Process -FilePath $startScript -WorkingDirectory $cwd -WindowStyle Hidden -PassThru
+    }}
+    Write-RelaunchLog "start script launched pid=$($p.Id) via $startScript"
+    Clear-RestartStamp
+    Remove-SelfScript
+    exit 0
+  }} catch {{
+    Write-RelaunchLog "failed to launch start script: $($_.Exception.Message)"
+    Clear-RestartStamp
+    Remove-SelfScript
+    exit 1
   }}
-}} catch {{}}
-$script = {json.dumps(str(script))}
-$cwd = {json.dumps(root)}
-try {{
-  if ($script.ToLower().EndsWith('.ps1')) {{
-    $p = Start-Process -FilePath powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$script) -WorkingDirectory $cwd -WindowStyle Hidden -PassThru
-  }} else {{
-    $p = Start-Process -FilePath $script -WorkingDirectory $cwd -WindowStyle Hidden -PassThru
-  }}
-  Write-RelaunchLog "start script launched pid=$($p.Id)"
-  Clear-RestartStamp
-  exit 0
 }} catch {{
-  Write-RelaunchLog "failed to launch start script: $($_.Exception.Message)"
+  Write-RelaunchLog "relauncher crashed: $($_.Exception.Message)"
   Clear-RestartStamp
+  Remove-SelfScript
   exit 1
 }}
 """.strip()
-        encoded = base64.b64encode(ps.encode('utf-16le')).decode('ascii')
+        try:
+            waiter_path.write_text(ps + '\n', encoding='utf-8')
+        except Exception as exc:
+            return {
+                'ok': False,
+                'message': f'Failed to write dashboard relauncher script: {exc}',
+            }
+
+        ps_exe = _resolve_powershell_exe()
         cmd = [
-            'powershell',
+            ps_exe,
             '-NoProfile',
             '-ExecutionPolicy', 'Bypass',
             '-WindowStyle', 'Hidden',
-            '-EncodedCommand', encoded,
+            '-File', str(waiter_path),
         ]
-        popen_kwargs = {
-            'cwd': root,
-            'stdin': subprocess.DEVNULL,
-            'stdout': subprocess.DEVNULL,
-            'stderr': subprocess.DEVNULL,
-            'close_fds': True,
-            'creationflags': _dashboard_relaunch_creationflags(),
+        try:
+            fout = open(launcher_stdout, 'a', encoding='utf-8', errors='ignore')
+            ferr = open(launcher_stderr, 'a', encoding='utf-8', errors='ignore')
+            try:
+                fout.write(f'\n==== schedule {time.strftime("%Y-%m-%d %H:%M:%S")} token={token} pid={pid} ====\n')
+                fout.flush()
+            except Exception:
+                pass
+            proc = subprocess.Popen(
+                cmd,
+                cwd=root,
+                stdin=subprocess.DEVNULL,
+                stdout=fout,
+                stderr=ferr,
+                # Windows: keep handles open so the child can write logs; close_fds=True
+                # + DETACHED has been observed to drop the relauncher before it logs.
+                close_fds=False,
+                creationflags=_dashboard_relaunch_creationflags(),
+            )
+        except Exception as exc:
+            try:
+                waiter_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return {
+                'ok': False,
+                'message': f'Failed to schedule dashboard relaunch: {exc}',
+            }
+
+        # Confirm the waiter process actually started (not immediately dead).
+        time.sleep(0.15)
+        if proc.poll() is not None:
+            err_tail = ''
+            try:
+                err_tail = launcher_stderr.read_text(encoding='utf-8', errors='ignore')[-400:]
+            except Exception:
+                pass
+            try:
+                waiter_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            message = f'Dashboard relauncher exited immediately (code {proc.returncode}).'
+            if err_tail.strip():
+                message = f'{message} {err_tail.strip()}'
+            return {'ok': False, 'message': message}
+
+        return {
+            'ok': True,
+            'message': 'Dashboard panel is restarting.',
+            'relaunch_log': str(relaunch_log),
+            'port': port,
+            'pid': pid,
+            'token': token,
+            'relauncher_pid': proc.pid,
+            'waiter_script': str(waiter_path),
         }
-    else:
-        shell = f"""
+
+    shell = f"""
 set -eu
 log={json.dumps(str(relaunch_log))}
 stamp={json.dumps(stamp_path)}
@@ -550,18 +673,17 @@ fi
 clear_stamp
 exit 0
 """
-        cmd = ['/bin/bash', '-lc', shell]
-        popen_kwargs = {
-            'cwd': root,
-            'stdin': subprocess.DEVNULL,
-            'stdout': subprocess.DEVNULL,
-            'stderr': subprocess.DEVNULL,
-            'close_fds': True,
-            'start_new_session': True,
-        }
-
+    cmd = ['/bin/bash', '-lc', shell]
     try:
-        subprocess.Popen(cmd, **popen_kwargs)
+        subprocess.Popen(
+            cmd,
+            cwd=root,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            start_new_session=True,
+        )
     except Exception as exc:
         return {
             'ok': False,
@@ -1740,6 +1862,8 @@ def start_oauth_manager():
     if not OAUTH_MANAGER_SWITCHER.exists():
         return {'ok': False, 'message': f'switcher.py was not found: {OAUTH_MANAGER_SWITCHER}'}
 
+    command = None
+    proc = None
     with process_lock:
         running_pid = None
         tracked = processes.get('oauth_manager')
@@ -1779,46 +1903,46 @@ def start_oauth_manager():
                 close_fds=False if is_windows() else True,
             )
             processes['oauth_manager'] = proc
-            # switcher.py rewrites run/dashboard.pid; wait for TCP listen readiness.
-            ready_pid = None
-            deadline = time.time() + 12.0
-            while time.time() < deadline:
-                if not process_alive(proc) and not _read_oauth_manager_pid_file():
-                    break
-                # Invalidate short-lived PID cache while waiting for readiness.
-                _oauth_manager_pid_cache['time'] = 0
-                ready_pid = find_oauth_manager_pid() or (proc.pid if process_alive(proc) else None)
-                listener_pid = find_proxy_listener_pid(_oauth_manager_port())
-                if ready_pid and listener_pid:
-                    break
-                time.sleep(0.25)
-
-            listener_pid = find_proxy_listener_pid(_oauth_manager_port())
-            if not listener_pid and not process_alive(proc) and not find_oauth_manager_pid():
-                err_tail = ''
-                try:
-                    err_tail = OAUTH_MANAGER_STDERR.read_text(encoding='utf-8', errors='ignore')[-500:]
-                except Exception:
-                    pass
-                processes['oauth_manager'] = None
-                message = 'Failed to start OAuth Manager.'
-                if err_tail.strip():
-                    message = f'{message} {err_tail.strip()}'
-                return {'ok': False, 'message': message, 'command': command, 'url': _oauth_manager_url()}
-
-            ready_pid = listener_pid or find_oauth_manager_pid() or proc.pid
-            _oauth_manager_pid_cache['value'] = ready_pid
-            _oauth_manager_pid_cache['time'] = time.time()
-            return {
-                'ok': True,
-                'message': f'Started OAuth Manager at {_oauth_manager_url()}.',
-                'pid': ready_pid,
-                'command': command,
-                'url': _oauth_manager_url(),
-            }
         except Exception as exc:
             processes['oauth_manager'] = None
             return {'ok': False, 'message': f'Failed to start OAuth Manager: {exc}', 'url': _oauth_manager_url()}
+
+    # switcher.py rewrites run/dashboard.pid; wait for TCP listen readiness outside process_lock.
+    deadline = time.time() + 12.0
+    while time.time() < deadline:
+        if not process_alive(proc) and not _read_oauth_manager_pid_file():
+            break
+        _oauth_manager_pid_cache['time'] = 0
+        listener_pid = find_proxy_listener_pid(_oauth_manager_port())
+        ready_pid = find_oauth_manager_pid() or (proc.pid if process_alive(proc) else None)
+        if ready_pid and listener_pid:
+            break
+        time.sleep(0.25)
+
+    listener_pid = find_proxy_listener_pid(_oauth_manager_port())
+    if not listener_pid and not process_alive(proc) and not find_oauth_manager_pid():
+        err_tail = ''
+        try:
+            err_tail = OAUTH_MANAGER_STDERR.read_text(encoding='utf-8', errors='ignore')[-500:]
+        except Exception:
+            pass
+        with process_lock:
+            processes['oauth_manager'] = None
+        message = 'Failed to start OAuth Manager.'
+        if err_tail.strip():
+            message = f'{message} {err_tail.strip()}'
+        return {'ok': False, 'message': message, 'command': command, 'url': _oauth_manager_url()}
+
+    ready_pid = listener_pid or find_oauth_manager_pid() or proc.pid
+    _oauth_manager_pid_cache['value'] = ready_pid
+    _oauth_manager_pid_cache['time'] = time.time()
+    return {
+        'ok': True,
+        'message': f'Started OAuth Manager at {_oauth_manager_url()}.',
+        'pid': ready_pid,
+        'command': command,
+        'url': _oauth_manager_url(),
+    }
 
 
 def stop_oauth_manager():
@@ -1915,11 +2039,11 @@ def find_create_grok_pid():
 
 
 def _create_grok_node_bin() -> str | None:
+    # Shared by Node-based side services (e.g. 77chat); keep name for callers.
     candidates = []
     which_node = shutil.which('node')
     if which_node:
         candidates.append(which_node)
-    # 常见 Windows 安装路径兜底
     candidates.extend([
         str(Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'nodejs' / 'node.exe'),
         str(Path(os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')) / 'nodejs' / 'node.exe'),
@@ -1936,42 +2060,92 @@ def _create_grok_node_bin() -> str | None:
     return which_node
 
 
+def _create_grok_python_bin() -> str | None:
+    """Prefer project venv, then PATH python/py."""
+    candidates = [
+        CREATE_GROK_DIR / '.venv' / 'Scripts' / 'python.exe',
+        CREATE_GROK_DIR / '.venv' / 'bin' / 'python',
+    ]
+    for path in candidates:
+        if path.exists():
+            return str(path)
+    for name in ('python', 'python3', 'py'):
+        found = shutil.which(name)
+        if found:
+            return found
+    # Common Windows install locations as last resort.
+    for path in (
+        Path(os.environ.get('LOCALAPPDATA', '')) / 'Programs' / 'Python' / 'Python313' / 'python.exe',
+        Path(os.environ.get('LOCALAPPDATA', '')) / 'Programs' / 'Python' / 'Python312' / 'python.exe',
+        Path(r'C:\Python313\python.exe'),
+        Path(r'C:\Python312\python.exe'),
+    ):
+        if path and path.exists():
+            return str(path)
+    return None
+
+
 def start_create_grok():
     if not CREATE_GROK_DIR.exists():
-        return {'ok': False, 'message': f'create-grok 目录不存在: {CREATE_GROK_DIR}', 'url': _create_grok_url()}
-    if not CREATE_GROK_SERVER.exists():
-        return {'ok': False, 'message': f'server.js 不存在: {CREATE_GROK_SERVER}', 'url': _create_grok_url()}
+        return {'ok': False, 'message': f'grok-register-mint 目录不存在: {CREATE_GROK_DIR}', 'url': _create_grok_url()}
+    if not CREATE_GROK_ENTRY.exists():
+        return {'ok': False, 'message': f'web_ui.py 不存在: {CREATE_GROK_ENTRY}', 'url': _create_grok_url()}
 
+    port = create_grok_port()
+    # Resolve binary + listener outside process_lock so a stuck peer start
+    # cannot freeze this button behind slow PATH / netstat work.
     with process_lock:
-        running_pid = None
         tracked = processes.get('create_grok')
-        if process_alive(tracked):
-            running_pid = tracked.pid
-        if not running_pid:
-            running_pid = find_proxy_listener_pid(create_grok_port())
-        if running_pid:
-            return {
-                'ok': True,
-                'message': f'create-grok 已在运行：{_create_grok_url()}',
-                'pid': running_pid,
-                'url': _create_grok_url(),
-            }
+        running_pid = tracked.pid if process_alive(tracked) else None
+    if not running_pid:
+        running_pid = find_proxy_listener_pid(port)
+    if running_pid:
+        return {
+            'ok': True,
+            'message': f'grok-register-mint 已在运行：{_create_grok_url()}',
+            'pid': running_pid,
+            'url': _create_grok_url(),
+        }
 
-        node_bin = _create_grok_node_bin()
-        if not node_bin:
-            return {'ok': False, 'message': '未找到 node，请先安装 Node.js 并加入 PATH。', 'url': _create_grok_url()}
+    python_bin = _create_grok_python_bin()
+    if not python_bin:
+        return {
+            'ok': False,
+            'message': '未找到 Python。请在 grok-register-mint 下创建 .venv，或把 python 加入 PATH。',
+            'url': _create_grok_url(),
+        }
 
-        try:
-            LOGS_DIR.mkdir(parents=True, exist_ok=True)
-            command = [node_bin, str(CREATE_GROK_SERVER)]
-            env = os.environ.copy()
-            env['GROK_UI_HOST'] = env.get('GROK_UI_HOST') or '127.0.0.1'
-            env['GROK_UI_PORT'] = str(create_grok_port())
-            fout = open(CREATE_GROK_STDOUT, 'w', encoding='utf-8', errors='ignore')
-            ferr = open(CREATE_GROK_STDERR, 'w', encoding='utf-8', errors='ignore')
-            creationflags = 0
-            if is_windows():
-                creationflags = getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+    command = [python_bin, str(CREATE_GROK_ENTRY), '--host', '127.0.0.1', '--port', str(port)]
+    env = os.environ.copy()
+    env['PYTHONUNBUFFERED'] = '1'
+    env['GROK_UI_HOST'] = env.get('GROK_UI_HOST') or '127.0.0.1'
+    env['GROK_UI_PORT'] = str(port)
+    proc = None
+    try:
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        fout = open(CREATE_GROK_STDOUT, 'w', encoding='utf-8', errors='ignore')
+        ferr = open(CREATE_GROK_STDERR, 'w', encoding='utf-8', errors='ignore')
+        creationflags = 0
+        if is_windows():
+            creationflags = getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+        with process_lock:
+            # Re-check under lock to avoid double-start races.
+            tracked = processes.get('create_grok')
+            if process_alive(tracked):
+                return {
+                    'ok': True,
+                    'message': f'grok-register-mint 已在运行：{_create_grok_url()}',
+                    'pid': tracked.pid,
+                    'url': _create_grok_url(),
+                }
+            existing = find_proxy_listener_pid(port)
+            if existing:
+                return {
+                    'ok': True,
+                    'message': f'grok-register-mint 已在运行：{_create_grok_url()}',
+                    'pid': existing,
+                    'url': _create_grok_url(),
+                }
             proc = subprocess.Popen(
                 command,
                 cwd=str(CREATE_GROK_DIR),
@@ -1983,31 +2157,33 @@ def start_create_grok():
                 close_fds=False if is_windows() else True,
             )
             processes['create_grok'] = proc
-
-            ready = wait_for_listener(create_grok_port(), proc=proc, timeout_seconds=12.0)
-            if not ready and not process_alive(proc):
-                err_tail = ''
-                try:
-                    err_tail = CREATE_GROK_STDERR.read_text(encoding='utf-8', errors='ignore')[-500:]
-                except Exception:
-                    pass
-                processes['create_grok'] = None
-                message = 'create-grok 启动失败。'
-                if err_tail.strip():
-                    message = f'{message} {err_tail.strip()}'
-                return {'ok': False, 'message': message, 'command': command, 'url': _create_grok_url()}
-
-            ready_pid = find_proxy_listener_pid(create_grok_port()) or (proc.pid if process_alive(proc) else None)
-            return {
-                'ok': True,
-                'message': f'已启动 create-grok：{_create_grok_url()}',
-                'pid': ready_pid,
-                'command': command,
-                'url': _create_grok_url(),
-            }
-        except Exception as exc:
+    except Exception as exc:
+        with process_lock:
             processes['create_grok'] = None
-            return {'ok': False, 'message': f'启动 create-grok 失败: {exc}', 'url': _create_grok_url()}
+        return {'ok': False, 'message': f'启动 grok-register-mint 失败: {exc}', 'url': _create_grok_url()}
+
+    ready = wait_for_listener(port, proc=proc, timeout_seconds=15.0)
+    if not ready and not process_alive(proc):
+        err_tail = ''
+        try:
+            err_tail = CREATE_GROK_STDERR.read_text(encoding='utf-8', errors='ignore')[-500:]
+        except Exception:
+            pass
+        with process_lock:
+            processes['create_grok'] = None
+        message = 'grok-register-mint 启动失败。'
+        if err_tail.strip():
+            message = f'{message} {err_tail.strip()}'
+        return {'ok': False, 'message': message, 'command': command, 'url': _create_grok_url()}
+
+    ready_pid = find_proxy_listener_pid(port) or (proc.pid if process_alive(proc) else None)
+    return {
+        'ok': True,
+        'message': f'已启动 grok-register-mint：{_create_grok_url()}',
+        'pid': ready_pid,
+        'command': command,
+        'url': _create_grok_url(),
+    }
 
 
 def stop_create_grok():
@@ -2024,7 +2200,7 @@ def stop_create_grok():
 
     return {
         'ok': True,
-        'message': '已停止 create-grok。' if stopped else 'create-grok 未在运行。',
+        'message': '已停止 grok-register-mint。' if stopped else 'grok-register-mint 未在运行。',
         'url': _create_grok_url(),
     }
 
@@ -2056,35 +2232,54 @@ def start_chat77():
     if not CHAT77_SERVER.exists():
         return {'ok': False, 'message': f'src/server/index.js 不存在: {CHAT77_SERVER}', 'url': _chat77_url()}
 
+    port = chat77_port()
+    # Keep process_lock short: node lookup + netstat must not sit under the lock,
+    # otherwise a deadlocked peer service start freezes this button forever.
     with process_lock:
-        running_pid = None
         tracked = processes.get('chat77')
-        if process_alive(tracked):
-            running_pid = tracked.pid
-        if not running_pid:
-            running_pid = find_proxy_listener_pid(chat77_port())
-        if running_pid:
-            return {
-                'ok': True,
-                'message': f'77chat 已在运行：{_chat77_url()}',
-                'pid': running_pid,
-                'url': _chat77_url(),
-            }
+        running_pid = tracked.pid if process_alive(tracked) else None
+    if not running_pid:
+        running_pid = find_proxy_listener_pid(port)
+    if running_pid:
+        return {
+            'ok': True,
+            'message': f'77chat 已在运行：{_chat77_url()}',
+            'pid': running_pid,
+            'url': _chat77_url(),
+        }
 
-        node_bin = _create_grok_node_bin()
-        if not node_bin:
-            return {'ok': False, 'message': '未找到 node，请先安装 Node.js 并加入 PATH。', 'url': _chat77_url()}
+    node_bin = _create_grok_node_bin()
+    if not node_bin:
+        return {'ok': False, 'message': '未找到 node，请先安装 Node.js 并加入 PATH。', 'url': _chat77_url()}
 
-        try:
-            LOGS_DIR.mkdir(parents=True, exist_ok=True)
-            command = [node_bin, str(CHAT77_SERVER)]
-            env = os.environ.copy()
-            env['PORT'] = str(chat77_port())
-            fout = open(CHAT77_STDOUT, 'w', encoding='utf-8', errors='ignore')
-            ferr = open(CHAT77_STDERR, 'w', encoding='utf-8', errors='ignore')
-            creationflags = 0
-            if is_windows():
-                creationflags = getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+    command = [node_bin, str(CHAT77_SERVER)]
+    env = os.environ.copy()
+    env['PORT'] = str(port)
+    proc = None
+    try:
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        fout = open(CHAT77_STDOUT, 'w', encoding='utf-8', errors='ignore')
+        ferr = open(CHAT77_STDERR, 'w', encoding='utf-8', errors='ignore')
+        creationflags = 0
+        if is_windows():
+            creationflags = getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+        with process_lock:
+            tracked = processes.get('chat77')
+            if process_alive(tracked):
+                return {
+                    'ok': True,
+                    'message': f'77chat 已在运行：{_chat77_url()}',
+                    'pid': tracked.pid,
+                    'url': _chat77_url(),
+                }
+            existing = find_proxy_listener_pid(port)
+            if existing:
+                return {
+                    'ok': True,
+                    'message': f'77chat 已在运行：{_chat77_url()}',
+                    'pid': existing,
+                    'url': _chat77_url(),
+                }
             proc = subprocess.Popen(
                 command,
                 cwd=str(CHAT77_DIR),
@@ -2096,31 +2291,33 @@ def start_chat77():
                 close_fds=False if is_windows() else True,
             )
             processes['chat77'] = proc
-
-            ready = wait_for_listener(chat77_port(), proc=proc, timeout_seconds=12.0)
-            if not ready and not process_alive(proc):
-                err_tail = ''
-                try:
-                    err_tail = CHAT77_STDERR.read_text(encoding='utf-8', errors='ignore')[-500:]
-                except Exception:
-                    pass
-                processes['chat77'] = None
-                message = '77chat 启动失败。'
-                if err_tail.strip():
-                    message = f'{message} {err_tail.strip()}'
-                return {'ok': False, 'message': message, 'command': command, 'url': _chat77_url()}
-
-            ready_pid = find_proxy_listener_pid(chat77_port()) or (proc.pid if process_alive(proc) else None)
-            return {
-                'ok': True,
-                'message': f'已启动 77chat：{_chat77_url()}',
-                'pid': ready_pid,
-                'command': command,
-                'url': _chat77_url(),
-            }
-        except Exception as exc:
+    except Exception as exc:
+        with process_lock:
             processes['chat77'] = None
-            return {'ok': False, 'message': f'启动 77chat 失败: {exc}', 'url': _chat77_url()}
+        return {'ok': False, 'message': f'启动 77chat 失败: {exc}', 'url': _chat77_url()}
+
+    ready = wait_for_listener(port, proc=proc, timeout_seconds=12.0)
+    if not ready and not process_alive(proc):
+        err_tail = ''
+        try:
+            err_tail = CHAT77_STDERR.read_text(encoding='utf-8', errors='ignore')[-500:]
+        except Exception:
+            pass
+        with process_lock:
+            processes['chat77'] = None
+        message = '77chat 启动失败。'
+        if err_tail.strip():
+            message = f'{message} {err_tail.strip()}'
+        return {'ok': False, 'message': message, 'command': command, 'url': _chat77_url()}
+
+    ready_pid = find_proxy_listener_pid(port) or (proc.pid if process_alive(proc) else None)
+    return {
+        'ok': True,
+        'message': f'已启动 77chat：{_chat77_url()}',
+        'pid': ready_pid,
+        'command': command,
+        'url': _chat77_url(),
+    }
 
 
 def stop_chat77():
@@ -2370,7 +2567,64 @@ def stop_device_login():
     return {'ok': True, 'message': 'Stopped device login.' if stopped else 'Device login was not running.'}
 
 
-def start_proxy():
+
+def _managed_listener_info(port: int):
+    """Return listener info for a port: None if free, or {pid, name, managed}."""
+    pid = find_proxy_listener_pid(port)
+    if not pid:
+        return None
+    name = str(get_process_name(pid) or '').strip().lower()
+    return {
+        'pid': pid,
+        'name': name,
+        'managed': name in _managed_proxy_process_names(),
+    }
+
+
+def _persist_proxy_applied_state(state, auth_files, bind_host, access_api_key):
+    """Mirror applied/selected auth + bind metadata after a successful start or adopt."""
+    selected_items = auth_files or []
+    state['selected_auth_refs'] = [item.get('id') for item in selected_items]
+    state['selected_auths'] = [item.get('name') for item in selected_items]
+    state['selected_auth_ref'] = state['selected_auth_refs'][0] if state['selected_auth_refs'] else None
+    state['selected_auth'] = state['selected_auths'][0] if state['selected_auths'] else None
+    state['applied_auth_refs'] = list(state['selected_auth_refs'])
+    state['applied_auths'] = list(state['selected_auths'])
+    state['applied_auth_ref'] = state['applied_auth_refs'][0] if state['applied_auth_refs'] else None
+    state['applied_auth'] = state['applied_auths'][0] if state['applied_auths'] else None
+    state['last_proxy_bind_host'] = bind_host
+    state['last_proxy_api_key'] = access_api_key
+    state['applied_route_strategy'] = normalize_route_strategy(state.get('route_strategy'))
+    save_state(state)
+    return selected_items
+
+
+def _finalize_proxy_start_result(selected_items, media_result=None, *, adopted=False, core_pid=None, gateway_pid=None):
+    if media_result is None:
+        media_result = start_media_proxy()
+    media_message = ''
+    if media_result.get('ok'):
+        media_message = ' MediaProxy is ready on port 8320.'
+    else:
+        media_message = f' MediaProxy was not started: {media_result.get("message", "unknown error")}'
+    if adopted:
+        message = (
+            f'RelayX already running (core PID {core_pid}, gateway PID {gateway_pid}); '
+            f'adopted existing instance with {len(selected_items)} active account file(s).{media_message}'
+        )
+    else:
+        message = f'Started RelayX with storage/auth account files: {len(selected_items)} active.{media_message}'
+    return {
+        'ok': True,
+        'message': message,
+        'adopted': bool(adopted),
+        'media_proxy': media_result,
+        'core_pid': core_pid,
+        'gateway_pid': gateway_pid,
+    }
+
+
+def start_proxy(*, _from_restart=False):
     if not _cli_binary_ready():
         return {'ok': False, 'message': _cli_unavailable_message()}
     if not ACCESS_GATEWAY_BINARY.is_file():
@@ -2385,30 +2639,83 @@ def start_proxy():
     socket_issue = probe_socket_stack()
     if socket_issue:
         return {'ok': False, 'message': socket_issue}
+
+    core_port = core_proxy_port()
+    proc = None
+    gateway_proc = None
+    reclaimed = False
+    # process_lock is a non-reentrant Lock. Never call start_media_proxy /
+    # _finalize_proxy_start_result / build_runtime_config while holding it —
+    # those paths re-enter the same lock (or run multi-second egress probes)
+    # and freeze the homepage Start button.
+    adopt_info = None
+    reclaim_pids = []
+
     with process_lock:
+        if not _from_restart and (_proxy_start_state.get('starting') or _proxy_start_state.get('restarting')):
+            return {'ok': False, 'message': 'RelayX start is already in progress. Please wait a moment and retry.'}
         if process_alive(processes.get('proxy')) and process_alive(processes.get('access_gateway')):
-            return {'ok': True, 'message': 'RelayX is already running.'}
-        for port in (8317, core_proxy_port()):
-            listener_pid = find_proxy_listener_pid(port)
-            if not listener_pid:
-                continue
-            process_name = get_process_name(listener_pid)
-            normalized_name = str(process_name or '').strip().lower()
-            if normalized_name not in _managed_proxy_process_names():
-                label = process_name or f'PID {listener_pid}'
+            return {'ok': True, 'message': 'RelayX is already running.', 'adopted': False}
+
+        gateway_info = _managed_listener_info(8317)
+        core_info = _managed_listener_info(core_port)
+        for port, info in ((8317, gateway_info), (core_port, core_info)):
+            if info and not info.get('managed'):
+                label = info.get('name') or f'PID {info.get("pid")}'
                 return {'ok': False, 'message': f'Port {port} is occupied by {label}. Please stop it first.'}
-            if not stop_pid(listener_pid):
-                return {'ok': False, 'message': f'Port {port} is occupied by existing RelayX (PID {listener_pid}) and could not be stopped.'}
-            time.sleep(0.3)
+
+        if (
+            gateway_info
+            and gateway_info.get('managed')
+            and core_info
+            and core_info.get('managed')
+        ):
+            adopt_info = {
+                'core_pid': core_info.get('pid'),
+                'gateway_pid': gateway_info.get('pid'),
+            }
+        else:
+            for port in (8317, core_port):
+                info = gateway_info if port == 8317 else core_info
+                if info is None:
+                    info = _managed_listener_info(port)
+                if not info:
+                    continue
+                if not info.get('managed'):
+                    label = info.get('name') or f'PID {info.get("pid")}'
+                    return {'ok': False, 'message': f'Port {port} is occupied by {label}. Please stop it first.'}
+                reclaim_pids.append((port, info['pid']))
+            # Claim the start slot under lock; heavy work runs after release.
+            _proxy_start_state['starting'] = True
+            _proxy_start_state['started_at'] = time.time()
+
+    if adopt_info is not None:
+        selected_items = _persist_proxy_applied_state(state, auth_files, bind_host, access_api_key)
+        return _finalize_proxy_start_result(
+            selected_items,
+            adopted=True,
+            core_pid=adopt_info.get('core_pid'),
+            gateway_pid=adopt_info.get('gateway_pid'),
+        )
+
+    try:
+        for port, pid in reclaim_pids:
+            if not stop_pid(pid):
+                return {'ok': False, 'message': f'Port {port} is occupied by existing RelayX (PID {pid}) and could not be stopped.'}
+            reclaimed = True
+
         try:
+            # Egress probing / provider config rebuild can take seconds — keep
+            # it outside process_lock so /api/status and other buttons stay live.
             build_runtime_config(
                 bind_host='127.0.0.1',
-                listen_port=core_proxy_port(),
+                listen_port=core_port,
                 access_api_keys=[access_api_key],
                 state=state,
             )
         except Exception as exc:
             return {'ok': False, 'message': str(exc)}
+
         cmd = [str(CLI_EXE), '-config', str(RUNTIME_CONFIG)]
         if state.get('local_model'):
             cmd.append('--local-model')
@@ -2420,50 +2727,51 @@ def start_proxy():
             pass
         merged_env = os.environ.copy()
         merged_env.update(proxy_env)
-        stdout = open(PROXY_STDOUT, 'a', encoding='utf-8', errors='ignore')
-        stderr = open(PROXY_STDERR, 'a', encoding='utf-8', errors='ignore')
-        proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), stdout=stdout, stderr=stderr, stdin=subprocess.DEVNULL, creationflags=_creationflags(), env=merged_env)
-        processes['proxy'] = proc
-        if not wait_for_listener(core_proxy_port(), proc=proc):
-            kill_process(proc)
-            processes['proxy'] = None
-            return {'ok': False, 'message': f'CPA core did not become ready on 127.0.0.1:{core_proxy_port()}. Check {PROXY_STDERR}.'}
-        ACCESS_GATEWAY_STDOUT.parent.mkdir(parents=True, exist_ok=True)
-        gateway_stdout = open(ACCESS_GATEWAY_STDOUT, 'a', encoding='utf-8', errors='ignore')
-        gateway_stderr = open(ACCESS_GATEWAY_STDERR, 'a', encoding='utf-8', errors='ignore')
-        gateway_cmd = [str(ACCESS_GATEWAY_BINARY), '-listen', f'{bind_host}:8317', '-upstream', f'http://127.0.0.1:{core_proxy_port()}', '-config', str(RUNTIME_CONFIG)]
-        gateway_proc = subprocess.Popen(gateway_cmd, cwd=str(ACCESS_GATEWAY_ROOT), stdout=gateway_stdout, stderr=gateway_stderr, stdin=subprocess.DEVNULL, creationflags=_creationflags())
-        processes['access_gateway'] = gateway_proc
+
+        with process_lock:
+            stdout = open(PROXY_STDOUT, 'a', encoding='utf-8', errors='ignore')
+            stderr = open(PROXY_STDERR, 'a', encoding='utf-8', errors='ignore')
+            proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT), stdout=stdout, stderr=stderr, stdin=subprocess.DEVNULL, creationflags=_creationflags(), env=merged_env)
+            processes['proxy'] = proc
+
+        if reclaimed:
+            time.sleep(0.3)
+
+        if not wait_for_listener(core_port, proc=proc, timeout_seconds=120.0):
+            with process_lock:
+                kill_process(proc)
+                processes['proxy'] = None
+            return {'ok': False, 'message': f'CPA core did not become ready on 127.0.0.1:{core_port} within 120s. Check {PROXY_STDERR}.'}
+
+        with process_lock:
+            ACCESS_GATEWAY_STDOUT.parent.mkdir(parents=True, exist_ok=True)
+            gateway_stdout = open(ACCESS_GATEWAY_STDOUT, 'a', encoding='utf-8', errors='ignore')
+            gateway_stderr = open(ACCESS_GATEWAY_STDERR, 'a', encoding='utf-8', errors='ignore')
+            gateway_cmd = [str(ACCESS_GATEWAY_BINARY), '-listen', f'{bind_host}:8317', '-upstream', f'http://127.0.0.1:{core_port}', '-config', str(RUNTIME_CONFIG)]
+            gateway_proc = subprocess.Popen(gateway_cmd, cwd=str(ACCESS_GATEWAY_ROOT), stdout=gateway_stdout, stderr=gateway_stderr, stdin=subprocess.DEVNULL, creationflags=_creationflags())
+            processes['access_gateway'] = gateway_proc
+
         if not wait_for_listener(8317, proc=gateway_proc):
-            kill_process(gateway_proc)
-            kill_process(proc)
-            processes['access_gateway'] = None
-            processes['proxy'] = None
+            with process_lock:
+                kill_process(gateway_proc)
+                kill_process(proc)
+                processes['access_gateway'] = None
+                processes['proxy'] = None
             return {'ok': False, 'message': f'Access gateway did not become ready on {bind_host}:8317. Check {ACCESS_GATEWAY_STDERR}.'}
-    selected_items = auth_files
-    state['selected_auth_refs'] = [item.get('id') for item in selected_items]
-    state['selected_auths'] = [item.get('name') for item in selected_items]
-    state['selected_auth_ref'] = state['selected_auth_refs'][0] if state['selected_auth_refs'] else None
-    state['selected_auth'] = state['selected_auths'][0] if state['selected_auths'] else None
-    state['applied_auth_refs'] = list(state['selected_auth_refs'])
-    state['applied_auths'] = list(state['selected_auths'])
-    state['applied_auth_ref'] = state['applied_auth_refs'][0] if state['applied_auth_refs'] else None
-    state['applied_auth'] = state['applied_auths'][0] if state['applied_auths'] else None
-    state['last_proxy_bind_host'] = bind_host
-    state['last_proxy_api_key'] = access_api_key
-    state['applied_route_strategy'] = normalize_route_strategy(state.get('route_strategy'))
-    save_state(state)
-    media_result = start_media_proxy()
-    media_message = ''
-    if media_result.get('ok'):
-        media_message = ' MediaProxy is ready on port 8320.'
-    else:
-        media_message = f' MediaProxy was not started: {media_result.get("message", "unknown error")}'
-    return {
-        'ok': True,
-        'message': f'Started RelayX with storage/auth account files: {len(selected_items)} active.{media_message}',
-        'media_proxy': media_result,
-    }
+
+        core_pid = proc.pid
+        gateway_pid = gateway_proc.pid
+    finally:
+        _set_proxy_starting(False)
+
+    selected_items = _persist_proxy_applied_state(state, auth_files, bind_host, access_api_key)
+    return _finalize_proxy_start_result(
+        selected_items,
+        adopted=False,
+        core_pid=core_pid,
+        gateway_pid=gateway_pid,
+    )
+
 
 
 def stop_proxy():
@@ -2491,9 +2799,16 @@ def stop_proxy():
 
 
 def restart_proxy():
-    stop_proxy()
-    time.sleep(0.4)
-    return start_proxy()
+    with process_lock:
+        if _proxy_start_state.get('starting') or _proxy_start_state.get('restarting'):
+            return {'ok': False, 'message': 'RelayX restart is already in progress. Please wait a moment and retry.'}
+        _proxy_start_state['restarting'] = True
+    try:
+        stop_proxy()
+        time.sleep(0.3)
+        return start_proxy(_from_restart=True)
+    finally:
+        _set_proxy_restarting(False)
 
 
 def media_proxy_config_path():
@@ -2563,7 +2878,7 @@ def stop_media_proxy():
 
 def restart_media_proxy():
     stop_media_proxy()
-    time.sleep(0.4)
+    time.sleep(0.3)
     return start_media_proxy()
 
 
@@ -2679,7 +2994,6 @@ def stop_grok2api_backend():
     with process_lock:
         stopped = kill_process(processes.get('grok2api'))
         processes['grok2api'] = None
-    time.sleep(0.2)
     listener_pid = find_proxy_listener_pid(grok2api_port())
     if listener_pid:
         stopped = stop_pid(listener_pid) or stopped
@@ -2693,7 +3007,6 @@ def stop_grok2api_frontend():
     with process_lock:
         stopped = kill_process(processes.get('grok2api_frontend'))
         processes['grok2api_frontend'] = None
-    time.sleep(0.2)
     listener_pid = find_proxy_listener_pid(grok2api_frontend_port())
     if listener_pid:
         stopped = stop_pid(listener_pid) or stopped
@@ -2705,13 +3018,13 @@ def stop_grok2api_frontend():
 
 def restart_grok2api_backend():
     stop_grok2api_backend()
-    time.sleep(0.4)
+    time.sleep(0.3)
     return start_grok2api_backend()
 
 
 def restart_grok2api_frontend():
     stop_grok2api_frontend()
-    time.sleep(0.4)
+    time.sleep(0.3)
     return start_grok2api_frontend()
 
 
@@ -2742,7 +3055,7 @@ def stop_grok2api():
 
 def restart_grok2api():
     stop_grok2api()
-    time.sleep(0.4)
+    time.sleep(0.3)
     return start_grok2api()
 
 

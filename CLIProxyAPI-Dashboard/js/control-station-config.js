@@ -43,16 +43,34 @@ window.CONTROL_STATION_LAYERS = [
               action: 'service', op: 'start', type: 'proxy',
               label: '启动', i18n: 'btn.startProxy',
               api: '/api/start-project', errorState: 'red',
+              // 后端启动仍可能需数秒（配置重建）；API 返回后以 status 绿为准
+              wait: {
+                field: 'proxy_running', expect: true,
+                timeoutMs: 150000, intervalMs: 1500,
+                readyMessage: '代理服务已启动并可用。',
+                timeoutMessage: '启动命令已发出，但 2.5 分钟内未检测到代理就绪。请查看代理日志后重试。',
+              },
             },
             {
               action: 'service', op: 'restart', type: 'proxy',
               label: '重启', i18n: 'btn.restartProxy',
               api: '/api/restart-proxy', className: 'secondary',
+              wait: {
+                field: 'proxy_running', expect: true,
+                timeoutMs: 150000, intervalMs: 1500,
+                readyMessage: '代理服务已重启并可用。',
+                timeoutMessage: '重启命令已发出，但 2.5 分钟内未检测到代理就绪。请查看代理日志后重试。',
+              },
             },
             {
               action: 'service', op: 'stop', type: 'proxy',
               label: '停止', i18n: 'btn.stopProxy',
               api: '/api/stop-proxy', className: 'danger', errorState: 'green',
+              wait: {
+                field: 'proxy_running', expect: false,
+                timeoutMs: 30000, intervalMs: 1000,
+                readyMessage: '代理服务已停止。',
+              },
             },
           ],
         },
@@ -112,7 +130,7 @@ window.CONTROL_STATION_LAYERS = [
       ],
     }],
   },
-  // 第 2 层：OpenClaw / OAuth / create-grok（长启动需 wait 轮询就绪）
+  // 第 2 层：OpenClaw / OAuth / create-grok(=grok-register-mint，长启动需 wait 轮询就绪)
   {
     grids: [{
       className: 'control-station-layer-grid',
@@ -210,10 +228,10 @@ window.CONTROL_STATION_LAYERS = [
           id: 'create-grok',
           icon: '🧪',
           title: {
-            text: 'create-grok',
+            text: 'grok-register-mint',
             href: 'http://127.0.0.1:3780/',
             id: 'create-grok-title-link',
-            titleAttr: 'Grok 批量注册面板',
+            titleAttr: 'Grok Register Mint 批量注册 / CPA mint 面板',
           },
           indicator: { id: 'create-grok-status-indicator', color: 'red' },
           buttons: [
@@ -224,8 +242,8 @@ window.CONTROL_STATION_LAYERS = [
               wait: {
                 field: 'create_grok_running', expect: true,
                 timeoutMs: 20000, intervalMs: 1000,
-                readyMessage: 'create-grok 已启动：http://127.0.0.1:3780/',
-                timeoutMessage: 'create-grok 启动命令已发出，但未检测到 :3780 就绪。',
+                readyMessage: 'grok-register-mint 已启动：http://127.0.0.1:3780/',
+                timeoutMessage: 'grok-register-mint 启动命令已发出，但未检测到 :3780 就绪。',
               },
             },
             {
@@ -235,8 +253,8 @@ window.CONTROL_STATION_LAYERS = [
               wait: {
                 field: 'create_grok_running', expect: true,
                 timeoutMs: 25000, intervalMs: 1000,
-                readyMessage: 'create-grok 已启动：http://127.0.0.1:3780/',
-                timeoutMessage: 'create-grok 重启命令已发出，但未检测到 :3780 就绪。',
+                readyMessage: 'grok-register-mint 已启动：http://127.0.0.1:3780/',
+                timeoutMessage: 'grok-register-mint 重启命令已发出，但未检测到 :3780 就绪。',
               },
             },
             {
@@ -246,7 +264,7 @@ window.CONTROL_STATION_LAYERS = [
               wait: {
                 field: 'create_grok_running', expect: false,
                 timeoutMs: 15000, intervalMs: 800,
-                readyMessage: 'create-grok 已停止。',
+                readyMessage: 'grok-register-mint 已停止。',
               },
             },
           ],

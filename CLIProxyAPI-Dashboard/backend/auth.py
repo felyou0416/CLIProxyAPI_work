@@ -10,7 +10,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
-from backend.paths import AUTH_SOURCE_DIRS, MANUAL_AUTH_SAVE_DIR, SOURCE_AUTH_DIR, ACTIVE_AUTH_DIR, BASE_CONFIG, RUNTIME_CONFIG, MODEL_MAPPING_OVERRIDES_FILE, AGGREGATE_MODEL_ALIASES_FILE, PROVIDER_MODEL_TEST_STATE_FILE, MODEL_PROXY_SETTINGS_FILE, QUOTA_CACHE_FILE, APP_DIR, AUTH_DIR, POOL_AUTH_DIR, BACKUPS_DIR
+from backend.paths import AUTH_SOURCE_DIRS, MANUAL_AUTH_SAVE_DIR, SOURCE_AUTH_DIR, ACTIVE_AUTH_DIR, BASE_CONFIG, RUNTIME_CONFIG, MODEL_MAPPING_OVERRIDES_FILE, AGGREGATE_MODEL_ALIASES_FILE, PROVIDER_MODEL_TEST_STATE_FILE, MODEL_PROXY_SETTINGS_FILE, QUOTA_CACHE_FILE, APP_DIR, AUTH_DIR, POOL_AUTH_DIR, BACKUPS_DIR, STORAGE_DIR
 from backend.state import load_state, normalize_route_strategy, get_proxy_bind_host, get_proxy_api_key
 
 
@@ -1843,12 +1843,193 @@ def _is_loopback_base_url(base_url: str | None) -> bool:
         return False
 
 
+_EGRESS_CHOICE_CACHE: dict[str, object] = {'ts': 0.0, 'items': {}}
+_EGRESS_CHOICE_TTL_SECONDS = 8.0
+_EGRESS_CHOICE_PERSIST_TTL_SECONDS = 3600  # 1 hour — survive process restarts
+_EGRESS_CACHE_FILE = STORAGE_DIR / 'egress_cache.json'
+_EGRESS_DISK_CACHE_LOADED = False
+_EGRESS_DISK_ITEMS: dict[str, dict] = {}
+
+
+def _egress_cache_load_disk() -> None:
+    """Load persisted egress choices from disk (called once per process)."""
+    global _EGRESS_DISK_CACHE_LOADED, _EGRESS_DISK_ITEMS
+    if _EGRESS_DISK_CACHE_LOADED:
+        return
+    _EGRESS_DISK_CACHE_LOADED = True
+    try:
+        if _EGRESS_CACHE_FILE.is_file():
+            raw = json.loads(_EGRESS_CACHE_FILE.read_text(encoding='utf-8'))
+            if isinstance(raw, dict):
+                _EGRESS_DISK_ITEMS = raw
+    except Exception:
+        _EGRESS_DISK_ITEMS = {}
+
+
+def _egress_cache_save_disk() -> None:
+    """Persist current egress choices to disk.
+
+    Merge with existing disk entries so a process that only warmed a subset of
+    keys does not wipe the rest of the file (previously each set() rewrote only
+    in-memory items, which collapses multi-host cache after restart).
+    """
+    global _EGRESS_DISK_ITEMS
+    try:
+        _egress_cache_load_disk()
+        _EGRESS_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temp = _EGRESS_CACHE_FILE.with_suffix('.tmp')
+        items = _EGRESS_CHOICE_CACHE.get('items') or {}
+        cutoff = time.time() - _EGRESS_CHOICE_PERSIST_TTL_SECONDS
+        disk_items: dict[str, dict] = {}
+        if isinstance(_EGRESS_DISK_ITEMS, dict):
+            for key, entry in _EGRESS_DISK_ITEMS.items():
+                if isinstance(entry, dict) and float(entry.get('ts') or 0.0) > cutoff:
+                    disk_items[str(key)] = {
+                        'ts': float(entry.get('ts') or 0.0),
+                        'value': str(entry.get('value') or ''),
+                    }
+        for key, entry in items.items():
+            if isinstance(entry, dict) and float(entry.get('ts') or 0.0) > cutoff:
+                disk_items[str(key)] = {
+                    'ts': float(entry.get('ts') or 0.0),
+                    'value': str(entry.get('value') or ''),
+                }
+        _EGRESS_DISK_ITEMS = disk_items
+        temp.write_text(json.dumps(disk_items, ensure_ascii=False), encoding='utf-8')
+        temp.replace(_EGRESS_CACHE_FILE)
+    except Exception:
+        pass
+
+
+def report_provider_egress_failure(provider: str, base_url: str | None = None, proxy_url: str | None = None) -> None:
+    """Mark an egress path as failed so choose_best_egress skips it briefly."""
+    try:
+        from backend.local_proxy import report_egress_failure
+        report_egress_failure(str(base_url or ''), proxy_url=proxy_url)
+    except Exception:
+        pass
+    # Also invalidate the cache for this host so next rebuild re-probes.
+    host = ''
+    try:
+        parsed = urlparse(str(base_url or '').strip() if '://' in str(base_url or '') else f'http://{base_url}')
+        host = str(parsed.netloc or parsed.hostname or '').strip().lower()
+    except Exception:
+        host = str(base_url or '').strip().lower()
+    prefer = str(_model_proxy_url_for_provider(provider) or '').strip().lower()
+    cache_key = f'{host}|{prefer}'
+    items = _EGRESS_CHOICE_CACHE.get('items')
+    if isinstance(items, dict):
+        items.pop(cache_key, None)
+
+
+def _egress_choice_cache_get(key: str):
+    now = time.time()
+    items = _EGRESS_CHOICE_CACHE.get('items')
+    if isinstance(items, dict):
+        entry = items.get(key)
+        if isinstance(entry, dict):
+            if (now - float(entry.get('ts') or 0.0)) <= _EGRESS_CHOICE_TTL_SECONDS:
+                return entry.get('value')
+    # Memory miss — try persistent disk cache.
+    _egress_cache_load_disk()
+    disk_entry = _EGRESS_DISK_ITEMS.get(key)
+    if isinstance(disk_entry, dict):
+        if (now - float(disk_entry.get('ts') or 0.0)) <= _EGRESS_CHOICE_PERSIST_TTL_SECONDS:
+            # Promote to memory cache.
+            _egress_choice_cache_set(key, str(disk_entry.get('value') or ''))
+            return disk_entry.get('value')
+    return None
+
+
+def _egress_choice_cache_set(key: str, value: str) -> None:
+    items = _EGRESS_CHOICE_CACHE.get('items')
+    if not isinstance(items, dict):
+        items = {}
+        _EGRESS_CHOICE_CACHE['items'] = items
+    items[key] = {'ts': time.time(), 'value': str(value or '')}
+    # Mirror to disk so subsequent process startups skip egress probing.
+    _egress_cache_save_disk()
+
+
+def _choose_provider_egress_proxy_url(
+    provider: str,
+    base_url: str | None = None,
+    prefer_proxy_url: str | None = None,
+) -> str:
+    """Homepage-aligned egress pick: compare listening ports + direct for this target."""
+    prefer = str(prefer_proxy_url or '').strip()
+    # Non-local explicit proxy (rare) is left untouched.
+    try:
+        from backend.local_proxy import is_local_proxy_url
+        if prefer and prefer.lower() not in {'direct', 'none', 'off', 'disabled'} and not is_local_proxy_url(prefer):
+            return prefer
+    except Exception:
+        pass
+
+    host = ''
+    try:
+        parsed = urlparse(str(base_url or '').strip() if '://' in str(base_url or '') else f'http://{base_url}')
+        host = str(parsed.netloc or parsed.hostname or '').strip().lower()
+    except Exception:
+        host = str(base_url or '').strip().lower()
+    # Cache by host so many models/providers on the same upstream only probe once.
+    cache_key = f'{host}|{prefer.lower()}'
+    cached = _egress_choice_cache_get(cache_key)
+    if isinstance(cached, str) and cached:
+        return cached
+
+    # Cold-start protection: do at most ONE global live probe per process/prefer,
+    # then reuse the winner for every remaining host. Per-host choose_best_egress
+    # used to multiply into ~29 × 2.5s = 70s+ and freeze start_proxy.
+    global_key = f'__global__|{prefer.lower()}'
+    global_cached = _egress_choice_cache_get(global_key)
+    if isinstance(global_cached, str) and global_cached:
+        _egress_choice_cache_set(cache_key, global_cached)
+        return global_cached
+
+    selected = ''
+    try:
+        from backend.local_proxy import choose_best_egress
+        choice = choose_best_egress(
+            str(base_url or ''),
+            include_direct=True,
+            prefer_proxy_url=prefer or None,
+            timeout=1.5,
+        )
+        if choice.get('ok') and choice.get('proxy_url'):
+            selected = str(choice.get('proxy_url') or '').strip() or 'direct'
+    except Exception:
+        selected = ''
+
+    if not selected:
+        # Fallbacks when live probes fail: prefer explicit rule, then homepage best port, else direct.
+        if prefer:
+            selected = prefer
+        else:
+            try:
+                detected = _detect_active_local_proxy()
+                if detected.get('ok') and detected.get('proxy_url'):
+                    selected = str(detected.get('proxy_url') or '').strip()
+            except Exception:
+                selected = ''
+            if not selected:
+                selected = 'direct'
+
+    _egress_choice_cache_set(global_key, selected)
+    _egress_choice_cache_set(cache_key, selected)
+    return selected
+
+
 def _effective_model_proxy_url(provider: str, base_url: str | None = None) -> str:
-    """Force direct for loopback providers; remap local mixed-port to the active one."""
+    """Force direct for loopback; for remote providers pick the currently working egress.
+
+    Selection matches the homepage candidate set (listening mixed-ports + direct). An
+    explicit model-proxy rule only biases preference; dead ports are not sticky.
+    """
     if _is_loopback_base_url(base_url):
         return 'direct'
-    # get_model_proxy_settings() already remaps local mixed-port URLs to the active proxy.
-    return _model_proxy_url_for_provider(provider)
+    prefer = _model_proxy_url_for_provider(provider)
+    return _choose_provider_egress_proxy_url(provider, base_url, prefer_proxy_url=prefer)
 
 
 def _provider_model_override_deleted(overrides: dict, provider: str, upstream_id: str):

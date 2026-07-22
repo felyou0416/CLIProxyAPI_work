@@ -100,7 +100,7 @@ def default_state():
         'session_affinity_enabled': False,
         'session_affinity_ttl': '1h',
         'ws_auth': False,
-        'local_model': False,
+        'local_model': True,
         'commercial_mode': False,
         'sensitive_auth_key': 'zR9#mX2$pQ7!yW5%vT1*nK8&sB6@hJ3(fG0',
     }
@@ -138,6 +138,14 @@ def load_state():
         if not merged.get('exposure_api_key'):
             merged['exposure_api_key'] = generate_exposure_api_key()
         merged['route_strategy'] = normalize_route_strategy(merged.get('route_strategy'))
+        # One-time startup-resilience migration: flip local_model on so the Go
+        # core skips remote model-catalog fetching and becomes ready in
+        # milliseconds instead of blocking ~90s on GitHub/Google Cloud. The
+        # _local_model_secured marker ensures a user's later explicit toggle
+        # (via Advanced Config) is always respected.
+        if not merged.get('_local_model_secured'):
+            merged['local_model'] = True
+            merged['_local_model_secured'] = True
         return _normalize_runtime_paths(merged)
     except Exception:
         return default_state()

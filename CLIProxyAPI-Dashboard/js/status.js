@@ -16,7 +16,7 @@ window.oauthActionBusy = false;
 window.dashboardActionBusy = false;
 window.openclawActionBusy = false;
 window.mediaProxyActionBusy = false;
-// create-grok 面板（:3780）busy 锁
+// create-grok = grok-register-mint 面板（:3780）busy 锁
 window['create-grokActionBusy'] = false;
 window['77chatActionBusy'] = false;
 // 前后端共用一把锁，避免并发改灯互相覆盖
@@ -53,6 +53,8 @@ const INDICATOR_ELEMENT_IDS = {
   'grok2api-sys-proxy': 'grok2api-sys-proxy-indicator',
   // 旧缓存/调用方可能仍传 "grok2api"，回退到前端灯
   'grok2api': 'grok2api-frontend-status-indicator',
+  // 控制站 DOM 用 chat77-，逻辑 type 用 77chat
+  '77chat': 'chat77-status-indicator',
 };
 // 内存态：script 加载后立刻 hydrate，渲染控制台时直接用缓存色，避免先红后绿闪一下
 const INDICATOR_MEMORY = Object.create(null);
