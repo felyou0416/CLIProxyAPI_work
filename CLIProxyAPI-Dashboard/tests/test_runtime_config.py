@@ -12,6 +12,34 @@ if str(ROOT) not in sys.path:
 import backend.auth as auth
 
 
+class RuntimeCoreOptionsTests(unittest.TestCase):
+    def test_runtime_options_are_rendered_from_dashboard_state(self):
+        rendered = auth.rewrite_core_runtime_options('host: "127.0.0.1"\ncodex:\n  identity-confuse: false\n', {
+            'force_model_prefix': True, 'passthrough_headers': True, 'request_retry': 5,
+            'max_retry_credentials': 2, 'max_retry_interval': 45, 'save_cooldown_status': True,
+            'transient_error_cooldown_seconds': -1, 'video_result_auth_cache_ttl': '4h',
+            'logging_to_file': True, 'logs_max_total_size_mb': 512, 'error_logs_max_files': 20,
+            'usage_statistics_enabled': True, 'usage_queue_retention_seconds': 120,
+            'nonstream_keepalive_interval': 10, 'quota_switch_project': False,
+            'quota_switch_preview_model': True, 'quota_antigravity_credits': False,
+            'streaming_keepalive_seconds': 15, 'streaming_bootstrap_retries': 2,
+            'codex_identity_confuse': True,
+        })
+        self.assertIn('force-model-prefix: true', rendered)
+        self.assertIn('request-retry: 5', rendered)
+        self.assertIn('video-result-auth-cache-ttl: "4h"', rendered)
+        self.assertIn('logging-to-file: true', rendered)
+        self.assertIn('usage-statistics-enabled: true', rendered)
+        self.assertIn('quota-exceeded:\n  switch-project: false', rendered)
+        self.assertIn('streaming:\n  keepalive-seconds: 15\n  bootstrap-retries: 2', rendered)
+        self.assertIn('codex:\n  identity-confuse: true', rendered)
+        self.assertEqual(rendered.count('\ncodex:\n'), 1)
+
+    def test_passthrough_image_mode_is_supported(self):
+        rendered = auth.rewrite_disable_image_generation('disable-image-generation: false\n', 'passthrough')
+        self.assertIn('disable-image-generation: "passthrough"', rendered)
+
+
 class RuntimeConfigRequestLogTests(unittest.TestCase):
     def test_build_runtime_config_enables_request_log_for_observability(self):
         with tempfile.TemporaryDirectory() as tmp:

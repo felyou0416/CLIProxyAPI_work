@@ -1,10 +1,17 @@
 <section id="section-advanced-config" class="panel panel-scroll section-view" hidden>
-  <div class="panel-head">
+  <div class="panel-head runtime-config-head">
     <div>
-      <div class="section-kicker">Advanced Settings</div>
-      <h2 class="section-title">高级配置</h2>
+      <div class="section-kicker">CPA Runtime</div>
+      <h2 class="section-title">内核运行配置</h2>
+      <p class="runtime-config-subtitle">由 Dashboard 生成运行时配置，不修改 CPA 内核源码。</p>
     </div>
-    <div class="action-row"><button class="primary" onclick="saveAdvancedConfig()">保存</button></div>
+    <div class="action-row toolbar-scroll">
+      <span class="runtime-config-state" id="runtime-config-state">未加载</span>
+      <button class="secondary" type="button" onclick="resetAdvancedConfigDefaults()">恢复推荐值</button>
+      <button class="secondary" type="button" id="advanced-config-save" onclick="saveAdvancedConfig(false)">保存</button>
+      <button class="primary" type="button" id="advanced-config-save-restart" onclick="saveAdvancedConfig(true)">保存并重启</button>
+    </div>
   </div>
-  <div id="advanced-config-content"></div>
+  <div class="runtime-config-notice"><strong>生效方式</strong><span>保存会立即重建运行时 YAML；正在运行的代理需重启后使用新参数。</span></div>
+  <div id="advanced-config-content" class="runtime-config-grid"><div class="metric-empty">正在读取运行时配置…</div></div>
 </section>

@@ -2,6 +2,7 @@
   <div class="panel-head system-hub-head">
     <div>
       <h2 class="section-title" data-i18n="section.systemTitle">系统中心</h2>
+      <p class="system-hub-subtitle">集中管理 CPA 运行参数、网络入口、部署与诊断工具。</p>
     </div>
     <div class="action-row toolbar-scroll">
       <button class="secondary" type="button" onclick="refreshStatus()" data-i18n="btn.refresh">刷新</button>
@@ -9,8 +10,21 @@
   </div>
 
   <div class="system-hub-grid">
+    <article class="system-runtime-feature">
+      <div class="system-runtime-copy">
+        <span class="system-card-kicker">CPA Runtime</span>
+        <h3>内核运行配置</h3>
+        <p>路由与 Session、重试与冷却、配额与 OAuth、图片视频与保活、日志统计、WebSocket 与运行模式。</p>
+        <div class="system-runtime-tags" aria-label="配置范围">
+          <span>路由与 Session</span><span>重试与冷却</span><span>配额与 OAuth</span><span>媒体与保活</span><span>日志与统计</span><span>服务模式</span>
+        </div>
+      </div>
+      <button class="primary" type="button" onclick="openSystemSection('advanced-config')">打开全部配置</button>
+    </article>
+
     <article class="system-hub-card primary-card">
       <h3>网络与入口</h3>
+      <p>控制访问范围、端口与系统网络接入。</p>
       <div class="system-link-grid">
         <button type="button" onclick="openSystemSection('network-access')">网络接入</button>
         <button type="button" onclick="openSystemSection('firewall-access')">端口放行</button>
@@ -21,6 +35,7 @@
 
     <article class="system-hub-card">
       <h3>路由与代理</h3>
+      <p>管理模型出口、请求策略与运行状态。</p>
       <div class="system-link-grid">
         <button type="button" onclick="openSystemSection('model-proxy')">模型代理</button>
         <button type="button" onclick="openSystemSection('cloaking-config')">请求伪装</button>
@@ -33,6 +48,7 @@
 
     <article class="system-hub-card">
       <h3>部署与数据</h3>
+      <p>管理部署方式、持久化后端和配置迁移。</p>
       <div class="system-link-grid">
         <button type="button" onclick="openSystemSection('docker-deploy')">Docker</button>
         <button type="button" onclick="openSystemSection('storage-config')">存储后端</button>
@@ -41,10 +57,12 @@
     </article>
 
     <article class="system-hub-card">
-      <h3>高级</h3>
+      <h3>面板与维护</h3>
+      <p>调整桌面面板行为并进入日常维护工具。</p>
       <div class="system-link-grid">
-        <button type="button" onclick="openSystemSection('advanced-config')">高级配置</button>
         <button type="button" onclick="openSystemSection('settings')">面板设置</button>
+        <button type="button" onclick="openSystemSection('tools')">工具箱</button>
+        <button type="button" onclick="openSystemSection('doc')">接口文档</button>
       </div>
     </article>
   </div>

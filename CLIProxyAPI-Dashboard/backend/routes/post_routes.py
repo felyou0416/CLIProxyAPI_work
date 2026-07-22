@@ -7,6 +7,24 @@ from backend.tools import run_tool, stop_tool, test_provider_models, test_image_
 from backend.terminals import open_terminal, open_desktop_terminal, close_terminal, list_terminals, write_terminal, resize_terminal
 from backend.routes.helpers import send_json
 from backend.system_proxy import configure_system_proxy, toggle_system_proxy, restore_system_proxy_default, set_system_proxy_port
+import re
+
+
+_GO_DURATION_RE = re.compile(r'^(?:\d+(?:\.\d+)?(?:ns|us|ms|s|m|h))+$')
+
+
+def _validated_duration(value, default, field_name):
+    normalized = str(value or default).strip()
+    if not _GO_DURATION_RE.fullmatch(normalized):
+        raise ValueError(f'{field_name} must be a duration such as 30s, 15m, or 1h')
+    return normalized
+
+
+def _bounded_int(data, key, default, minimum, maximum):
+    value = int(data.get(key, default))
+    if value < minimum or value > maximum:
+        raise ValueError(f'{key} must be between {minimum} and {maximum}')
+    return value
 
 
 def handle_post(handler, parsed, data):
@@ -991,16 +1009,43 @@ def handle_post(handler, parsed, data):
             state = load_state()
             if 'disable_image_generation' in data:
                 v = str(data['disable_image_generation'] or 'off').strip().lower()
-                if v not in ('off', 'all', 'chat'):
-                    raise ValueError('disable_image_generation must be off, all, or chat')
+                if v not in ('off', 'all', 'chat', 'passthrough'):
+                    raise ValueError('disable_image_generation must be off, all, chat, or passthrough')
                 state['disable_image_generation'] = v
-            for key in ('session_affinity_enabled', 'local_model', 'ws_auth', 'commercial_mode'):
+            strategy = str(data.get('core_routing_strategy', state.get('core_routing_strategy', 'round-robin'))).strip().lower()
+            if strategy not in ('round-robin', 'fill-first'):
+                raise ValueError('core_routing_strategy must be round-robin or fill-first')
+            state['core_routing_strategy'] = strategy
+            for key in (
+                'session_affinity_enabled', 'local_model', 'ws_auth', 'commercial_mode',
+                'disable_cooling', 'force_model_prefix', 'passthrough_headers',
+                'save_cooldown_status', 'quota_switch_project', 'quota_switch_preview_model',
+                'quota_antigravity_credits', 'logging_to_file', 'usage_statistics_enabled',
+                'codex_identity_confuse',
+            ):
                 if key in data:
                     state[key] = bool(data[key])
             if 'session_affinity_ttl' in data:
-                state['session_affinity_ttl'] = str(data['session_affinity_ttl'] or '1h').strip()
+                state['session_affinity_ttl'] = _validated_duration(data['session_affinity_ttl'], '1h', 'session_affinity_ttl')
+            if 'video_result_auth_cache_ttl' in data:
+                state['video_result_auth_cache_ttl'] = _validated_duration(data['video_result_auth_cache_ttl'], '3h', 'video_result_auth_cache_ttl')
             if 'auth_auto_refresh_workers' in data:
-                state['auth_auto_refresh_workers'] = max(1, min(256, int(data['auth_auto_refresh_workers'] or 16)))
+                state['auth_auto_refresh_workers'] = _bounded_int(data, 'auth_auto_refresh_workers', 16, 1, 256)
+            int_fields = (
+                ('request_retry', 3, 0, 20),
+                ('max_retry_credentials', 0, 0, 1000),
+                ('max_retry_interval', 30, 0, 3600),
+                ('transient_error_cooldown_seconds', 0, -1, 86400),
+                ('logs_max_total_size_mb', 0, 0, 102400),
+                ('error_logs_max_files', 10, 0, 10000),
+                ('usage_queue_retention_seconds', 60, 1, 3600),
+                ('nonstream_keepalive_interval', 0, 0, 3600),
+                ('streaming_keepalive_seconds', 0, 0, 3600),
+                ('streaming_bootstrap_retries', 0, 0, 10),
+            )
+            for key, default, minimum, maximum in int_fields:
+                if key in data:
+                    state[key] = _bounded_int(data, key, default, minimum, maximum)
             save_state(state)
             rebuild = rebuild_runtime_config_from_state(state)
             send_json(handler, {'ok': True, 'message': 'Advanced config saved.', 'runtime_rebuilt': rebuild.get('rebuilt'), 'restart_required': True})

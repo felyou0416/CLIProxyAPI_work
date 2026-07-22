@@ -4,7 +4,7 @@
 
 .system-hub {
   display: grid;
-  gap: 10px;
+  gap: 14px;
 }
 
 .system-hub-head {
@@ -13,20 +13,32 @@
 }
 
 .system-hub-subtitle {
-  display: none;
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .system-hub-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 10px;
 }
+
+.system-runtime-feature { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 18px; min-width: 0; padding: 16px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--accent-soft) 16%, var(--panel)); }
+.system-runtime-copy { min-width: 0; }
+.system-runtime-feature .system-card-kicker { display: block; margin-bottom: 4px; color: var(--accent); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.system-runtime-feature h3 { margin: 0; color: var(--text); font-size: 17px; }
+.system-runtime-feature p { max-width: 760px; margin: 5px 0 10px; color: var(--text-soft); font-size: 12px; line-height: 1.5; }
+.system-runtime-feature > button { flex: 0 0 auto; min-height: 38px; }
+.system-runtime-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.system-runtime-tags span { padding: 3px 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); color: var(--text-muted); font-size: 10px; font-weight: 700; }
 
 .system-hub-card {
   min-width: 0;
   padding: 12px;
   border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--panel);
   display: grid;
   gap: 8px;
@@ -52,7 +64,11 @@
 }
 
 .system-hub-card p {
-  display: none;
+  display: block;
+  margin: -3px 0 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .system-link-grid {
@@ -99,9 +115,50 @@
 }
 
 @media (max-width: 560px) {
+  .system-runtime-feature { align-items: stretch; flex-direction: column; }
+  .system-runtime-feature > button { width: 100%; }
   .system-link-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.runtime-config-head { align-items: flex-end; }
+.runtime-config-subtitle { margin: 4px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.4; }
+.runtime-config-state { align-self: center; padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; color: var(--text-muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.runtime-config-state[data-kind="saved"] { border-color: color-mix(in srgb, #22a06b 45%, var(--border)); color: #168357; }
+.runtime-config-state[data-kind="dirty"] { border-color: color-mix(in srgb, #c9851b 48%, var(--border)); color: #a86608; }
+.runtime-config-state[data-kind="error"] { border-color: color-mix(in srgb, #d14343 48%, var(--border)); color: #c53030; }
+.runtime-config-notice { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-block: 1px solid var(--border); background: var(--panel-2); color: var(--text-soft); font-size: 11px; }
+.runtime-config-notice strong { flex: 0 0 auto; color: var(--text); }
+.runtime-config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px 0 4px; }
+.runtime-config-card { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.runtime-config-card-wide { grid-column: 1 / -1; }
+.runtime-config-card-head { padding: 11px 12px 9px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--panel-2) 72%, var(--panel)); }
+.runtime-config-card-head span { display: block; margin-bottom: 2px; color: var(--text-muted); font-size: 9px; font-weight: 800; text-transform: uppercase; }
+.runtime-config-card-head h3 { margin: 0; color: var(--text); font-size: 13px; font-weight: 750; }
+.runtime-config-list { display: grid; }
+.runtime-config-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(100px, 160px); align-items: center; gap: 12px; min-height: 58px; padding: 8px 12px; border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent); }
+.runtime-config-row:last-child { border-bottom: 0; }
+.runtime-config-copy { min-width: 0; }
+.runtime-config-copy label { display: block; color: var(--text); font-size: 12px; font-weight: 700; }
+.runtime-config-copy span { display: block; margin-top: 2px; color: var(--text-muted); font-size: 10px; line-height: 1.35; }
+.runtime-number-control { display: grid; grid-template-columns: minmax(64px, 1fr) auto; align-items: center; gap: 6px; }
+.runtime-number-control > span { min-width: 22px; color: var(--text-muted); font-size: 10px; }
+.runtime-config-row .form-input, .runtime-select-control { width: 100%; min-width: 0; height: 34px; padding-top: 6px; padding-bottom: 6px; font-size: 12px; }
+.runtime-toggle { position: relative; justify-self: end; width: 38px; height: 22px; }
+.runtime-toggle input { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.runtime-toggle span { position: absolute; inset: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2); transition: background-color .15s ease, border-color .15s ease; }
+.runtime-toggle span::before { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-muted); transition: transform .15s ease, background-color .15s ease; }
+.runtime-toggle input:checked + span { border-color: var(--accent); background: var(--accent); }
+.runtime-toggle input:checked + span::before { transform: translateX(16px); background: #fff; }
+.runtime-toggle input:focus-visible + span { outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent); outline-offset: 2px; }
+@media (max-width: 980px) { .runtime-config-grid { grid-template-columns: 1fr; } .runtime-config-card-wide { grid-column: auto; } }
+@media (max-width: 640px) {
+  .runtime-config-head { align-items: stretch; }
+  .runtime-config-head .action-row { width: 100%; }
+  .runtime-config-state { margin-right: auto; }
+  .runtime-config-notice { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .runtime-config-row { grid-template-columns: minmax(0, 1fr) minmax(88px, 118px); gap: 8px; padding-inline: 10px; }
 }
 
 .doc-grid {

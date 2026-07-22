@@ -4657,6 +4657,8 @@ def rewrite_disable_image_generation(config_text: str, mode: str):
         yaml_value = 'true'
     elif mode_value == 'chat':
         yaml_value = '"chat"'
+    elif mode_value == 'passthrough':
+        yaml_value = '"passthrough"'
     else:
         yaml_value = 'false'
     return cleaned + f'disable-image-generation: {yaml_value}\n'
@@ -4672,6 +4674,52 @@ def rewrite_workers_and_flags(config_text: str, workers: int = 16, commercial_mo
         f'ws-auth: {str(bool(ws_auth)).lower()}',
     ]
     return text + '\n'.join(lines) + '\n'
+
+
+def rewrite_core_runtime_options(config_text: str, state: dict | None = None):
+    current = state or {}
+    scalar_values = {
+        'force-model-prefix': str(bool(current.get('force_model_prefix', False))).lower(),
+        'passthrough-headers': str(bool(current.get('passthrough_headers', False))).lower(),
+        'request-retry': int(current.get('request_retry', 3)),
+        'max-retry-credentials': int(current.get('max_retry_credentials', 0)),
+        'max-retry-interval': int(current.get('max_retry_interval', 30)),
+        'save-cooldown-status': str(bool(current.get('save_cooldown_status', False))).lower(),
+        'transient-error-cooldown-seconds': int(current.get('transient_error_cooldown_seconds', 0)),
+        'video-result-auth-cache-ttl': _yaml_str(str(current.get('video_result_auth_cache_ttl', '3h')).strip()),
+        'logging-to-file': str(bool(current.get('logging_to_file', False))).lower(),
+        'logs-max-total-size-mb': int(current.get('logs_max_total_size_mb', 0)),
+        'error-logs-max-files': int(current.get('error_logs_max_files', 10)),
+        'usage-statistics-enabled': str(bool(current.get('usage_statistics_enabled', False))).lower(),
+        'redis-usage-queue-retention-seconds': int(current.get('usage_queue_retention_seconds', 60)),
+        'nonstream-keepalive-interval': int(current.get('nonstream_keepalive_interval', 0)),
+    }
+    text = config_text
+    for key in scalar_values:
+        text = _strip_top_level_block(text, key).rstrip() + '\n\n'
+    text += '\n'.join(f'{key}: {value}' for key, value in scalar_values.items()) + '\n'
+
+    text = _strip_top_level_block(text, 'quota-exceeded').rstrip() + '\n\n'
+    text += '\n'.join([
+        'quota-exceeded:',
+        f"  switch-project: {str(bool(current.get('quota_switch_project', True))).lower()}",
+        f"  switch-preview-model: {str(bool(current.get('quota_switch_preview_model', True))).lower()}",
+        f"  antigravity-credits: {str(bool(current.get('quota_antigravity_credits', True))).lower()}",
+    ]) + '\n'
+
+    text = _strip_top_level_block(text, 'streaming').rstrip() + '\n\n'
+    text += '\n'.join([
+        'streaming:',
+        f"  keepalive-seconds: {int(current.get('streaming_keepalive_seconds', 0))}",
+        f"  bootstrap-retries: {int(current.get('streaming_bootstrap_retries', 0))}",
+    ]) + '\n'
+
+    text = _strip_top_level_block(text, 'codex').rstrip() + '\n\n'
+    text += '\n'.join([
+        'codex:',
+        f"  identity-confuse: {str(bool(current.get('codex_identity_confuse', False))).lower()}",
+    ]) + '\n'
+    return text
 
 
 def _yaml_str(value) -> str:
@@ -4866,7 +4914,7 @@ def build_runtime_config(
     runtime_text = rewrite_disable_cooling(runtime_text, current_state.get('disable_cooling', False))
     runtime_text = rewrite_routing_config(
         runtime_text,
-        strategy=current_state.get('route_strategy', {}).get('enabled', True) and 'round-robin' or 'round-robin',
+        strategy=current_state.get('core_routing_strategy', 'round-robin'),
         session_affinity=current_state.get('session_affinity_enabled', False),
         session_affinity_ttl=current_state.get('session_affinity_ttl', '1h'),
     )
@@ -4877,6 +4925,7 @@ def build_runtime_config(
         commercial_mode=current_state.get('commercial_mode', False),
         ws_auth=current_state.get('ws_auth', False),
     )
+    runtime_text = rewrite_core_runtime_options(runtime_text, current_state)
     amp_config = current_state.get('amp_config')
     if isinstance(amp_config, dict):
         runtime_text = rewrite_amp_config(runtime_text, amp_config)
