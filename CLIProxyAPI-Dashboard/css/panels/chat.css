@@ -485,6 +485,60 @@
   color: var(--text-muted);
   letter-spacing: 0.02em;
 }
+.chat-video-link-panel,
+.media-card-link-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 140px;
+  padding: 16px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel-2) 70%, #0b1220);
+  color: var(--text);
+}
+.media-card-link-panel {
+  height: 100%;
+  min-height: 0;
+  border-radius: 0;
+}
+.chat-video-link-title,
+.media-card-link-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+.chat-video-link-note,
+.media-card-link-note {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.chat-video-link-url,
+.media-card-link-url {
+  width: 100%;
+  font-size: 11px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--accent, #3b82f6) 85%, var(--text));
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.media-card-link-icon {
+  color: var(--accent, #3b82f6);
+  opacity: 0.9;
+}
+.media-card-note {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.media-card.is-link-only .media-card-preview {
+  aspect-ratio: 16 / 10;
+  background: transparent;
+}
 .chat-video-actions {
   display: flex;
   flex-wrap: wrap;

@@ -800,7 +800,7 @@ const SECTION_ASSETS = {
     scripts: [
       '/js/marked.min.js',
       '/js/highlight.min.js',
-      '/js/chat.js?v=20260721-disk-media',
+      '/js/chat.js?v=20260722-video-link-only',
     ],
   },
   aggregates: {

@@ -1246,7 +1246,8 @@ function localDownloadUrl(url) {
   if (value.startsWith('/generated/')) {
     return value.includes('?') ? `${value}&download=1` : `${value}?download=1`;
   }
-  if (looksLikeVideoUrl(value)) return mediaProxyUrl(value, { mode: 'local', download: true });
+  // Videos stay remote; download streams on demand and does not materialize to disk.
+  if (looksLikeVideoUrl(value)) return mediaProxyUrl(value, { mode: 'stream', download: true });
   return value;
 }
 
@@ -1296,35 +1297,32 @@ function mediaPlayUrl(url, kind) {
   const value = String(url || '').trim();
   if (!value) return '';
   if (isLocalMediaUrl(value)) return value;
-  if (kind === 'video' || looksLikeVideoUrl(value)) return mediaProxyUrl(value, { mode: 'stream' });
+  // Remote videos are link-only by default; do not auto-proxy/stream into the gallery.
+  if (kind === 'video' || looksLikeVideoUrl(value)) return value;
   return value;
 }
 
 async function revealLocalMedia(pathOrUrl, button) {
   const value = String(pathOrUrl || '').trim();
   if (!value) return;
+  // Videos are not auto-cached; only reveal paths that already live under /generated/.
+  if (!value.startsWith('/generated/') && looksLikeVideoUrl(value)) {
+    const msg = '视频仅保存远程链接，未自动下载到本地。请先点「下载视频」。';
+    if (typeof showMessage === 'function') showMessage(msg, true);
+    else alert(msg);
+    return;
+  }
   const original = button?.textContent;
   if (button) {
     button.textContent = '定位中…';
     button.setAttribute('aria-busy', 'true');
   }
   try {
-    let target = value;
-    if (!isLocalMediaUrl(value) && looksLikeVideoUrl(value)) {
-      // Materialize remote video first so explorer can open a real local file.
-      const response = await fetch(mediaProxyUrl(value, { mode: 'local' }), { credentials: 'same-origin' });
-      if (!response.ok) throw new Error(`缓存视频失败 (${response.status})`);
-      // media-proxy local mode streams the file; derive local URL from Content-Disposition if possible.
-      const cd = response.headers.get('Content-Disposition') || '';
-      const nameMatch = cd.match(/filename="?([^"]+)"?/i);
-      if (nameMatch?.[1]) target = `/generated/videos/${nameMatch[1]}`;
-      else target = value;
-    }
     const data = await fetch('/api/reveal-path', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ path: target, url: target }),
+      body: JSON.stringify({ path: value, url: value }),
     }).then(r => r.json());
     if (!data?.ok) throw new Error(data?.message || '打开本地目录失败');
   } catch (err) {
@@ -1341,7 +1339,8 @@ async function revealLocalMedia(pathOrUrl, button) {
 
 function buildMediaCard({ kind, url, prompt, model, status, error, requestId, jobId }) {
   const card = document.createElement('article');
-  card.className = `media-card media-card-${kind || 'image'}${status === 'running' ? ' is-running' : ''}${status === 'error' ? ' is-error' : ''}`;
+  const isVideo = kind === 'video' || looksLikeVideoUrl(url);
+  card.className = `media-card media-card-${kind || 'image'}${status === 'running' ? ' is-running' : ''}${status === 'error' ? ' is-error' : ''}${isVideo ? ' is-link-only' : ''}`;
   if (requestId) card.dataset.requestId = requestId;
   if (jobId) card.dataset.jobId = jobId;
 
@@ -1352,28 +1351,26 @@ function buildMediaCard({ kind, url, prompt, model, status, error, requestId, jo
     mediaWrap.innerHTML = `<div class="media-card-loading"><div class="typing-indicator"><span></span><span></span><span></span></div><div>生成中…</div></div>`;
   } else if (status === 'error') {
     mediaWrap.innerHTML = `<div class="media-card-error">${escapeHtml(error || '生成失败')}</div>`;
+  } else if (url && isVideo) {
+    // Link-only video result: no auto-download / no auto-proxy stream.
+    const local = url.startsWith('/generated/');
+    mediaWrap.innerHTML = `
+      <div class="media-card-link-panel">
+        <div class="media-card-link-icon" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+        </div>
+        <div class="media-card-link-title">视频链接已保存</div>
+        <div class="media-card-link-note">${local ? '本地文件' : '未自动下载 · 点下方按钮获取'}</div>
+        <div class="media-card-link-url" title="${escapeHtml(url)}">${escapeHtml(url)}</div>
+      </div>
+    `;
   } else if (url) {
-    if (kind === 'video' || looksLikeVideoUrl(url)) {
-      const video = document.createElement('video');
-      video.controls = true;
-      video.preload = 'metadata';
-      video.playsInline = true;
-      video.className = 'media-card-media';
-      video.src = mediaPlayUrl(url, 'video');
-      video.addEventListener('error', () => {
-        if (video.dataset.fallbackApplied === '1') return;
-        video.dataset.fallbackApplied = '1';
-        if (video.src !== url) video.src = url;
-      }, { once: true });
-      mediaWrap.appendChild(video);
-    } else {
-      const img = document.createElement('img');
-      img.className = 'media-card-media';
-      img.src = mediaPlayUrl(url, 'image');
-      img.alt = prompt || 'generated image';
-      img.loading = 'lazy';
-      mediaWrap.appendChild(img);
-    }
+    const img = document.createElement('img');
+    img.className = 'media-card-media';
+    img.src = mediaPlayUrl(url, 'image');
+    img.alt = prompt || 'generated image';
+    img.loading = 'lazy';
+    mediaWrap.appendChild(img);
   } else {
     mediaWrap.innerHTML = `<div class="media-card-empty">暂无媒体结果</div>`;
   }
@@ -1393,8 +1390,16 @@ function buildMediaCard({ kind, url, prompt, model, status, error, requestId, jo
   if (status === 'running') bits.push('运行中');
   if (status === 'error') bits.push('失败');
   if (kind) bits.push(kind === 'video' ? '视频' : '图片');
+  if (isVideo && url && !url.startsWith('/generated/')) bits.push('仅链接');
   meta.textContent = bits.join(' · ');
   body.appendChild(meta);
+
+  if (isVideo && url && status !== 'running' && status !== 'error') {
+    const note = document.createElement('div');
+    note.className = 'media-card-note';
+    note.textContent = '结果只记录远程链接与提示词，不会自动缓存到本机；需要时再下载。';
+    body.appendChild(note);
+  }
 
   const actions = document.createElement('div');
   actions.className = 'media-card-actions';
@@ -1404,7 +1409,7 @@ function buildMediaCard({ kind, url, prompt, model, status, error, requestId, jo
     downloadBtn.className = 'chat-video-action primary';
     downloadBtn.href = localDownloadUrl(url);
     downloadBtn.download = '';
-    downloadBtn.textContent = kind === 'video' ? '下载视频' : '下载图片';
+    downloadBtn.textContent = isVideo ? '下载视频' : '下载图片';
     downloadBtn.addEventListener('click', async (event) => {
       if (isLocalMediaUrl(url) && url.startsWith('/generated/')) return;
       event.preventDefault();
@@ -1418,11 +1423,11 @@ function buildMediaCard({ kind, url, prompt, model, status, error, requestId, jo
         const objectUrl = URL.createObjectURL(blob);
         const temp = document.createElement('a');
         const ctype = response.headers.get('Content-Type') || '';
-        const ext = kind === 'video'
+        const ext = isVideo
           ? (ctype.includes('webm') ? '.webm' : '.mp4')
           : (ctype.includes('jpeg') || ctype.includes('jpg') ? '.jpg' : ctype.includes('webp') ? '.webp' : '.png');
         temp.href = objectUrl;
-        temp.download = `generated-${kind || 'media'}-${Date.now()}${ext}`;
+        temp.download = `generated-${isVideo ? 'video' : 'image'}-${Date.now()}${ext}`;
         document.body.appendChild(temp);
         temp.click();
         temp.remove();
@@ -1437,19 +1442,22 @@ function buildMediaCard({ kind, url, prompt, model, status, error, requestId, jo
     });
     actions.appendChild(downloadBtn);
 
-    const revealBtn = document.createElement('button');
-    revealBtn.type = 'button';
-    revealBtn.className = 'chat-video-action';
-    revealBtn.textContent = '打开本地';
-    revealBtn.addEventListener('click', () => revealLocalMedia(url, revealBtn));
-    actions.appendChild(revealBtn);
+    // Local reveal only for files already under /generated/.
+    if (url.startsWith('/generated/')) {
+      const revealBtn = document.createElement('button');
+      revealBtn.type = 'button';
+      revealBtn.className = 'chat-video-action';
+      revealBtn.textContent = '打开本地';
+      revealBtn.addEventListener('click', () => revealLocalMedia(url, revealBtn));
+      actions.appendChild(revealBtn);
+    }
 
     const openBtn = document.createElement('a');
     openBtn.className = 'chat-video-action';
     openBtn.href = url;
     openBtn.target = '_blank';
     openBtn.rel = 'noopener noreferrer';
-    openBtn.textContent = '原链';
+    openBtn.textContent = isVideo ? '打开链接' : '原链';
     actions.appendChild(openBtn);
   }
 
@@ -1552,32 +1560,35 @@ function paintMediaWorkspace(history, focusSession, diskItems = []) {
     });
   });
 
-  // Disk files shared across browsers/clients — only add URLs not already in session jobs.
-  const seenUrls = new Set();
-  allJobs.forEach((job) => {
-    const key = mediaUrlKey(job.url);
-    if (key) seenUrls.add(key);
-  });
-  (Array.isArray(diskItems) ? diskItems : []).forEach((item) => {
-    if (!item || item.kind !== expectedKind) return;
-    const url = String(item.url || '').trim();
-    const key = mediaUrlKey(url);
-    if (!url || !key || seenUrls.has(key)) return;
-    seenUrls.add(key);
-    allJobs.push({
-      id: `disk_${item.filename || key}`,
-      prompt: item.filename || '本地文件',
-      model: '',
-      status: 'done',
-      kind: item.kind,
-      url,
-      sessionId: '',
-      sessionTitle: '',
-      sessionTs: Number(item.mtime || 0) * 1000,
-      source: 'disk',
-      bytes: item.bytes || 0,
+  // Images: merge disk files shared across browsers/clients.
+  // Videos: link-only — do not surface auto-cached local video files.
+  if (expectedKind === 'image') {
+    const seenUrls = new Set();
+    allJobs.forEach((job) => {
+      const key = mediaUrlKey(job.url);
+      if (key) seenUrls.add(key);
     });
-  });
+    (Array.isArray(diskItems) ? diskItems : []).forEach((item) => {
+      if (!item || item.kind !== 'image') return;
+      const url = String(item.url || '').trim();
+      const key = mediaUrlKey(url);
+      if (!url || !key || seenUrls.has(key)) return;
+      seenUrls.add(key);
+      allJobs.push({
+        id: `disk_${item.filename || key}`,
+        prompt: item.filename || '本地文件',
+        model: '',
+        status: 'done',
+        kind: 'image',
+        url,
+        sessionId: '',
+        sessionTitle: '',
+        sessionTs: Number(item.mtime || 0) * 1000,
+        source: 'disk',
+        bytes: item.bytes || 0,
+      });
+    });
+  }
 
   // Prefer focused session, then running, then recency.
   allJobs.sort((a, b) => {
@@ -1594,14 +1605,19 @@ function paintMediaWorkspace(history, focusSession, diskItems = []) {
   header.className = 'media-workbench-head';
   const diskCount = allJobs.filter((job) => job.source === 'disk').length;
   const totalDone = allJobs.filter((job) => job.status === 'done' && job.url).length;
+  const subtitle = expectedKind === 'video'
+    ? `${modeSessions.length} 个任务${runningCount ? ` · ${runningCount} 运行中` : ''} · ${totalDone} 条链接 · 仅保存远程链/说明，不自动下载`
+    : `${modeSessions.length} 个任务${runningCount ? ` · ${runningCount} 运行中` : ''} · ${totalDone} 项本地结果${diskCount ? `（含 ${diskCount} 共享文件）` : ''} · 可并发生成`;
   header.innerHTML = `
     <div class="media-workbench-title">
       <strong>${kindLabel}工作台</strong>
-      <span>${modeSessions.length} 个任务${runningCount ? ` · ${runningCount} 运行中` : ''} · ${totalDone} 项本地结果${diskCount ? `（含 ${diskCount} 共享文件）` : ''} · 可并发生成</span>
+      <span>${subtitle}</span>
     </div>
     <div class="media-workbench-actions">
       <button type="button" class="chat-video-action" onclick="createNewSession()">新建任务</button>
-      <button type="button" class="chat-video-action" onclick="revealLocalMedia('${isVideoMode() ? '/generated/videos/' : '/generated/images/'}', this)">打开保存目录</button>
+      ${expectedKind === 'image'
+        ? `<button type="button" class="chat-video-action" onclick="revealLocalMedia('/generated/images/', this)">打开保存目录</button>`
+        : ''}
     </div>
   `;
   shell.appendChild(header);
@@ -1614,7 +1630,9 @@ function paintMediaWorkspace(history, focusSession, diskItems = []) {
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg>
       </div>
       <div class="chat-welcome-text">描述你想生成的${kindLabel}</div>
-      <div class="chat-welcome-hint">Enter 生成 · 支持多任务并发 · 结果可下载/打开本地目录 · 各浏览器共享本地文件</div>
+      <div class="chat-welcome-hint">${expectedKind === 'video'
+        ? 'Enter 生成 · 多任务并发 · 结果只记链接与提示词 · 需要时再下载'
+        : 'Enter 生成 · 支持多任务并发 · 结果可下载/打开本地目录 · 各浏览器共享本地文件'}</div>
     `;
     shell.appendChild(empty);
   } else {
@@ -1657,15 +1675,14 @@ function renderMediaWorkspace(focusSession = null) {
   if (!history) return;
 
   const kind = isVideoMode() ? 'video' : 'image';
-  // Paint immediately with any cached disk list so UI doesn't flash empty.
-  paintMediaWorkspace(history, focusSession, diskMediaCache[kind] || []);
+  // Videos are link-only (no disk gallery). Images merge shared local files.
+  paintMediaWorkspace(history, focusSession, kind === 'image' ? (diskMediaCache.image || []) : []);
   requestAnimationFrame(() => history.scrollTo({ top: 0, behavior: 'smooth' }));
 
-  // Refresh from disk so other browsers/clients always see shared local files.
-  fetchDiskMedia(kind).then((items) => {
-    // Bail if user left media mode / switched history root while we were loading.
+  if (kind !== 'image') return;
+  fetchDiskMedia('image').then((items) => {
     if (document.getElementById('chat-history') !== history) return;
-    if (!isMediaMode() || (kind === 'video') !== isVideoMode()) return;
+    if (!isMediaMode() || isVideoMode()) return;
     paintMediaWorkspace(history, focusSession, items);
   });
 }
@@ -1762,22 +1779,21 @@ function decorateMediaEmbeds(contentDiv) {
     if (!looksLikeVideoUrl(href, label)) return;
 
     const remoteUrl = href;
-    const playUrl = isLocalMediaUrl(remoteUrl) ? remoteUrl : mediaProxyUrl(remoteUrl, { mode: 'stream' });
-    const downloadUrl = isLocalMediaUrl(remoteUrl)
-      ? (remoteUrl.includes('?') ? `${remoteUrl}&download=1` : `${remoteUrl}?download=1`)
-      : mediaProxyUrl(remoteUrl, { mode: 'local', download: true });
+    const isLocal = remoteUrl.startsWith('/generated/');
+    const downloadUrl = localDownloadUrl(remoteUrl);
 
     const card = document.createElement('div');
-    card.className = 'chat-video-card';
+    card.className = 'chat-video-card is-link-only';
     card.dataset.remoteUrl = remoteUrl;
 
-    const video = document.createElement('video');
-    video.controls = true;
-    video.preload = 'metadata';
-    video.playsInline = true;
-    video.className = 'chat-generated-video';
-    video.src = playUrl;
-    video.setAttribute('controlslist', 'nodownload');
+    // Link-only panel: keep the remote URL + actions, do not auto-stream/cache video bytes.
+    const panel = document.createElement('div');
+    panel.className = 'chat-video-link-panel';
+    panel.innerHTML = `
+      <div class="chat-video-link-title">视频链接已保存</div>
+      <div class="chat-video-link-note">${isLocal ? '本地文件' : '未自动下载 · 需要时再下载'}</div>
+      <div class="chat-video-link-url" title="${escapeHtml(remoteUrl)}">${escapeHtml(remoteUrl)}</div>
+    `;
 
     const actions = document.createElement('div');
     actions.className = 'chat-video-actions';
@@ -1787,7 +1803,7 @@ function decorateMediaEmbeds(contentDiv) {
     openBtn.href = remoteUrl;
     openBtn.target = '_blank';
     openBtn.rel = 'noopener noreferrer';
-    openBtn.textContent = '打开原链';
+    openBtn.textContent = '打开链接';
 
     const downloadBtn = document.createElement('a');
     downloadBtn.className = 'chat-video-action primary';
@@ -1795,14 +1811,14 @@ function decorateMediaEmbeds(contentDiv) {
     downloadBtn.download = '';
     downloadBtn.textContent = '下载视频';
     downloadBtn.addEventListener('click', async (event) => {
-      // Prefer a same-origin blob download so browsers don't just navigate away.
-      if (isLocalMediaUrl(remoteUrl) && remoteUrl.startsWith('/generated/')) return;
+      if (isLocal) return;
       event.preventDefault();
       const original = downloadBtn.textContent;
       downloadBtn.textContent = '下载中…';
       downloadBtn.setAttribute('aria-busy', 'true');
       try {
-        const response = await fetch(mediaProxyUrl(remoteUrl, { mode: 'local', download: true }), {
+        // Stream-only proxy: never materialize into /generated/videos.
+        const response = await fetch(mediaProxyUrl(remoteUrl, { mode: 'stream', download: true }), {
           credentials: 'same-origin',
         });
         if (!response.ok) {
@@ -1828,21 +1844,22 @@ function decorateMediaEmbeds(contentDiv) {
       }
     });
 
-    const revealBtn = document.createElement('button');
-    revealBtn.type = 'button';
-    revealBtn.className = 'chat-video-action';
-    revealBtn.textContent = '打开本地';
-    revealBtn.addEventListener('click', () => revealLocalMedia(remoteUrl, revealBtn));
-
     actions.appendChild(downloadBtn);
-    actions.appendChild(revealBtn);
+    if (isLocal) {
+      const revealBtn = document.createElement('button');
+      revealBtn.type = 'button';
+      revealBtn.className = 'chat-video-action';
+      revealBtn.textContent = '打开本地';
+      revealBtn.addEventListener('click', () => revealLocalMedia(remoteUrl, revealBtn));
+      actions.appendChild(revealBtn);
+    }
     actions.appendChild(openBtn);
 
     const caption = document.createElement('div');
     caption.className = 'chat-video-caption';
-    caption.textContent = '生成视频';
+    caption.textContent = '生成视频 · 仅保存链接，不自动下载';
 
-    card.appendChild(video);
+    card.appendChild(panel);
     card.appendChild(caption);
     card.appendChild(actions);
 
