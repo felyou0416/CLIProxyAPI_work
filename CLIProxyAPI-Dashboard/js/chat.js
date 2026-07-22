@@ -62,6 +62,7 @@ function loadChatSessions() {
   });
   activeSessionId = activeSessionIdsByMode[chatMode] || null;
   chatSessionsLoaded = true;
+  resumeRunningMediaTasks();
 }
 
 function saveChatSessions() {
@@ -267,6 +268,7 @@ function setChatMode(mode) {
   saveChatSessions();
   renderChatHistoryList();
   syncChatModeUI();
+  resumeRunningMediaTasks();
 }
 
 function isImageModelId(model) {
@@ -667,7 +669,7 @@ function chatCompletionText(response) {
   return response?.choices?.[0]?.message?.content || '';
 }
 
-async function pollVideoResult(model, taskId, { attempts = 45, intervalMs = 3000 } = {}) {
+async function pollVideoResult(model, taskId, { attempts = 120, intervalMs = 3000 } = {}) {
   let lastError = null;
   let lastStatus = '';
   for (let i = 0; i < attempts; i += 1) {
@@ -691,6 +693,92 @@ async function pollVideoResult(model, taskId, { attempts = 45, intervalMs = 3000
   }
   if (lastError) throw lastError;
   return { url: '', id: taskId, status: lastStatus || 'timeout' };
+}
+
+const activeMediaPollingIds = new Set();
+
+async function requestImageGenerationFallback(model, prompt, options = {}) {
+  const imagePrompt = buildImagePrompt(prompt);
+  let firstErr = null;
+  try {
+    const response = await chatFetchFirstJson(['/api/chat', '/v1/chat/completions'], 'POST', {
+      model,
+      messages: [{ role: 'user', content: imagePrompt }],
+      max_tokens: 4096,
+      stream: false,
+      ...options
+    });
+    const reply = chatCompletionText(response);
+    if (reply) return reply;
+  } catch (err) {
+    firstErr = err;
+    console.warn('Primary image chat-completions path failed, trying /v1/images/generations fallback', err);
+  }
+
+  try {
+    const directPayload = {
+      model,
+      prompt: imagePrompt,
+      n: 1,
+      size: options?.size || '1024x1024',
+      response_format: 'url',
+      ...options
+    };
+    const response = await chatFetchFirstJson(
+      ['/v1/images/generations', '/api/image-generation'],
+      'POST',
+      directPayload
+    );
+
+    if (response?.data?.[0]?.url) {
+      return `![image](${response.data[0].url})`;
+    }
+    if (response?.data?.[0]?.b64_json) {
+      return `![image](data:image/png;base64,${response.data[0].b64_json})`;
+    }
+    const reply = chatCompletionText(response);
+    if (reply) return reply;
+  } catch (err) {
+    throw firstErr || err;
+  }
+  throw firstErr || new Error('Image response did not include a valid URL or base64 image data.');
+}
+
+function resumeRunningMediaTasks() {
+  if (!Array.isArray(chatSessions)) return;
+  chatSessions.forEach((session) => {
+    if (!session || session.status !== 'running' || !session.pendingRequestId) return;
+    if (activeMediaPollingIds.has(session.pendingRequestId)) return;
+    const mode = normalizeChatMode(session.pendingMode || session.mode);
+    if (mode !== 'video' && mode !== 'image') return;
+    activeMediaPollingIds.add(session.pendingRequestId);
+
+    const requestId = session.pendingRequestId;
+    const model = session.model || '';
+    const lastUserMsg = (session.messages || []).filter(m => m.role === 'user').slice(-1)[0];
+    const prompt = lastUserMsg ? lastUserMsg.content : '';
+
+    (async () => {
+      try {
+        let reply = '';
+        if (mode === 'video') {
+          reply = await requestVideoGenerationFallback(model, prompt, getVideoOptions());
+        } else {
+          reply = await requestImageGenerationFallback(model, prompt, getImageOptions());
+        }
+        markSessionDraft(session, requestId, reply, true);
+        finalizeSessionReply(session, requestId, reply);
+      } catch (err) {
+        console.warn('Resumed background media task failed:', err);
+        markSessionFailed(session, requestId, err.message || 'Media task failed');
+      } finally {
+        activeMediaPollingIds.delete(requestId);
+        if (isMediaMode() && normalizeChatMode(session.mode) === chatMode) {
+          renderMediaWorkspace(getActiveSession());
+        }
+      }
+    })();
+  });
 }
 
 function looksLikeEgressFailure(err) {
@@ -2127,27 +2215,26 @@ async function sendChatMessage() {
 
     if (requestIsMedia) {
       let reply = '';
-      let mediaError = null;
-      markSessionDraft(session, requestId, `${getSessionModeLabel(requestMode)} generation is running...`, true);
-      try {
-        const response = await chatFetchFirstJson(['/api/chat', '/v1/chat/completions'], 'POST', payload);
-        reply = chatCompletionText(response);
-        if (!reply) {
-          throw new Error(response.error?.message || response.message || 'Invalid response format');
-        }
-      } catch (err) {
-        mediaError = err;
-        if (requestIsVideo) {
+      if (requestIsImage) {
+        reply = await requestImageGenerationFallback(model, content, getImageOptions());
+      } else {
+        let mediaError = null;
+        try {
+          const response = await chatFetchFirstJson(['/api/chat', '/v1/chat/completions'], 'POST', payload);
+          reply = chatCompletionText(response);
+          if (!reply) {
+            throw new Error(response.error?.message || response.message || 'Invalid response format');
+          }
+        } catch (err) {
+          mediaError = err;
           reply = await requestVideoGenerationFallback(model, content, videoOptions || {});
-        } else {
-          throw err;
+        }
+        if (mediaError) {
+          console.warn('Primary media chat-completions path failed; video fallback succeeded.', mediaError);
         }
       }
       markSessionDraft(session, requestId, reply, true);
       finalizeSessionReply(session, requestId, reply);
-      if (mediaError) {
-        console.warn('Primary media chat-completions path failed; video fallback succeeded.', mediaError);
-      }
     } else {
       let streamSucceeded = false;
       try {

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-07-22
+### Added
+- Upgraded CPA Go proxy server kernel to official v7.2.74 with clean zero-patch architecture.
+- Modularized local CPA customizations into Go C-shared dynamic plugin (`CLIProxyAPI-LocalPlugin`).
+- Background task auto-resumption (`resumeRunningMediaTasks`) in Dashboard Chat for video & image generation tasks when switching tabs or reloading.
+- Expanded video task polling threshold to 360 seconds (120 attempts) to prevent false timeouts on long renders.
+- Double-fallback pipeline (`/v1/chat/completions` + `/v1/images/generations`) for image model compatibility.
+- Synchronized release pipeline supporting Go Core, AccessGateway, MediaProxy, and LocalPlugin binaries.
+
 ## [1.0.8] - 2026-07-22
 ### Added
 - Browser favicon brand icons (`favicon.svg`, `favicon.png`, `favicon.ico`) matching the CLIProxyAPI terminal squircle design.
