@@ -7,11 +7,15 @@ import hashlib
 import base64
 import ipaddress
 import tempfile
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 from backend.paths import AUTH_SOURCE_DIRS, MANUAL_AUTH_SAVE_DIR, SOURCE_AUTH_DIR, ACTIVE_AUTH_DIR, BASE_CONFIG, RUNTIME_CONFIG, MODEL_MAPPING_OVERRIDES_FILE, AGGREGATE_MODEL_ALIASES_FILE, PROVIDER_MODEL_TEST_STATE_FILE, MODEL_PROXY_SETTINGS_FILE, MODEL_THINKING_CONFIGS_FILE, QUOTA_CACHE_FILE, APP_DIR, AUTH_DIR, POOL_AUTH_DIR, BACKUPS_DIR, STORAGE_DIR, LOCAL_PLUGIN_DIR
 from backend.state import load_state, normalize_route_strategy, get_proxy_bind_host, get_proxy_api_key
+
+
+_runtime_rebuild_lock = threading.Lock()
 
 
 PROVIDER_MODEL_ALIASES = {
@@ -1223,7 +1227,15 @@ def _normalize_runtime_oauth_payload(payload, provider: str, auth_kind: str):
 
 def _write_runtime_auth_payload(path: Path, payload: dict):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+    handle, temp_name = tempfile.mkstemp(prefix=f'{path.name}.', suffix='.tmp', dir=path.parent)
+    os.close(handle)
+    temp_path = Path(temp_name)
+    try:
+        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+        temp_path.replace(path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 def _backup_auth_file_for_migration(path: Path, backup_root: Path):
@@ -3381,6 +3393,52 @@ def _strip_top_level_block(config_text: str, key_name: str):
     return '\n'.join(output).rstrip() + '\n'
 
 
+def _rewrite_top_level_mapping_scalars(config_text: str, key_name: str, scalar_values: dict):
+    """Update direct scalar children while preserving unmanaged nested options."""
+    lines = config_text.splitlines()
+    start = None
+    end = len(lines)
+    for index, line in enumerate(lines):
+        top_level = bool(line) and not line.startswith((' ', '\t'))
+        if start is None and top_level and line.lstrip().startswith(f'{key_name}:'):
+            start = index
+            continue
+        if start is not None and top_level:
+            end = index
+            break
+
+    rendered = {str(key): str(value) for key, value in scalar_values.items()}
+    if start is None:
+        block = [f'{key_name}:']
+        block.extend(f'  {key}: {value}' for key, value in rendered.items())
+        return config_text.rstrip() + '\n\n' + '\n'.join(block) + '\n'
+
+    header_suffix = lines[start].split(':', 1)[1].strip()
+    lines[start] = f'{key_name}:' + (f' {header_suffix}' if header_suffix.startswith('#') else '')
+    body = lines[start + 1:end]
+    direct_indents = [
+        len(line) - len(line.lstrip(' '))
+        for line in body
+        if line.strip() and not line.lstrip().startswith('#') and line.startswith(' ')
+    ]
+    direct_indent = min(direct_indents) if direct_indents else 2
+    prefix = ' ' * direct_indent
+    seen = set()
+    updated = []
+    for line in body:
+        if line.startswith(prefix) and not line.startswith(prefix + ' '):
+            match = re.match(r'^\s*([A-Za-z0-9_-]+)\s*:', line)
+            child_key = match.group(1) if match else ''
+            if child_key in rendered:
+                if child_key not in seen:
+                    updated.append(f'{prefix}{child_key}: {rendered[child_key]}')
+                    seen.add(child_key)
+                continue
+        updated.append(line)
+    updated.extend(f'{prefix}{key}: {value}' for key, value in rendered.items() if key not in seen)
+    return '\n'.join(lines[:start + 1] + updated + lines[end:]).rstrip() + '\n'
+
+
 def rewrite_api_keys(config_text: str, api_keys: list[str] | None = None):
     cleaned = _strip_top_level_block(config_text, 'api-keys').rstrip() + '\n\n'
     values = [str(item).strip() for item in (api_keys or []) if str(item).strip()]
@@ -4714,11 +4772,17 @@ def rewrite_core_runtime_options(config_text: str, state: dict | None = None):
         f"  bootstrap-retries: {int(current.get('streaming_bootstrap_retries', 0))}",
     ]) + '\n'
 
-    text = _strip_top_level_block(text, 'codex').rstrip() + '\n\n'
-    text += '\n'.join([
-        'codex:',
-        f"  identity-confuse: {str(bool(current.get('codex_identity_confuse', False))).lower()}",
-    ]) + '\n'
+    text = _rewrite_top_level_mapping_scalars(text, 'codex', {
+        'identity-confuse': str(bool(current.get('codex_identity_confuse', False))).lower(),
+        'disable-codex-cloaking': str(bool(current.get('codex_disable_cloaking', False))).lower(),
+        'optimize-multi-agent-v2': str(bool(current.get('codex_optimize_multi_agent_v2', False))).lower(),
+    })
+    text = _rewrite_top_level_mapping_scalars(text, 'claude-code', {
+        'disable-cloaking-model-list': str(bool(current.get('claude_code_disable_cloaking_model_list', False))).lower(),
+    })
+    text = _rewrite_top_level_mapping_scalars(text, 'xai', {
+        'inject-x-search': str(bool(current.get('xai_inject_x_search', False))).lower(),
+    })
     return text
 
 
@@ -4953,25 +5017,82 @@ def build_runtime_config(
 
 
 def rebuild_runtime_config_from_state(state: dict | None = None):
-    current_state = state or load_state()
-    has_active_auth_files = any(True for _ in _iter_pool_auth_json_files())
-    if not has_active_auth_files:
-        return {'rebuilt': False, 'reason': 'no_auth_files', 'validation': {'ok': False, 'issues': ['no auth files in storage/auth'], 'message': 'No auth JSON files found in storage/auth.'}}
-    try:
-        copied = build_runtime_config(
-            bind_host=get_proxy_bind_host(current_state),
-            access_api_keys=[get_proxy_api_key(current_state)],
-            state=current_state,
-        )
-    except Exception as exc:
-        return {
-            'rebuilt': False,
-            'reason': 'validation_failed',
-            'error': str(exc),
-            'runtime_config': str(RUNTIME_CONFIG),
-            'validation': {'ok': False, 'issues': [str(exc)], 'message': str(exc)},
-        }
-    return {'rebuilt': True, 'runtime_config': str(RUNTIME_CONFIG), 'copied_auth_count': len(copied), 'validation': {'ok': True, 'issues': [], 'message': 'Runtime config rebuilt successfully.'}}
+    with _runtime_rebuild_lock:
+        current_state = state or load_state()
+        has_active_auth_files = any(True for _ in _iter_pool_auth_json_files())
+        if not has_active_auth_files:
+            removed = 0
+            if ACTIVE_AUTH_DIR.exists():
+                for path in ACTIVE_AUTH_DIR.glob('*.json'):
+                    try:
+                        path.unlink()
+                        removed += 1
+                    except OSError:
+                        pass
+            return {
+                'rebuilt': False,
+                'reason': 'no_auth_files',
+                'removed_active_auth_count': removed,
+                'validation': {'ok': False, 'issues': ['no auth files in storage/auth'], 'message': 'No auth JSON files found in storage/auth.'},
+            }
+        try:
+            copied = build_runtime_config(
+                bind_host=get_proxy_bind_host(current_state),
+                access_api_keys=[get_proxy_api_key(current_state)],
+                state=current_state,
+            )
+        except Exception as exc:
+            return {
+                'rebuilt': False,
+                'reason': 'validation_failed',
+                'error': str(exc),
+                'runtime_config': str(RUNTIME_CONFIG),
+                'validation': {'ok': False, 'issues': [str(exc)], 'message': str(exc)},
+            }
+        return {'rebuilt': True, 'runtime_config': str(RUNTIME_CONFIG), 'copied_auth_count': len(copied), 'validation': {'ok': True, 'issues': [], 'message': 'Runtime config rebuilt successfully.'}}
+
+
+def _auth_pool_signature():
+    signature = []
+    for path in _iter_pool_auth_json_files():
+        try:
+            stat = path.stat()
+            relative = path.relative_to(POOL_AUTH_DIR).as_posix()
+            signature.append((relative, int(stat.st_mtime_ns), int(stat.st_size)))
+        except OSError:
+            continue
+    return tuple(signature)
+
+
+def sync_auth_pool_if_changed(previous_signature=None):
+    signature = _auth_pool_signature()
+    if previous_signature is not None and signature == previous_signature:
+        return {'changed': False, 'signature': previous_signature, 'runtime': None}
+    runtime = rebuild_runtime_config_from_state()
+    accepted = bool(runtime.get('rebuilt')) or runtime.get('reason') == 'no_auth_files'
+    return {
+        'changed': True,
+        'signature': signature if accepted else previous_signature,
+        'runtime': runtime,
+    }
+
+
+def start_auth_pool_sync_thread(interval_seconds: float = 2.0):
+    def _worker():
+        signature = None
+        while True:
+            result = sync_auth_pool_if_changed(signature)
+            signature = result.get('signature')
+            runtime = result.get('runtime') or {}
+            if result.get('changed') and runtime.get('rebuilt'):
+                print(f'Auth pool hot-synced: {runtime.get("copied_auth_count", 0)} OAuth file(s).')
+            elif result.get('changed') and runtime.get('reason') == 'validation_failed':
+                print(f'Auth pool hot-sync failed: {runtime.get("error", "validation failed")}')
+            time.sleep(max(0.5, float(interval_seconds or 2.0)))
+
+    thread = threading.Thread(target=_worker, name='dashboard-auth-pool-sync', daemon=True)
+    thread.start()
+    return thread
 
 
 def _safe_name(text: str, fallback='entry'):

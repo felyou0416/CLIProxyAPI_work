@@ -1,0 +1,40 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - button "展开侧栏" [ref=e5] [cursor=pointer]
+        - generic:
+          - generic: CLIProxyAPI
+          - generic: CLIProxyAPI Codex 控制面板
+      - navigation [ref=e10]:
+        - generic [ref=e13]:
+          - button "账号" [ref=e14] [cursor=pointer]
+          - button "聊天" [ref=e16] [cursor=pointer]
+          - button "请求" [ref=e18] [cursor=pointer]
+          - button "Token 用量" [ref=e20] [cursor=pointer]
+          - button "客户端" [ref=e22] [cursor=pointer]
+          - button "设置" [ref=e24] [cursor=pointer]
+        - generic [ref=e28]:
+          - button "提供方" [ref=e29] [cursor=pointer]
+          - button "图像/视频" [ref=e31] [cursor=pointer]
+          - button "聚合" [ref=e33] [cursor=pointer]
+          - button "映射" [ref=e35] [cursor=pointer]
+          - button "接入" [ref=e37] [cursor=pointer]
+          - button "OAuth" [ref=e39] [cursor=pointer]
+        - generic [ref=e43]:
+          - button "密钥管理" [ref=e44] [cursor=pointer]
+          - button "工具" [ref=e46] [cursor=pointer]
+          - button "文档" [ref=e48] [cursor=pointer]
+        - button "系统中心" [ref=e53] [cursor=pointer]
+      - button "主题：明亮" [ref=e56] [cursor=pointer]
+    - main [ref=e57]:
+      - generic [ref=e58]: › › › › › › › › › › › › › › › ›
+  - generic [ref=e60]:
+    - generic [ref=e61]: CLI
+    - heading "访问口令" [level=2] [ref=e62]
+    - paragraph [ref=e63]: 请输入访问口令以进入控制面板
+    - generic [ref=e64]:
+      - generic [ref=e65]:
+        - generic [ref=e66]: 访问口令
+        - textbox [ref=e67]
+      - button "登录" [ref=e68] [cursor=pointer]

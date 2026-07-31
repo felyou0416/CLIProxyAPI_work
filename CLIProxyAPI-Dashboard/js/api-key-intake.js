@@ -130,8 +130,8 @@ function renderApiKeyIntakeResult(data) {
           <b>${data?.runtime_rebuilt ? '已重建' : '未重建'}</b>
         </div>
         <div class="api-key-result-metric">
-          <span>代理</span>
-          <b>${data?.proxy_restart?.ok ? '已重启' : '未重启'}</b>
+          <span>生效方式</span>
+          <b>${data?.runtime_hot_reloaded ? '热更新' : (data?.runtime_rebuilt ? '下次启动' : '同步失败')}</b>
         </div>
       </div>
       <div class="api-key-result-queue">检测队列：${queued.length ? apiKeyIntakeEscape(queued.join(', ')) : '未排队'}</div>

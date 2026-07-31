@@ -1,0 +1,261 @@
+- generic [ref=f1e2]:
+  - complementary [ref=f1e3]:
+    - generic [ref=f1e4]:
+      - button "展开侧栏" [ref=f1e5] [cursor=pointer]
+      - generic:
+        - generic: CLIProxyAPI
+        - generic: CLIProxyAPI Codex 控制面板
+    - navigation [ref=f1e10]:
+      - generic [ref=f1e13]:
+        - button "账号" [ref=f1e14] [cursor=pointer]
+        - button "聊天" [ref=f1e16] [cursor=pointer]
+        - button "请求" [ref=f1e18] [cursor=pointer]
+        - button "Token 用量" [ref=f1e20] [cursor=pointer]
+        - button "客户端" [ref=f1e22] [cursor=pointer]
+        - button "设置" [ref=f1e24] [cursor=pointer]
+      - generic [ref=f1e28]:
+        - button "提供方" [ref=f1e29] [cursor=pointer]
+        - button "图像/视频" [ref=f1e31] [cursor=pointer]
+        - button "聚合" [ref=f1e33] [cursor=pointer]
+        - button "映射" [ref=f1e35] [cursor=pointer]
+        - button "接入" [ref=f1e37] [cursor=pointer]
+        - button "OAuth" [ref=f1e39] [cursor=pointer]
+      - generic [ref=f1e43]:
+        - button "密钥管理" [ref=f1e44] [cursor=pointer]
+        - button "工具" [ref=f1e46] [cursor=pointer]
+        - button "文档" [ref=f1e48] [cursor=pointer]
+      - button "系统中心" [ref=f1e53] [cursor=pointer]
+    - button "主题：明亮" [ref=f1e56] [cursor=pointer]
+  - main [ref=f1e57]:
+    - generic [ref=f1e58]:
+      - text: › › › › › › › › › › › › › › › ›
+      - generic [ref=f1e59]:
+        - generic [ref=f1e60]:
+          - generic [ref=f1e61]:
+            - heading "内核运行配置" [level=2] [ref=f1e62]
+            - paragraph [ref=f1e63]: 由 Dashboard 生成运行时配置，不修改 CPA 内核源码。
+          - generic [ref=f1e64]:
+            - generic [ref=f1e65]: 已同步
+            - button "恢复推荐值" [ref=f1e66] [cursor=pointer]
+            - button "保存" [ref=f1e67] [cursor=pointer]
+            - button "保存并重启" [ref=f1e68] [cursor=pointer]
+        - generic [ref=f1e69]:
+          - strong [ref=f1e70]: 生效方式
+          - generic [ref=f1e71]: 保存会立即重建运行时 YAML；正在运行的代理需重启后使用新参数。
+        - generic [ref=f1e72]:
+          - article [ref=f1e346]:
+            - generic [ref=f1e347]:
+              - generic [ref=f1e348]: Routing
+              - heading "路由与会话" [level=3] [ref=f1e349]
+            - generic [ref=f1e350]:
+              - generic [ref=f1e351]:
+                - generic [ref=f1e352]:
+                  - generic [ref=f1e353]: 凭据选择策略
+                  - generic [ref=f1e354]: 多个可用凭据之间的基础分配方式。
+                - combobox "凭据选择策略" [ref=f1e355] [cursor=pointer]:
+                  - option "轮询分配" [selected]
+                  - option "优先填满"
+              - generic [ref=f1e356]:
+                - generic [ref=f1e357]:
+                  - generic [ref=f1e358]: Session 亲和路由
+                  - generic [ref=f1e359]: 同一会话优先固定到同一凭据，失效时自动切换。
+                - generic "Session 亲和路由" [ref=f1e360]:
+                  - checkbox "Session 亲和路由" [ref=f1e361] [cursor=pointer]
+              - generic [ref=f1e363]:
+                - generic [ref=f1e364]:
+                  - generic [ref=f1e365]: Session 绑定时长
+                  - generic [ref=f1e366]: 支持 30s、15m、1h 等 Go duration。
+                - textbox "Session 绑定时长" [ref=f1e367]:
+                  - /placeholder: 1h
+                  - text: 1h
+              - generic [ref=f1e368]:
+                - generic [ref=f1e369]:
+                  - generic [ref=f1e370]: 强制模型前缀
+                  - generic [ref=f1e371]: 无前缀请求只使用同样未设置前缀的凭据。
+                - generic "强制模型前缀" [ref=f1e372]:
+                  - checkbox "强制模型前缀" [ref=f1e373] [cursor=pointer]
+              - generic [ref=f1e375]:
+                - generic [ref=f1e376]:
+                  - generic [ref=f1e377]: Codex 身份隔离
+                  - generic [ref=f1e378]: 在亲和或优先填满路由下，按凭据隔离缓存与安装标识。
+                - generic "Codex 身份隔离" [ref=f1e379]:
+                  - checkbox "Codex 身份隔离" [ref=f1e380] [cursor=pointer]
+          - article [ref=f1e382]:
+            - generic [ref=f1e383]:
+              - generic [ref=f1e384]: Reliability
+              - heading "重试与冷却" [level=3] [ref=f1e385]
+            - generic [ref=f1e386]:
+              - generic [ref=f1e387]:
+                - generic [ref=f1e388]:
+                  - generic [ref=f1e389]: 单请求重试次数
+                  - generic [ref=f1e390]: 用于 403、408、500、502、503、504。
+                - generic [ref=f1e391]:
+                  - spinbutton "单请求重试次数" [ref=f1e392]: "3"
+                  - generic [ref=f1e393]: 次
+              - generic [ref=f1e394]:
+                - generic [ref=f1e395]:
+                  - generic [ref=f1e396]: 最多尝试凭据数
+                  - generic [ref=f1e397]: 0 表示尝试所有可用凭据。
+                - generic [ref=f1e398]:
+                  - spinbutton "最多尝试凭据数" [ref=f1e399]: "0"
+                  - generic [ref=f1e400]: 个
+              - generic [ref=f1e401]:
+                - generic [ref=f1e402]:
+                  - generic [ref=f1e403]: 冷却等待上限
+                  - generic [ref=f1e404]: 等待冷却凭据恢复的最长时间。
+                - generic [ref=f1e405]:
+                  - spinbutton "冷却等待上限" [ref=f1e406]: "30"
+                  - generic [ref=f1e407]: 秒
+              - generic [ref=f1e408]:
+                - generic [ref=f1e409]:
+                  - generic [ref=f1e410]: 禁用全局冷却
+                  - generic [ref=f1e411]: 关闭失败后的凭据与模型冷却调度。
+                - generic "禁用全局冷却" [ref=f1e412]:
+                  - checkbox "禁用全局冷却" [checked] [ref=f1e413] [cursor=pointer]
+              - generic [ref=f1e415]:
+                - generic [ref=f1e416]:
+                  - generic [ref=f1e417]: 持久化冷却状态
+                  - generic [ref=f1e418]: 重启后继续保留冷却状态。
+                - generic "持久化冷却状态" [ref=f1e419]:
+                  - checkbox "持久化冷却状态" [ref=f1e420] [cursor=pointer]
+              - generic [ref=f1e422]:
+                - generic [ref=f1e423]:
+                  - generic [ref=f1e424]: 临时错误冷却
+                  - generic [ref=f1e425]: 0 使用默认 60 秒，-1 禁用。
+                - generic [ref=f1e426]:
+                  - spinbutton "临时错误冷却" [ref=f1e427]: "0"
+                  - generic [ref=f1e428]: 秒
+          - article [ref=f1e429]:
+            - generic [ref=f1e430]:
+              - generic [ref=f1e431]: Service
+              - heading "配额与服务" [level=3] [ref=f1e432]
+            - generic [ref=f1e433]:
+              - generic [ref=f1e434]:
+                - generic [ref=f1e435]:
+                  - generic [ref=f1e436]: 额度耗尽切换项目
+                  - generic [ref=f1e437]: 当前项目无额度时尝试其他项目。
+                - generic "额度耗尽切换项目" [ref=f1e438]:
+                  - checkbox "额度耗尽切换项目" [checked] [ref=f1e439] [cursor=pointer]
+              - generic [ref=f1e441]:
+                - generic [ref=f1e442]:
+                  - generic [ref=f1e443]: 切换预览模型
+                  - generic [ref=f1e444]: 额度受限时允许切换预览模型。
+                - generic "切换预览模型" [ref=f1e445]:
+                  - checkbox "切换预览模型" [checked] [ref=f1e446] [cursor=pointer]
+              - generic [ref=f1e448]:
+                - generic [ref=f1e449]:
+                  - generic [ref=f1e450]: Antigravity 额度兜底
+                  - generic [ref=f1e451]: 免费层耗尽时允许 credits 兜底。
+                - generic "Antigravity 额度兜底" [ref=f1e452]:
+                  - checkbox "Antigravity 额度兜底" [checked] [ref=f1e453] [cursor=pointer]
+              - generic [ref=f1e455]:
+                - generic [ref=f1e456]:
+                  - generic [ref=f1e457]: OAuth 刷新并发
+                  - generic [ref=f1e458]: 刷新文件型 OAuth 凭据的工作线程数。
+                - generic [ref=f1e459]:
+                  - spinbutton "OAuth 刷新并发" [ref=f1e460]: "16"
+                  - generic [ref=f1e461]: 线程
+              - generic [ref=f1e462]:
+                - generic [ref=f1e463]:
+                  - generic [ref=f1e464]: 仅使用本地模型目录
+                  - generic [ref=f1e465]: 跳过远程模型目录刷新。
+                - generic "仅使用本地模型目录" [ref=f1e466]:
+                  - checkbox "仅使用本地模型目录" [checked] [ref=f1e467] [cursor=pointer]
+              - generic [ref=f1e469]:
+                - generic [ref=f1e470]:
+                  - generic [ref=f1e471]: WebSocket 认证
+                  - generic [ref=f1e472]: 为 /v1/ws 开启 API Key 校验。
+                - generic "WebSocket 认证" [ref=f1e473]:
+                  - checkbox "WebSocket 认证" [ref=f1e474] [cursor=pointer]
+              - generic [ref=f1e476]:
+                - generic [ref=f1e477]:
+                  - generic [ref=f1e478]: 商用精简模式
+                  - generic [ref=f1e479]: 关闭高开销 HTTP 中间件。
+                - generic "商用精简模式" [ref=f1e480]:
+                  - checkbox "商用精简模式" [ref=f1e481] [cursor=pointer]
+          - article [ref=f1e483]:
+            - generic [ref=f1e484]:
+              - generic [ref=f1e485]: Response
+              - heading "响应与媒体" [level=3] [ref=f1e486]
+            - generic [ref=f1e487]:
+              - generic [ref=f1e488]:
+                - generic [ref=f1e489]:
+                  - generic [ref=f1e490]: 图片生成策略
+                  - generic [ref=f1e491]: 控制图片工具注入及 /v1/images 接口。
+                - combobox "图片生成策略" [ref=f1e492] [cursor=pointer]:
+                  - option "允许并自动处理" [selected]
+                  - option "聊天接口禁用"
+                  - option "聊天接口原样转发"
+                  - option "全部禁用"
+              - generic [ref=f1e493]:
+                - generic [ref=f1e494]:
+                  - generic [ref=f1e495]: 视频凭据绑定时长
+                  - generic [ref=f1e496]: 视频任务 ID 与创建凭据保持绑定的时长。
+                - textbox "视频凭据绑定时长" [ref=f1e497]:
+                  - /placeholder: 3h
+                  - text: 3h
+              - generic [ref=f1e498]:
+                - generic [ref=f1e499]:
+                  - generic [ref=f1e500]: 透传上游响应头
+                  - generic [ref=f1e501]: 将过滤后的上游响应头返回客户端。
+                - generic "透传上游响应头" [ref=f1e502]:
+                  - checkbox "透传上游响应头" [ref=f1e503] [cursor=pointer]
+              - generic [ref=f1e505]:
+                - generic [ref=f1e506]:
+                  - generic [ref=f1e507]: 非流式保活间隔
+                  - generic [ref=f1e508]: 0 关闭。
+                - generic [ref=f1e509]:
+                  - spinbutton "非流式保活间隔" [ref=f1e510]: "0"
+                  - generic [ref=f1e511]: 秒
+              - generic [ref=f1e512]:
+                - generic [ref=f1e513]:
+                  - generic [ref=f1e514]: SSE 保活间隔
+                  - generic [ref=f1e515]: 0 关闭。
+                - generic [ref=f1e516]:
+                  - spinbutton "SSE 保活间隔" [ref=f1e517]: "0"
+                  - generic [ref=f1e518]: 秒
+              - generic [ref=f1e519]:
+                - generic [ref=f1e520]:
+                  - generic [ref=f1e521]: 流式启动重试
+                  - generic [ref=f1e522]: 仅在首字节前安全重试。
+                - generic [ref=f1e523]:
+                  - spinbutton "流式启动重试" [ref=f1e524]: "0"
+                  - generic [ref=f1e525]: 次
+          - article [ref=f1e526]:
+            - generic [ref=f1e527]:
+              - generic [ref=f1e528]: Observability
+              - heading "日志与统计" [level=3] [ref=f1e529]
+            - generic [ref=f1e530]:
+              - generic [ref=f1e531]:
+                - generic [ref=f1e532]:
+                  - generic [ref=f1e533]: 写入轮转日志
+                  - generic [ref=f1e534]: 让 CPA 将应用日志写入轮转文件。
+                - generic "写入轮转日志" [ref=f1e535]:
+                  - checkbox "写入轮转日志" [ref=f1e536] [cursor=pointer]
+              - generic [ref=f1e538]:
+                - generic [ref=f1e539]:
+                  - generic [ref=f1e540]: 日志总大小上限
+                  - generic [ref=f1e541]: 0 表示不限制。
+                - generic [ref=f1e542]:
+                  - spinbutton "日志总大小上限" [ref=f1e543]: "0"
+                  - generic [ref=f1e544]: MB
+              - generic [ref=f1e545]:
+                - generic [ref=f1e546]:
+                  - generic [ref=f1e547]: 错误日志保留数
+                  - generic [ref=f1e548]: 请求日志关闭时保留的错误日志数量。
+                - generic [ref=f1e549]:
+                  - spinbutton "错误日志保留数" [ref=f1e550]: "10"
+                  - generic [ref=f1e551]: 份
+              - generic [ref=f1e552]:
+                - generic [ref=f1e553]:
+                  - generic [ref=f1e554]: 内存用量统计
+                  - generic [ref=f1e555]: 启用内核内存中的请求与 Token 汇总。
+                - generic "内存用量统计" [ref=f1e556]:
+                  - checkbox "内存用量统计" [ref=f1e557] [cursor=pointer]
+              - generic [ref=f1e559]:
+                - generic [ref=f1e560]:
+                  - generic [ref=f1e561]: 用量队列保留
+                  - generic [ref=f1e562]: Management API 用量队列保留时间。
+                - generic [ref=f1e563]:
+                  - spinbutton "用量队列保留" [ref=f1e564]: "60"
+                  - generic [ref=f1e565]: 秒

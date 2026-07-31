@@ -1,0 +1,108 @@
+- generic [ref=f1e2]:
+  - complementary [ref=f1e3]:
+    - generic [ref=f1e4]:
+      - button "展开侧栏" [ref=f1e5] [cursor=pointer]
+      - generic:
+        - generic: CLIProxyAPI
+        - generic: CLIProxyAPI Codex 控制面板
+    - navigation [ref=f1e10]:
+      - generic [ref=f1e13]:
+        - button "账号" [ref=f1e14] [cursor=pointer]
+        - button "聊天" [ref=f1e16] [cursor=pointer]
+        - button "请求" [ref=f1e18] [cursor=pointer]
+        - button "Token 用量" [ref=f1e20] [cursor=pointer]
+        - button "客户端" [ref=f1e22] [cursor=pointer]
+        - button "设置" [ref=f1e24] [cursor=pointer]
+      - generic [ref=f1e28]:
+        - button "提供方" [ref=f1e29] [cursor=pointer]
+        - button "图像/视频" [ref=f1e31] [cursor=pointer]
+        - button "聚合" [ref=f1e33] [cursor=pointer]
+        - button "映射" [ref=f1e35] [cursor=pointer]
+        - button "接入" [ref=f1e37] [cursor=pointer]
+        - button "OAuth" [ref=f1e39] [cursor=pointer]
+      - generic [ref=f1e43]:
+        - button "密钥管理" [ref=f1e44] [cursor=pointer]
+        - button "工具" [ref=f1e46] [cursor=pointer]
+        - button "文档" [ref=f1e48] [cursor=pointer]
+      - button "系统中心" [ref=f1e53] [cursor=pointer]
+    - button "主题：明亮" [ref=f1e56] [cursor=pointer]
+  - main [ref=f1e57]:
+    - generic [ref=f1e59]:
+      - generic [ref=f1e60]:
+        - generic [ref=f1e61]:
+          - heading "系统中心" [level=2] [ref=f1e62]
+          - paragraph [ref=f1e63]: 统一管理 CPA 运行策略、入口控制、存储部署与面板维护。
+        - button "刷新" [ref=f1e65] [cursor=pointer]
+      - generic [ref=f1e66]:
+        - article [ref=f1e67]:
+          - generic [ref=f1e68]:
+            - generic [ref=f1e69]: CPA Runtime
+            - heading "内核运行配置" [level=3] [ref=f1e70]
+            - paragraph [ref=f1e71]: 路由与 Session、重试与冷却、配额与 OAuth、图片视频与保活、日志统计、WebSocket 与运行模式。
+            - generic "配置范围" [ref=f1e72]:
+              - generic [ref=f1e73]: 路由与 Session
+              - generic [ref=f1e74]: 重试与冷却
+              - generic [ref=f1e75]: 配额与 OAuth
+              - generic [ref=f1e76]: 媒体与保活
+              - generic [ref=f1e77]: 日志与统计
+              - generic [ref=f1e78]: 服务模式
+          - button "打开全部配置" [ref=f1e79] [cursor=pointer]
+        - article [ref=f1e80]:
+          - generic [ref=f1e82]:
+            - generic [ref=f1e83]: Operations
+            - heading "运行与控制" [level=3] [ref=f1e84]
+            - paragraph [ref=f1e85]: 把常用运维入口集中在同一栏目，减少来回切换。
+          - list [ref=f1e86]:
+            - listitem [ref=f1e87] [cursor=pointer]:
+              - generic [ref=f1e88]: Home 控制面
+              - generic [ref=f1e89]: 远程控制面入口与访问策略
+            - listitem [ref=f1e90] [cursor=pointer]:
+              - generic [ref=f1e91]: 存储后端
+              - generic [ref=f1e92]: 持久化存储与数据落盘位置
+            - listitem [ref=f1e93] [cursor=pointer]:
+              - generic [ref=f1e94]: AMP 集成
+              - generic [ref=f1e95]: 上游 AMP 与模型映射
+            - listitem [ref=f1e96] [cursor=pointer]:
+              - generic [ref=f1e97]: 请求伪装
+              - generic [ref=f1e98]: 客户端请求特征与伪装策略
+            - listitem [ref=f1e99] [cursor=pointer]:
+              - generic [ref=f1e100]: 冷却状态
+              - generic [ref=f1e101]: 凭据/模型冷却与恢复监控
+            - listitem [ref=f1e102] [cursor=pointer]:
+              - generic [ref=f1e103]: 模型代理
+              - generic [ref=f1e104]: 默认出口代理与模型路由
+        - generic [ref=f1e105]:
+          - article [ref=f1e106]:
+            - generic [ref=f1e108]:
+              - generic [ref=f1e109]: Access
+              - heading "网络与入口" [level=3] [ref=f1e110]
+              - paragraph [ref=f1e111]: 访问范围、端口与终端入口。
+            - generic [ref=f1e112]:
+              - button "网络接入 ›" [ref=f1e113] [cursor=pointer]
+              - button "端口放行 ›" [ref=f1e114] [cursor=pointer]
+              - button "终端 ›" [ref=f1e115] [cursor=pointer]
+          - article [ref=f1e116]:
+            - generic [ref=f1e118]:
+              - generic [ref=f1e119]: Models
+              - heading "模型与诊断" [level=3] [ref=f1e120]
+              - paragraph [ref=f1e121]: 统计与思考推理相关配置。
+            - generic [ref=f1e122]:
+              - button "模型统计 ›" [ref=f1e123] [cursor=pointer]
+              - button "思考/推理配置 ›" [ref=f1e124] [cursor=pointer]
+          - article [ref=f1e125]:
+            - generic [ref=f1e127]:
+              - generic [ref=f1e128]: Deploy
+              - heading "部署与数据" [level=3] [ref=f1e129]
+              - paragraph [ref=f1e130]: 部署方式与配置迁移。
+            - generic [ref=f1e131]:
+              - button "Docker ›" [ref=f1e132] [cursor=pointer]
+              - button "导入导出 ›" [ref=f1e133] [cursor=pointer]
+          - article [ref=f1e134]:
+            - generic [ref=f1e136]:
+              - generic [ref=f1e137]: Panel
+              - heading "面板与维护" [level=3] [ref=f1e138]
+              - paragraph [ref=f1e139]: 桌面面板与日常工具。
+            - generic [ref=f1e140]:
+              - button "面板设置 ›" [ref=f1e141] [cursor=pointer]
+              - button "工具箱 ›" [ref=f1e142] [cursor=pointer]
+              - button "接口文档 ›" [ref=f1e143] [cursor=pointer]

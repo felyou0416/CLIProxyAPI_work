@@ -664,6 +664,10 @@ def handle_get(handler, parsed):
             'streaming_keepalive_seconds': state.get('streaming_keepalive_seconds', 0),
             'streaming_bootstrap_retries': state.get('streaming_bootstrap_retries', 0),
             'codex_identity_confuse': state.get('codex_identity_confuse', False),
+            'codex_disable_cloaking': state.get('codex_disable_cloaking', False),
+            'codex_optimize_multi_agent_v2': state.get('codex_optimize_multi_agent_v2', False),
+            'claude_code_disable_cloaking_model_list': state.get('claude_code_disable_cloaking_model_list', False),
+            'xai_inject_x_search': state.get('xai_inject_x_search', False),
         }})
         return True
     if parsed.path == '/api/cloaking-config':

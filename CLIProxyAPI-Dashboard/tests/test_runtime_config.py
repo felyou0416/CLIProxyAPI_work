@@ -14,7 +14,13 @@ import backend.auth as auth
 
 class RuntimeCoreOptionsTests(unittest.TestCase):
     def test_runtime_options_are_rendered_from_dashboard_state(self):
-        rendered = auth.rewrite_core_runtime_options('host: "127.0.0.1"\ncodex:\n  identity-confuse: false\n', {
+        rendered = auth.rewrite_core_runtime_options(
+            'host: "127.0.0.1"\n'
+            'codex:\n'
+            '  identity-confuse: false\n'
+            '  live-media-relay:\n'
+            '    enabled: true\n'
+            '    max-sessions: 12\n', {
             'force_model_prefix': True, 'passthrough_headers': True, 'request_retry': 5,
             'max_retry_credentials': 2, 'max_retry_interval': 45, 'save_cooldown_status': True,
             'transient_error_cooldown_seconds': -1, 'video_result_auth_cache_ttl': '4h',
@@ -23,7 +29,10 @@ class RuntimeCoreOptionsTests(unittest.TestCase):
             'nonstream_keepalive_interval': 10, 'quota_switch_project': False,
             'quota_switch_preview_model': True, 'quota_antigravity_credits': False,
             'streaming_keepalive_seconds': 15, 'streaming_bootstrap_retries': 2,
-            'codex_identity_confuse': True,
+            'codex_identity_confuse': True, 'codex_disable_cloaking': True,
+            'codex_optimize_multi_agent_v2': True,
+            'claude_code_disable_cloaking_model_list': True,
+            'xai_inject_x_search': True,
         })
         self.assertIn('force-model-prefix: true', rendered)
         self.assertIn('request-retry: 5', rendered)
@@ -33,7 +42,43 @@ class RuntimeCoreOptionsTests(unittest.TestCase):
         self.assertIn('quota-exceeded:\n  switch-project: false', rendered)
         self.assertIn('streaming:\n  keepalive-seconds: 15\n  bootstrap-retries: 2', rendered)
         self.assertIn('codex:\n  identity-confuse: true', rendered)
+        self.assertIn('  disable-codex-cloaking: true', rendered)
+        self.assertIn('  optimize-multi-agent-v2: true', rendered)
+        self.assertIn('  live-media-relay:\n    enabled: true\n    max-sessions: 12', rendered)
+        self.assertIn('claude-code:\n  disable-cloaking-model-list: true', rendered)
+        self.assertIn('xai:\n  inject-x-search: true', rendered)
         self.assertEqual(rendered.count('\ncodex:\n'), 1)
+
+    def test_weighted_round_robin_is_rendered(self):
+        rendered = auth.rewrite_routing_config('', strategy='weighted-round-robin')
+        self.assertIn('strategy: "weighted-round-robin"', rendered)
+
+    def test_auth_pool_sync_rebuilds_only_after_a_change(self):
+        signature = (('codex/account.json', 1, 10),)
+        with patch.object(auth, '_auth_pool_signature', return_value=signature), \
+             patch.object(auth, 'rebuild_runtime_config_from_state', return_value={'rebuilt': True, 'copied_auth_count': 1}) as rebuild:
+            first = auth.sync_auth_pool_if_changed(None)
+            second = auth.sync_auth_pool_if_changed(first['signature'])
+
+        self.assertTrue(first['changed'])
+        self.assertFalse(second['changed'])
+        rebuild.assert_called_once_with()
+
+    def test_empty_auth_pool_removes_stale_runtime_credentials(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            pool = root / 'pool'
+            active = root / 'active'
+            pool.mkdir()
+            active.mkdir()
+            stale = active / 'stale.json'
+            stale.write_text('{"type":"codex"}', encoding='utf-8')
+            with patch.object(auth, 'POOL_AUTH_DIR', pool), patch.object(auth, 'ACTIVE_AUTH_DIR', active):
+                result = auth.rebuild_runtime_config_from_state({})
+
+        self.assertEqual(result['reason'], 'no_auth_files')
+        self.assertEqual(result['removed_active_auth_count'], 1)
+        self.assertFalse(stale.exists())
 
     def test_passthrough_image_mode_is_supported(self):
         rendered = auth.rewrite_disable_image_generation('disable-image-generation: false\n', 'passthrough')

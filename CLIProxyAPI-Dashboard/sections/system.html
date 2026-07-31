@@ -2,68 +2,126 @@
   <div class="panel-head system-hub-head">
     <div>
       <h2 class="section-title" data-i18n="section.systemTitle">系统中心</h2>
-      <p class="system-hub-subtitle">集中管理 CPA 运行参数、网络入口、部署与诊断工具。</p>
+      <p class="system-hub-subtitle">统一管理 CPA 运行策略、入口控制、存储部署与面板维护。</p>
     </div>
     <div class="action-row toolbar-scroll">
       <button class="secondary" type="button" onclick="refreshStatus()" data-i18n="btn.refresh">刷新</button>
     </div>
   </div>
 
-  <div class="system-hub-grid">
+  <div class="system-hub-stack">
     <article class="system-runtime-feature">
       <div class="system-runtime-copy">
         <span class="system-card-kicker">CPA Runtime</span>
         <h3>内核运行配置</h3>
         <p>路由与 Session、重试与冷却、配额与 OAuth、图片视频与保活、日志统计、WebSocket 与运行模式。</p>
         <div class="system-runtime-tags" aria-label="配置范围">
-          <span>路由与 Session</span><span>重试与冷却</span><span>配额与 OAuth</span><span>媒体与保活</span><span>日志与统计</span><span>服务模式</span>
+          <span>路由与 Session</span>
+          <span>重试与冷却</span>
+          <span>配额与 OAuth</span>
+          <span>媒体与保活</span>
+          <span>日志与统计</span>
+          <span>协议兼容</span>
         </div>
       </div>
       <button class="primary" type="button" onclick="openSystemSection('advanced-config')">打开全部配置</button>
     </article>
 
-    <article class="system-hub-card primary-card">
-      <h3>网络与入口</h3>
-      <p>控制访问范围、端口与系统网络接入。</p>
-      <div class="system-link-grid">
-        <button type="button" onclick="openSystemSection('network-access')">网络接入</button>
-        <button type="button" onclick="openSystemSection('firewall-access')">端口放行</button>
-        <button type="button" onclick="openSystemSection('home-config')">Home 控制面</button>
-        <button type="button" onclick="openSystemSection('terminals')">终端</button>
+    <article class="system-hub-card system-hub-card-main">
+      <div class="system-card-head">
+        <div>
+          <span class="system-card-eyebrow">Operations</span>
+          <h3>运行与控制</h3>
+          <p>把常用运维入口集中在同一栏目，减少来回切换。</p>
+        </div>
+      </div>
+
+      <div class="system-ops-grid">
+        <button type="button" class="system-ops-item" onclick="openSystemSection('home-config')">
+          <span class="system-ops-title">Home 控制面</span>
+          <span class="system-ops-desc">远程控制面入口与访问策略</span>
+        </button>
+        <button type="button" class="system-ops-item" onclick="openSystemSection('storage-config')">
+          <span class="system-ops-title">存储后端</span>
+          <span class="system-ops-desc">持久化存储与数据落盘位置</span>
+        </button>
+        <button type="button" class="system-ops-item" onclick="openSystemSection('amp-config')">
+          <span class="system-ops-title">AMP 集成</span>
+          <span class="system-ops-desc">上游 AMP 与模型映射</span>
+        </button>
+        <button type="button" class="system-ops-item" onclick="openSystemSection('cloaking-config')">
+          <span class="system-ops-title">请求伪装</span>
+          <span class="system-ops-desc">客户端请求特征与伪装策略</span>
+        </button>
+        <button type="button" class="system-ops-item" onclick="openSystemSection('cooldown')">
+          <span class="system-ops-title">冷却状态</span>
+          <span class="system-ops-desc">凭据/模型冷却与恢复监控</span>
+        </button>
+        <button type="button" class="system-ops-item" onclick="openSystemSection('model-proxy')">
+          <span class="system-ops-title">模型代理</span>
+          <span class="system-ops-desc">默认出口代理与模型路由</span>
+        </button>
       </div>
     </article>
 
-    <article class="system-hub-card">
-      <h3>路由与代理</h3>
-      <p>管理模型出口、请求策略与运行状态。</p>
-      <div class="system-link-grid">
-        <button type="button" onclick="openSystemSection('model-proxy')">模型代理</button>
-        <button type="button" onclick="openSystemSection('cloaking-config')">请求伪装</button>
-        <button type="button" onclick="openSystemSection('amp-config')">AMP 集成</button>
-        <button type="button" onclick="openSystemSection('cooldown')">冷却状态</button>
-        <button type="button" onclick="openSystemSection('model-stats')">模型统计</button>
-        <button type="button" onclick="openSystemSection('model-thinking')">模型思考/推理配置</button>
-      </div>
-    </article>
+    <div class="system-hub-grid">
+      <article class="system-hub-card">
+        <div class="system-card-head compact">
+          <div>
+            <span class="system-card-eyebrow">Access</span>
+            <h3>网络与入口</h3>
+            <p>访问范围、端口与终端入口。</p>
+          </div>
+        </div>
+        <div class="system-link-grid">
+          <button type="button" onclick="openSystemSection('network-access')">网络接入</button>
+          <button type="button" onclick="openSystemSection('firewall-access')">端口放行</button>
+          <button type="button" onclick="openSystemSection('terminals')">终端</button>
+        </div>
+      </article>
 
-    <article class="system-hub-card">
-      <h3>部署与数据</h3>
-      <p>管理部署方式、持久化后端和配置迁移。</p>
-      <div class="system-link-grid">
-        <button type="button" onclick="openSystemSection('docker-deploy')">Docker</button>
-        <button type="button" onclick="openSystemSection('storage-config')">存储后端</button>
-        <button type="button" onclick="openSystemSection('data-transfer')">导入导出</button>
-      </div>
-    </article>
+      <article class="system-hub-card">
+        <div class="system-card-head compact">
+          <div>
+            <span class="system-card-eyebrow">Models</span>
+            <h3>模型与诊断</h3>
+            <p>统计与思考推理相关配置。</p>
+          </div>
+        </div>
+        <div class="system-link-grid">
+          <button type="button" onclick="openSystemSection('model-stats')">模型统计</button>
+          <button type="button" onclick="openSystemSection('model-thinking')">思考/推理配置</button>
+        </div>
+      </article>
 
-    <article class="system-hub-card">
-      <h3>面板与维护</h3>
-      <p>调整桌面面板行为并进入日常维护工具。</p>
-      <div class="system-link-grid">
-        <button type="button" onclick="openSystemSection('settings')">面板设置</button>
-        <button type="button" onclick="openSystemSection('tools')">工具箱</button>
-        <button type="button" onclick="openSystemSection('doc')">接口文档</button>
-      </div>
-    </article>
+      <article class="system-hub-card">
+        <div class="system-card-head compact">
+          <div>
+            <span class="system-card-eyebrow">Deploy</span>
+            <h3>部署与数据</h3>
+            <p>部署方式与配置迁移。</p>
+          </div>
+        </div>
+        <div class="system-link-grid">
+          <button type="button" onclick="openSystemSection('docker-deploy')">Docker</button>
+          <button type="button" onclick="openSystemSection('data-transfer')">导入导出</button>
+        </div>
+      </article>
+
+      <article class="system-hub-card">
+        <div class="system-card-head compact">
+          <div>
+            <span class="system-card-eyebrow">Panel</span>
+            <h3>面板与维护</h3>
+            <p>桌面面板与日常工具。</p>
+          </div>
+        </div>
+        <div class="system-link-grid">
+          <button type="button" onclick="openSystemSection('settings')">面板设置</button>
+          <button type="button" onclick="openSystemSection('tools')">工具箱</button>
+          <button type="button" onclick="openSystemSection('doc')">接口文档</button>
+        </div>
+      </article>
+    </div>
   </div>
 </section>

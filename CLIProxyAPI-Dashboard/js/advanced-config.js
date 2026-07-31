@@ -4,7 +4,9 @@ let advancedConfigDirty = false;
 
 const advancedConfigDefaults = Object.freeze({
   core_routing_strategy: 'round-robin', session_affinity_enabled: false, session_affinity_ttl: '1h',
-  force_model_prefix: false, codex_identity_confuse: false, request_retry: 3,
+  force_model_prefix: false, codex_identity_confuse: false, codex_disable_cloaking: false,
+  codex_optimize_multi_agent_v2: false, claude_code_disable_cloaking_model_list: false,
+  xai_inject_x_search: false, request_retry: 3,
   max_retry_credentials: 0, max_retry_interval: 30, disable_cooling: false,
   save_cooldown_status: false, transient_error_cooldown_seconds: 0,
   quota_switch_project: true, quota_switch_preview_model: true, quota_antigravity_credits: true,
@@ -64,7 +66,7 @@ function renderAdvancedConfig() {
   const content = document.getElementById('advanced-config-content'); if (!content) return;
   const d = { ...advancedConfigDefaults, ...advancedConfigData };
   const routing = [
-    acSelect('core-routing-strategy', '凭据选择策略', d.core_routing_strategy, {'round-robin':'轮询分配','fill-first':'优先填满'}, '多个可用凭据之间的基础分配方式。'),
+    acSelect('core-routing-strategy', '凭据选择策略', d.core_routing_strategy, {'round-robin':'轮询分配','weighted-round-robin':'加权轮询','fill-first':'优先填满'}, '多个可用凭据之间的基础分配方式；加权轮询读取凭据 weight。'),
     acToggle('session-affinity-enabled', 'Session 亲和路由', d.session_affinity_enabled, '同一会话优先固定到同一凭据，失效时自动切换。'),
     acText('session-affinity-ttl', 'Session 绑定时长', d.session_affinity_ttl, '1h', '支持 30s、15m、1h 等 Go duration。'),
     acToggle('force-model-prefix', '强制模型前缀', d.force_model_prefix, '无前缀请求只使用同样未设置前缀的凭据。'),
@@ -95,6 +97,12 @@ function renderAdvancedConfig() {
     acNumber('streaming-keepalive-seconds','SSE 保活间隔',d.streaming_keepalive_seconds,0,3600,'秒','0 关闭。'),
     acNumber('streaming-bootstrap-retries','流式启动重试',d.streaming_bootstrap_retries,0,10,'次','仅在首字节前安全重试。'),
   ].join('');
+  const compatibility = [
+    acToggle('codex-disable-cloaking','禁用 Codex 标头伪装',d.codex_disable_cloaking,'不再强制官方 Codex User-Agent 与 Originator，仅在上游需要原始标头时开启。'),
+    acToggle('codex-optimize-multi-agent-v2','Codex 多代理 v2 优化',d.codex_optimize_multi_agent_v2,'为 Codex Desktop 与 codex-tui 刷新代理模型信息并规范化 agent_message。'),
+    acToggle('claude-code-disable-cloaking-model-list','Claude 模型列表使用原名',d.claude_code_disable_cloaking_model_list,'Anthropic 模型列表返回原始模型 ID，不再使用伪装 ID。'),
+    acToggle('xai-inject-x-search','自动注入 xAI 搜索',d.xai_inject_x_search,'请求未声明时注入原生 x_search，并同步 allowed_tools。'),
+  ].join('');
   const logging = [
     acToggle('logging-to-file','写入轮转日志',d.logging_to_file,'让 CPA 将应用日志写入轮转文件。'),
     acNumber('logs-max-total-size-mb','日志总大小上限',d.logs_max_total_size_mb,0,102400,'MB','0 表示不限制。'),
@@ -102,7 +110,7 @@ function renderAdvancedConfig() {
     acToggle('usage-statistics-enabled','内存用量统计',d.usage_statistics_enabled,'启用内核内存中的请求与 Token 汇总。'),
     acNumber('usage-queue-retention-seconds','用量队列保留',d.usage_queue_retention_seconds,1,3600,'秒','Management API 用量队列保留时间。'),
   ].join('');
-  content.innerHTML = [acCard('路由与会话','Routing',routing),acCard('重试与冷却','Reliability',retry),acCard('配额与服务','Service',service),acCard('响应与媒体','Response',response),acCard('日志与统计','Observability',logging,true)].join('');
+  content.innerHTML = [acCard('路由与会话','Routing',routing),acCard('重试与冷却','Reliability',retry),acCard('配额与服务','Service',service),acCard('响应与媒体','Response',response),acCard('协议兼容','Compatibility',compatibility),acCard('日志与统计','Observability',logging,true)].join('');
   content.querySelectorAll('input, select').forEach(el => { el.addEventListener('input', markAdvancedConfigDirty); el.addEventListener('change', markAdvancedConfigDirty); });
 }
 
@@ -111,7 +119,7 @@ function acInteger(id) { const v=Number.parseInt(document.getElementById(id)?.va
 function collectAdvancedConfig() {
   const checked=id=>!!document.getElementById(id)?.checked;
   return {
-    core_routing_strategy:document.getElementById('core-routing-strategy')?.value||'round-robin', session_affinity_enabled:checked('session-affinity-enabled'), session_affinity_ttl:document.getElementById('session-affinity-ttl')?.value?.trim()||'1h', force_model_prefix:checked('force-model-prefix'), codex_identity_confuse:checked('codex-identity-confuse'), request_retry:acInteger('request-retry'), max_retry_credentials:acInteger('max-retry-credentials'), max_retry_interval:acInteger('max-retry-interval'), disable_cooling:checked('disable-cooling'), save_cooldown_status:checked('save-cooldown-status'), transient_error_cooldown_seconds:acInteger('transient-error-cooldown-seconds'), quota_switch_project:checked('quota-switch-project'), quota_switch_preview_model:checked('quota-switch-preview-model'), quota_antigravity_credits:checked('quota-antigravity-credits'), auth_auto_refresh_workers:acInteger('auth-auto-refresh-workers'), local_model:checked('local-model'), ws_auth:checked('ws-auth'), commercial_mode:checked('commercial-mode'), disable_image_generation:document.getElementById('disable-image-generation')?.value||'off', video_result_auth_cache_ttl:document.getElementById('video-result-auth-cache-ttl')?.value?.trim()||'3h', passthrough_headers:checked('passthrough-headers'), nonstream_keepalive_interval:acInteger('nonstream-keepalive-interval'), streaming_keepalive_seconds:acInteger('streaming-keepalive-seconds'), streaming_bootstrap_retries:acInteger('streaming-bootstrap-retries'), logging_to_file:checked('logging-to-file'), logs_max_total_size_mb:acInteger('logs-max-total-size-mb'), error_logs_max_files:acInteger('error-logs-max-files'), usage_statistics_enabled:checked('usage-statistics-enabled'), usage_queue_retention_seconds:acInteger('usage-queue-retention-seconds'),
+    core_routing_strategy:document.getElementById('core-routing-strategy')?.value||'round-robin', session_affinity_enabled:checked('session-affinity-enabled'), session_affinity_ttl:document.getElementById('session-affinity-ttl')?.value?.trim()||'1h', force_model_prefix:checked('force-model-prefix'), codex_identity_confuse:checked('codex-identity-confuse'), codex_disable_cloaking:checked('codex-disable-cloaking'), codex_optimize_multi_agent_v2:checked('codex-optimize-multi-agent-v2'), claude_code_disable_cloaking_model_list:checked('claude-code-disable-cloaking-model-list'), xai_inject_x_search:checked('xai-inject-x-search'), request_retry:acInteger('request-retry'), max_retry_credentials:acInteger('max-retry-credentials'), max_retry_interval:acInteger('max-retry-interval'), disable_cooling:checked('disable-cooling'), save_cooldown_status:checked('save-cooldown-status'), transient_error_cooldown_seconds:acInteger('transient-error-cooldown-seconds'), quota_switch_project:checked('quota-switch-project'), quota_switch_preview_model:checked('quota-switch-preview-model'), quota_antigravity_credits:checked('quota-antigravity-credits'), auth_auto_refresh_workers:acInteger('auth-auto-refresh-workers'), local_model:checked('local-model'), ws_auth:checked('ws-auth'), commercial_mode:checked('commercial-mode'), disable_image_generation:document.getElementById('disable-image-generation')?.value||'off', video_result_auth_cache_ttl:document.getElementById('video-result-auth-cache-ttl')?.value?.trim()||'3h', passthrough_headers:checked('passthrough-headers'), nonstream_keepalive_interval:acInteger('nonstream-keepalive-interval'), streaming_keepalive_seconds:acInteger('streaming-keepalive-seconds'), streaming_bootstrap_retries:acInteger('streaming-bootstrap-retries'), logging_to_file:checked('logging-to-file'), logs_max_total_size_mb:acInteger('logs-max-total-size-mb'), error_logs_max_files:acInteger('error-logs-max-files'), usage_statistics_enabled:checked('usage-statistics-enabled'), usage_queue_retention_seconds:acInteger('usage-queue-retention-seconds'),
   };
 }
 function setAdvancedConfigBusy(busy) { ['advanced-config-save','advanced-config-save-restart'].forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=busy;}); }

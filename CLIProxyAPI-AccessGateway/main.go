@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -39,6 +41,7 @@ type gatewayConfig struct {
 }
 
 type gateway struct {
+	mu      sync.RWMutex
 	allowed map[string]struct{}
 	proxy   *httputil.ReverseProxy
 }
@@ -62,6 +65,9 @@ func main() {
 	}
 
 	handler := newGateway(target, allowed)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go handler.watchAllowedModels(ctx, *configPath, time.Second)
 	server := &http.Server{
 		Addr:              *listen,
 		Handler:           handler,
@@ -117,6 +123,7 @@ func loadAllowedModels(path string) (map[string]struct{}, error) {
 }
 
 func newGateway(target *url.URL, allowed map[string]struct{}) *gateway {
+	handler := &gateway{allowed: allowed}
 	reverseProxy := httputil.NewSingleHostReverseProxy(target)
 	originalDirector := reverseProxy.Director
 	reverseProxy.Director = func(req *http.Request) {
@@ -127,9 +134,61 @@ func newGateway(target *url.URL, allowed map[string]struct{}) *gateway {
 		if !isModelsPath(resp.Request.URL.Path) || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return nil
 		}
-		return filterModelList(resp, allowed)
+		return filterModelList(resp, handler.allowedModels())
 	}
-	return &gateway{allowed: allowed, proxy: reverseProxy}
+	handler.proxy = reverseProxy
+	return handler
+}
+
+func (g *gateway) allowedModels() map[string]struct{} {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.allowed
+}
+
+func (g *gateway) replaceAllowedModels(allowed map[string]struct{}) {
+	g.mu.Lock()
+	g.allowed = allowed
+	g.mu.Unlock()
+}
+
+func (g *gateway) reloadAllowedModels(configPath string) error {
+	allowed, err := loadAllowedModels(configPath)
+	if err != nil {
+		return err
+	}
+	g.replaceAllowedModels(allowed)
+	return nil
+}
+
+func (g *gateway) watchAllowedModels(ctx context.Context, configPath string, interval time.Duration) {
+	lastModTime := int64(0)
+	lastSize := int64(-1)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			info, err := os.Stat(configPath)
+			if err != nil {
+				log.Printf("access gateway config watch: %v", err)
+				continue
+			}
+			modTime := info.ModTime().UnixNano()
+			if modTime == lastModTime && info.Size() == lastSize {
+				continue
+			}
+			if errReload := g.reloadAllowedModels(configPath); errReload != nil {
+				log.Printf("access gateway config reload: %v", errReload)
+				continue
+			}
+			lastModTime = modTime
+			lastSize = info.Size()
+			log.Printf("access gateway model allowlist hot-reloaded: public_models=%d", len(g.allowedModels()))
+		}
+	}
 }
 
 func (g *gateway) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -156,7 +215,7 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (g *gateway) isAllowed(model string) bool {
-	_, ok := g.allowed[normalizeModel(model)]
+	_, ok := g.allowedModels()[normalizeModel(model)]
 	return ok
 }
 

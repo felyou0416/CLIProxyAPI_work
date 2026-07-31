@@ -9,6 +9,7 @@ from backend.routes.get_routes import handle_get
 from backend.routes.post_routes import handle_post
 from backend.routes.helpers import send_json
 from backend.request_metrics import start_observability_refresh_thread
+from backend.auth import start_auth_pool_sync_thread
 from backend.runtime_env import dashboard_auto_start_enabled
 from backend.access_auth import auth_required, validate_token, extract_token_from_handler
 
@@ -209,6 +210,8 @@ def main():
     # on RelayX / MediaProxy startup (which can take tens of seconds at boot).
     start_observability_refresh_thread()
     print('Observability cache refresher started')
+    start_auth_pool_sync_thread()
+    print('Auth pool hot-sync started')
     if dashboard_auto_start_enabled():
         print('Auto start RelayX scheduled in background')
         threading.Thread(target=_auto_start_proxy_async, name='auto-start-proxy', daemon=True).start()

@@ -125,3 +125,22 @@ func TestGatewayRejectsRawGeminiPathAndWebSockets(t *testing.T) {
 		t.Fatalf("websocket status = %d, want 426", recorder.Code)
 	}
 }
+
+func TestGatewayReloadsAllowedModelsWithoutRestart(t *testing.T) {
+	configPath := t.TempDir() + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte("oauth-model-alias:\n  codex:\n    - name: raw-a\n      alias: public-a\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target, _ := url.Parse("http://127.0.0.1:1")
+	handler := newGateway(target, map[string]struct{}{"public-a": {}})
+
+	if err := os.WriteFile(configPath, []byte("oauth-model-alias:\n  codex:\n    - name: raw-b\n      alias: public-b\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.reloadAllowedModels(configPath); err != nil {
+		t.Fatal(err)
+	}
+	if handler.isAllowed("public-a") || !handler.isAllowed("public-b") {
+		t.Fatal("gateway did not atomically replace the model allowlist")
+	}
+}

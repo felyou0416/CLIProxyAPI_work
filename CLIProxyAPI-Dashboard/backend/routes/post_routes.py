@@ -169,11 +169,9 @@ def handle_post(handler, parsed, data):
             else:
                 auth_info = create_manual_auth_entry(base_url, models[0] if models else model, api_key, provider, remark)
 
-            rebuild = {'rebuilt': False, 'reason': 'not_requested'}
-            proxy_restart = {'ok': False, 'reason': 'not_requested'}
+            state = load_state()
             selected_auth_refs = []
             if select_after_create:
-                state = load_state()
                 selected_auth_refs = [str(ref or '').strip() for ref in (state.get('selected_auth_refs') or []) if str(ref or '').strip()]
                 auth_items = list_auth_files()
                 created_path = str(auth_info.get('path') or '').strip()
@@ -197,9 +195,9 @@ def handle_post(handler, parsed, data):
                 state['selected_auth_ref'] = state['selected_auth_refs'][0] if state['selected_auth_refs'] else None
                 state['selected_auth'] = state['selected_auths'][0] if state['selected_auths'] else None
                 save_state(state)
-                rebuild = rebuild_runtime_config_from_state(state)
-                if test_after_create and rebuild.get('rebuilt') and current_status().get('proxy_running'):
-                    proxy_restart = restart_proxy()
+            rebuild = rebuild_runtime_config_from_state(state)
+            proxy_running = bool(current_status().get('proxy_running'))
+            runtime_hot_reloaded = bool(rebuild.get('rebuilt') and proxy_running)
 
             test_result = {'ok': False, 'reason': 'not_requested'}
             call_models = auth_info.get('models') if isinstance(auth_info.get('models'), list) else []
@@ -208,7 +206,7 @@ def handle_post(handler, parsed, data):
                 value = str(item.get('alias') if isinstance(item, dict) else item or '').strip()
                 if value and value not in call_ids:
                     call_ids.append(value)
-            if test_after_create and call_ids:
+            if test_after_create and call_ids and rebuild.get('rebuilt'):
                 test_result = queue_provider_model_tests(call_ids)
 
             safe_auth = dict(auth_info)
@@ -218,8 +216,9 @@ def handle_post(handler, parsed, data):
                 'message': 'Manual auth entry created successfully.',
                 'auth': safe_auth,
                 'runtime_rebuilt': bool(rebuild.get('rebuilt')),
+                'runtime_hot_reloaded': runtime_hot_reloaded,
                 'runtime_validation': rebuild.get('validation'),
-                'proxy_restart': proxy_restart,
+                'proxy_restart': {'ok': False, 'reason': 'hot_reload_not_required'},
                 'test_queued': bool(test_result.get('ok')),
                 'test_result': test_result,
                 'selected_auth_refs': selected_auth_refs,
@@ -1013,15 +1012,17 @@ def handle_post(handler, parsed, data):
                     raise ValueError('disable_image_generation must be off, all, chat, or passthrough')
                 state['disable_image_generation'] = v
             strategy = str(data.get('core_routing_strategy', state.get('core_routing_strategy', 'round-robin'))).strip().lower()
-            if strategy not in ('round-robin', 'fill-first'):
-                raise ValueError('core_routing_strategy must be round-robin or fill-first')
+            if strategy not in ('round-robin', 'weighted-round-robin', 'fill-first'):
+                raise ValueError('core_routing_strategy must be round-robin, weighted-round-robin, or fill-first')
             state['core_routing_strategy'] = strategy
             for key in (
                 'session_affinity_enabled', 'local_model', 'ws_auth', 'commercial_mode',
                 'disable_cooling', 'force_model_prefix', 'passthrough_headers',
                 'save_cooldown_status', 'quota_switch_project', 'quota_switch_preview_model',
                 'quota_antigravity_credits', 'logging_to_file', 'usage_statistics_enabled',
-                'codex_identity_confuse',
+                'codex_identity_confuse', 'codex_disable_cloaking',
+                'codex_optimize_multi_agent_v2', 'claude_code_disable_cloaking_model_list',
+                'xai_inject_x_search',
             ):
                 if key in data:
                     state[key] = bool(data[key])
