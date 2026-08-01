@@ -1,0 +1,8 @@
+host: "127.0.0.1"
+port: 8317
+
+api-keys:
+  - "test-key-12345"
+
+debug: true
+usage-statistics-enabled: true
