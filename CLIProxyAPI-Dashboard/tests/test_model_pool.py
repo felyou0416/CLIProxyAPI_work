@@ -57,23 +57,14 @@ class TestModelPoolStorage(unittest.TestCase):
             self.assertTrue(pool_folder.exists())
             self.assertTrue(pool_folder.is_dir())
 
-            # Pool metadata is stored in the index; auth files are standard provider payloads.
-            self.assertFalse((pool_folder / "base_config.json").exists())
-
-            # Check node_1.json and node_2.json
-            node_1_path = pool_folder / "node_1.json"
-            node_2_path = pool_folder / "node_2.json"
-            self.assertTrue(node_1_path.exists())
-            self.assertTrue(node_2_path.exists())
-
-            node_payload = json.loads(node_1_path.read_text(encoding='utf-8'))
-            self.assertEqual(node_payload['content']['type'], 'api_key')
-            self.assertEqual(node_payload['content']['provider'], 'pool-provider-custom')
-            self.assertEqual(node_payload['content']['models'], ['gpt-4o'])
-            self.assertEqual(node_payload['metadata']['call_id'], 'custom-gpt4-pool')
-            parsed = _extract_manual_api_config(node_payload, str(node_1_path))
-            self.assertIsNotNone(parsed)
-            self.assertEqual(parsed['models'], ['gpt-4o'])
+            # Auth storage contains reference manifests only.
+            manifest_path = pool_folder / "preset_1.json"
+            self.assertTrue(manifest_path.exists())
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            self.assertEqual(manifest['metadata']['file_schema'], 'cliproxyapi-model-pool-ref-v2')
+            self.assertNotIn('base_url', json.dumps(manifest))
+            self.assertNotIn('api_key', json.dumps(manifest))
+            self.assertEqual(manifest['references']['node_refs'][0]['node_ref'], 'node-1')
 
             # Load back and verify
             loaded = load_model_pools()
@@ -114,7 +105,8 @@ class TestModelPoolStorage(unittest.TestCase):
 
         with patch("backend.model_pool.load_model_pools", return_value=sample_pools):
             entries = get_model_pool_manual_entries()
-            self.assertEqual(len(entries), 1)
+            self.assertEqual(len(entries), 2)
+            self.assertEqual({entry["direct_alias"] for entry in entries}, {"custom-gpt4-pool", "gpt-4o"})
             self.assertEqual(entries[0]["provider"], "pool-provider-custom")
 
             yaml_block = build_openai_compatibility_block(entries)

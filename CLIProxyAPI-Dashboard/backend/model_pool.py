@@ -1,4 +1,4 @@
-"""Model Load Balancer Pool (独立 Provider 轮询池) backend module."""
+"""Dashboard-managed model pool references and runtime expansion."""
 
 import json
 import logging
@@ -8,286 +8,246 @@ from pathlib import Path
 from backend.paths import MODEL_POOLS_FILE, MODEL_POOLS_AUTH_DIR
 
 logger = logging.getLogger(__name__)
+SCHEMA_VERSION = 2
 
 
 def _safe_folder_name(name: str) -> str:
-    """Sanitize string for folder name."""
-    s = str(name or '').strip()
-    s = re.sub(r'[\\/:*?"<>|]', '_', s)
-    return s or 'unnamed_pool'
+    return re.sub(r'[\\/:*?"<>|]', '_', str(name or '').strip()) or 'unnamed_pool'
+
+
+def _read_json(path: Path, default=None):
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return default
 
 
 def _load_model_pool_index() -> list[dict]:
-    if not MODEL_POOLS_FILE.exists() or not MODEL_POOLS_FILE.is_file():
-        return []
-    try:
-        data = json.loads(MODEL_POOLS_FILE.read_text(encoding='utf-8'))
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict) and isinstance(data.get('pools'), list):
-            return data['pools']
-    except Exception as err:
-        logger.error("Failed to read model_pools.json: %s", err)
+    data = _read_json(MODEL_POOLS_FILE, {})
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict) and isinstance(data.get('pools'), list):
+        return data['pools']
     return []
 
 
-def _read_pool_auth_dir(pool_dir: Path) -> dict | None:
-    base_config_path = pool_dir / 'base_config.json'
-    try:
-        base_config = json.loads(base_config_path.read_text(encoding='utf-8')) if base_config_path.exists() else {}
-    except Exception as err:
-        logger.error("Failed to read pool config %s: %s", base_config_path, err)
-        base_config = {}
+def _node_ref(node: dict, index: int) -> str:
+    return str(node.get('node_ref') or node.get('id') or f'node-{index + 1}').strip()
 
-    node_files = sorted(pool_dir.glob('node_*.json'))
-    if not base_config and not node_files:
-        return None
 
-    first_node = {}
+def _normalize_pool(pool: dict) -> dict:
+    pool = dict(pool or {})
+    call_id = str(pool.get('call_id') or pool.get('pool_ref') or pool.get('id') or '').strip()
+    pool_ref = str(pool.get('pool_ref') or call_id or pool.get('id') or '').strip()
     nodes = []
-    fallback_call_id = str(base_config.get('call_id') or pool_dir.name).strip()
-    for nfile in node_files:
-        try:
-            ndata = json.loads(nfile.read_text(encoding='utf-8'))
-            content = ndata.get('content') if isinstance(ndata.get('content'), dict) else ndata
-            metadata = ndata.get('metadata') if isinstance(ndata.get('metadata'), dict) else ndata
-            if not isinstance(content, dict):
+    for index, raw in enumerate(pool.get('nodes') or []):
+        if not isinstance(raw, dict):
+            continue
+        node = dict(raw)
+        node['node_ref'] = _node_ref(node, index)
+        node['id'] = node['node_ref']
+        node['enabled'] = bool(node.get('enabled', True))
+        node['weight'] = max(1, int(node.get('weight') or 1))
+        nodes.append(node)
+
+    presets = []
+    for index, raw in enumerate(pool.get('presets') or []):
+        if not isinstance(raw, dict):
+            continue
+        preset = dict(raw)
+        preset_id = str(preset.get('preset_id') or preset.get('id') or preset.get('call_id') or call_id).strip()
+        preset['preset_id'] = preset_id
+        preset['call_id'] = str(preset.get('call_id') or preset_id).strip()
+        preset['enabled'] = bool(preset.get('enabled', True))
+        refs = []
+        for ref_index, raw_ref in enumerate(preset.get('node_refs') or []):
+            if isinstance(raw_ref, str):
+                raw_ref = {'node_ref': raw_ref}
+            if not isinstance(raw_ref, dict):
                 continue
-            node = {
-                'id': str(metadata.get('node_id') or ndata.get('id') or nfile.stem),
-                'base_url': str(content.get('base_url') or '').strip(),
-                'api_key': str(content.get('api_key') or '').strip(),
-                'upstream_id': str(content.get('model') or ndata.get('upstream_id') or fallback_call_id).strip() or fallback_call_id,
-                'weight': int(metadata.get('weight') or ndata.get('weight') or 1),
-                'proxy_url': str(metadata.get('proxy_url') or ndata.get('proxy_url') or '').strip(),
-                'enabled': not bool(ndata.get('disabled')) and bool(ndata.get('enabled', True))
-            }
-            nodes.append(node)
-            if not first_node:
-                first_node = node
-        except Exception as err:
-            logger.error("Failed to read pool node %s: %s", nfile, err)
+            ref = dict(raw_ref)
+            ref['node_ref'] = str(ref.get('node_ref') or ref.get('id') or '').strip()
+            if not ref['node_ref']:
+                continue
+            ref['weight'] = max(1, int(ref.get('weight') or 1))
+            ref['enabled'] = bool(ref.get('enabled', True))
+            refs.append(ref)
+        preset['node_refs'] = refs
+        presets.append(preset)
 
-    call_id = str(base_config.get('call_id') or '').strip()
-    if not call_id and first_node:
-        try:
-            payload = json.loads((pool_dir / 'node_1.json').read_text(encoding='utf-8'))
-            metadata = payload.get('metadata') if isinstance(payload.get('metadata'), dict) else {}
-            call_id = str(metadata.get('call_id') or '').strip()
-        except Exception:
-            call_id = ''
-    call_id = call_id or pool_dir.name
-    provider = str(base_config.get('provider') or '').strip()
-    if not provider and first_node:
-        try:
-            payload = json.loads((pool_dir / 'node_1.json').read_text(encoding='utf-8'))
-            content = payload.get('content') if isinstance(payload.get('content'), dict) else payload
-            provider = str(content.get('provider') or '').strip()
-        except Exception:
-            provider = ''
+    if not presets and nodes:
+        preset_id = str(nodes[0].get('upstream_id') or call_id).strip() or call_id
+        presets = [{
+            'preset_id': preset_id,
+            'call_id': call_id or preset_id,
+            'enabled': bool(pool.get('enabled', True)),
+            'node_refs': [
+                {'node_ref': node['node_ref'], 'weight': node.get('weight', 1), 'enabled': node.get('enabled', True),
+                 'upstream_id': node.get('upstream_id', '')}
+                for node in nodes
+            ],
+        }]
 
-    return {
-        'id': str(base_config.get('id') or f'pool-{call_id}').strip(),
-        'provider': provider or f'pool-{call_id}',
-        'call_id': call_id,
-        'enabled': bool(base_config.get('enabled', True)),
-        'nodes': nodes
-    }
-
-
-def _load_auth_model_pools() -> list[dict]:
-    if not MODEL_POOLS_AUTH_DIR.exists() or not MODEL_POOLS_AUTH_DIR.is_dir():
-        return []
-    candidates = []
-    if (MODEL_POOLS_AUTH_DIR / 'base_config.json').exists() or list(MODEL_POOLS_AUTH_DIR.glob('node_*.json')):
-        candidates.append(MODEL_POOLS_AUTH_DIR)
-    candidates.extend(sorted(d for d in MODEL_POOLS_AUTH_DIR.iterdir() if d.is_dir()))
-    return [pool for pool in (_read_pool_auth_dir(path) for path in candidates) if pool]
+    pool['id'] = str(pool.get('id') or pool_ref or f'pool-{call_id}').strip()
+    pool['pool_ref'] = pool_ref or pool['id']
+    pool['call_id'] = call_id or pool['pool_ref']
+    pool['provider'] = str(pool.get('provider') or f'pool-{pool["call_id"]}').strip().lower()
+    pool['enabled'] = bool(pool.get('enabled', True))
+    pool['nodes'] = nodes
+    pool['presets'] = presets
+    return pool
 
 
 def load_model_pools() -> list[dict]:
-    """Load the index and overlay its nodes with the actual auth-directory payloads."""
-    indexed = _load_model_pool_index()
-    auth_pools = _load_auth_model_pools()
-    if not indexed:
-        return auth_pools
+    """Load panel pools, with legacy auth files as a fallback only."""
+    indexed = [_normalize_pool(p) for p in _load_model_pool_index() if isinstance(p, dict)]
+    if indexed:
+        return indexed
+    return _load_legacy_model_pools()
 
-    by_key = {}
-    for pool in auth_pools:
-        by_key[str(pool.get('call_id') or pool.get('id') or '').strip().lower()] = pool
 
-    result = []
-    consumed = set()
-    for pool in indexed:
-        if not isinstance(pool, dict):
-            continue
-        key = str(pool.get('call_id') or pool.get('id') or '').strip().lower()
-        auth_pool = by_key.get(key)
-        merged = dict(pool)
-        if auth_pool and auth_pool.get('nodes'):
-            merged['provider'] = auth_pool.get('provider') or merged.get('provider')
-            merged['nodes'] = auth_pool['nodes']
-            consumed.add(key)
-        result.append(merged)
+def _load_legacy_model_pools() -> list[dict]:
+    if not MODEL_POOLS_AUTH_DIR.is_dir():
+        return []
+    dirs = []
+    if list(MODEL_POOLS_AUTH_DIR.glob('node_*.json')) or (MODEL_POOLS_AUTH_DIR / 'base_config.json').exists():
+        dirs.append(MODEL_POOLS_AUTH_DIR)
+    dirs.extend(sorted(p for p in MODEL_POOLS_AUTH_DIR.iterdir() if p.is_dir()))
+    pools = []
+    for pool_dir in dirs:
+        base = _read_json(pool_dir / 'base_config.json', {}) or {}
+        nodes = []
+        for path in sorted(pool_dir.glob('node_*.json')):
+            data = _read_json(path, {}) or {}
+            content = data.get('content') if isinstance(data.get('content'), dict) else data
+            metadata = data.get('metadata') if isinstance(data.get('metadata'), dict) else data
+            nodes.append({
+                'id': str(metadata.get('node_id') or data.get('id') or path.stem),
+                'base_url': str(content.get('base_url') or '').strip(),
+                'api_key': str(content.get('api_key') or '').strip(),
+                'upstream_id': str(content.get('model') or data.get('upstream_id') or '').strip(),
+                'weight': int(metadata.get('weight') or data.get('weight') or 1),
+                'proxy_url': str(metadata.get('proxy_url') or data.get('proxy_url') or '').strip(),
+                'enabled': not bool(data.get('disabled')) and bool(data.get('enabled', True)),
+            })
+        pools.append(_normalize_pool({
+            'id': base.get('id') or f'pool-{pool_dir.name}',
+            'provider': base.get('provider'),
+            'call_id': base.get('call_id') or pool_dir.name,
+            'enabled': base.get('enabled', True),
+            'nodes': nodes,
+        }))
+    return pools
 
-    for pool in auth_pools:
-        key = str(pool.get('call_id') or pool.get('id') or '').strip().lower()
-        if key not in consumed and not any(str(item.get('call_id') or item.get('id') or '').strip().lower() == key for item in result):
-            result.append(pool)
-    return result
+
+def _write_reference_manifests(pools: list[dict]) -> None:
+    MODEL_POOLS_AUTH_DIR.mkdir(parents=True, exist_ok=True)
+    valid = set()
+    for pool in pools:
+        folder = _safe_folder_name(pool['pool_ref'])
+        valid.add(folder)
+        pool_dir = MODEL_POOLS_AUTH_DIR / folder
+        pool_dir.mkdir(parents=True, exist_ok=True)
+        for old in pool_dir.glob('*.json'):
+            old.unlink()
+        for index, preset in enumerate(pool.get('presets') or []):
+            aliases = [str(preset.get('call_id') or preset['preset_id']).strip()]
+            if pool['call_id'] not in aliases:
+                aliases.append(pool['call_id'])
+            manifest = {
+                'metadata': {
+                    'file_schema': 'cliproxyapi-model-pool-ref-v2',
+                    'source': 'model_pool',
+                    'pool_ref': pool['pool_ref'],
+                    'preset_id': preset['preset_id'],
+                    'aliases': aliases,
+                    'enabled': bool(pool['enabled'] and preset.get('enabled', True)),
+                },
+                'references': {
+                    'node_refs': [
+                        {key: value for key, value in ref.items() if key in ('node_ref', 'weight', 'enabled', 'upstream_id')}
+                        for ref in preset.get('node_refs', [])
+                    ]
+                }
+            }
+            (pool_dir / f'preset_{index + 1}.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+    for child in MODEL_POOLS_AUTH_DIR.iterdir():
+        if child.is_dir() and child.name not in valid:
+            shutil.rmtree(child, ignore_errors=True)
+        elif child.is_file() and (child.name == 'base_config.json' or child.name.startswith('node_')):
+            child.unlink(missing_ok=True)
 
 
 def save_model_pools(pools: list[dict]) -> bool:
-    """
-    Save model pools data to storage/auth/model_pools/<model_id>/ directory structure.
-    Also syncs to model_pools.json for fast caching.
-    """
     try:
-        # Save JSON index cache
+        normalized = [_normalize_pool(p) for p in pools if isinstance(p, dict)]
         MODEL_POOLS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        MODEL_POOLS_FILE.write_text(
-            json.dumps({'pools': pools}, ensure_ascii=False, indent=2),
-            encoding='utf-8'
-        )
-
-        # Save to storage/auth/model_pools/<model_id>/
-        MODEL_POOLS_AUTH_DIR.mkdir(parents=True, exist_ok=True)
-
-        valid_folder_names = set()
-        for pool in pools:
-            if not isinstance(pool, dict):
-                continue
-
-            call_id = str(pool.get('call_id') or '').strip()
-            if not call_id:
-                continue
-
-            folder_name = _safe_folder_name(call_id)
-            valid_folder_names.add(folder_name)
-            pool_dir = MODEL_POOLS_AUTH_DIR / folder_name
-            pool_dir.mkdir(parents=True, exist_ok=True)
-
-            # Write standard provider node files; pool metadata remains in model_pools.json.
-            for legacy_config in pool_dir.glob('base_config.json'):
-                try:
-                    legacy_config.unlink()
-                except OSError:
-                    pass
-
-            # Write node_*.json files
-            existing_nodes = list((pool.get('nodes') or []))
-            # Clean up old node files
-            for old_node in pool_dir.glob('node_*.json'):
-                try:
-                    old_node.unlink()
-                except OSError:
-                    pass
-
-            for idx, node in enumerate(existing_nodes):
-                if not isinstance(node, dict):
-                    continue
-                node_file = pool_dir / f'node_{idx + 1}.json'
-                node_id = str(node.get('id') or f'node-{idx + 1}').strip()
-                upstream_id = str(node.get('upstream_id') or call_id).strip() or call_id
-                provider = str(pool.get('provider') or 'model_pools').strip().lower()
-                node_enabled = bool(node.get('enabled', True))
-                node_data = {
-                    'metadata': {
-                        'file_schema': 'cliproxyapi-auth-v1',
-                        'source': 'model_pool',
-                        'pool_id': str(pool.get('id') or f'pool-{call_id}').strip(),
-                        'call_id': call_id,
-                        'node_id': node_id,
-                        'weight': max(1, int(node.get('weight') or 1)),
-                        'proxy_url': str(node.get('proxy_url') or '').strip(),
-                    },
-                    'disabled': not node_enabled,
-                    'content': {
-                        'type': 'api_key',
-                        'provider': provider,
-                        'base_url': str(node.get('base_url') or '').strip(),
-                        'api_key': str(node.get('api_key') or '').strip(),
-                        'model': upstream_id,
-                        'models': [upstream_id],
-                    }
-                }
-                node_file.write_text(
-                    json.dumps(node_data, ensure_ascii=False, indent=2),
-                    encoding='utf-8'
-                )
-
-        # Remove stale pool directories and the pre-migration root-level files.
-        if MODEL_POOLS_AUTH_DIR.exists():
-            for legacy_file in (
-                MODEL_POOLS_AUTH_DIR / 'base_config.json',
-                *MODEL_POOLS_AUTH_DIR.glob('node_*.json'),
-            ):
-                try:
-                    if legacy_file.is_file():
-                        legacy_file.unlink()
-                except OSError as err:
-                    logger.error("Failed to remove legacy pool file %s: %s", legacy_file, err)
-            for child in MODEL_POOLS_AUTH_DIR.iterdir():
-                if child.is_dir() and child.name not in valid_folder_names:
-                    try:
-                        shutil.rmtree(child)
-                    except OSError as err:
-                        logger.error("Failed to remove stale pool dir %s: %s", child, err)
-
+        MODEL_POOLS_FILE.write_text(json.dumps({'schema_version': SCHEMA_VERSION, 'pools': normalized}, ensure_ascii=False, indent=2), encoding='utf-8')
+        _write_reference_manifests(normalized)
         return True
     except Exception as err:
-        logger.error("Failed to save model pools into storage/auth: %s", err)
+        logger.error('Failed to save model pools: %s', err)
         return False
 
 
+def resolve_model_pool_references(pools: list[dict] | None = None) -> tuple[list[dict], list[str]]:
+    resolved, warnings = [], []
+    pools = pools if pools is not None else load_model_pools()
+    aliases = {}
+    for raw_pool in pools:
+        pool = _normalize_pool(raw_pool)
+        if not pool['enabled']:
+            continue
+        node_map = {str(node.get('node_ref') or node.get('id')): node for node in pool.get('nodes', [])}
+        for preset in pool.get('presets', []):
+            if not preset.get('enabled', True):
+                continue
+            preset_id = str(preset.get('preset_id') or '').strip()
+            preset_alias = str(preset.get('call_id') or preset_id).strip()
+            alias_list = []
+            for alias in (preset_id, preset_alias, pool['call_id']):
+                if alias and alias not in alias_list:
+                    alias_list.append(alias)
+            route_nodes = []
+            for ref in preset.get('node_refs', []):
+                if not ref.get('enabled', True):
+                    continue
+                node = node_map.get(str(ref.get('node_ref') or '').strip())
+                if not node:
+                    warnings.append(f'{pool["pool_ref"]}/{preset_id}: missing node {ref.get("node_ref")}')
+                    continue
+                upstream = str(ref.get('upstream_id') or node.get('upstream_id') or preset_id or pool['call_id']).strip()
+                if not node.get('base_url') or not node.get('api_key') or not upstream:
+                    warnings.append(f'{pool["pool_ref"]}/{preset_id}: node {ref.get("node_ref")} is incomplete')
+                    continue
+                route_nodes.append({
+                    'provider': pool['provider'], 'base_url': str(node['base_url']).rstrip('/'),
+                    'api_key': node['api_key'], 'proxy_url': node.get('proxy_url', ''),
+                    'weight': max(1, int(ref.get('weight') or node.get('weight') or 1)),
+                    'models': [upstream], 'aliases': alias_list,
+                })
+            if not route_nodes:
+                continue
+            route_key = (pool['pool_ref'], preset_id)
+            for alias in alias_list:
+                alias_key = alias.lower()
+                prior = aliases.get(alias_key)
+                if prior and prior != route_key:
+                    warnings.append(f'alias conflict: {alias}')
+                    continue
+                aliases[alias_key] = route_key
+            resolved.extend(route_nodes)
+    return resolved, warnings
+
+
 def get_model_pool_manual_entries() -> list[dict]:
-    """
-    Convert all enabled model pools into manual entry formats for openai-compatibility synthesis.
-    Each enabled node becomes an entry with provider name, base_url, api_key, weight, proxy_url, and model mapping.
-    """
-    pools = load_model_pools()
-    entries = []
-
-    for pool in pools:
-        if not isinstance(pool, dict) or not pool.get('enabled', True):
-            continue
-
-        provider_name = str(pool.get('provider') or '').strip().lower()
-        call_id = str(pool.get('call_id') or '').strip()
-        nodes = pool.get('nodes') or []
-
-        if not provider_name or not call_id or not nodes:
-            continue
-
-        for idx, node in enumerate(nodes):
-            if not isinstance(node, dict) or not node.get('enabled', True):
-                continue
-
-            base_url = str(node.get('base_url') or '').strip()
-            api_key = str(node.get('api_key') or '').strip()
-            upstream_id = str(node.get('upstream_id') or call_id).strip() or call_id
-            weight = int(node.get('weight') or 1)
-            proxy_url = str(node.get('proxy_url') or '').strip()
-
-            if not base_url or not api_key:
-                continue
-
-            entry = {
-                'provider': provider_name,
-                'base_url': base_url,
-                'api_key': api_key,
-                'weight': max(1, weight),
-                'proxy_url': proxy_url,
-                'direct_alias': call_id,
-                'models': [upstream_id],
-                'mappings': [
-                    {
-                        'call_id': call_id,
-                        'upstream_id': upstream_id,
-                        'provider': provider_name,
-                    }
-                ]
-            }
-            entries.append(entry)
-
-    return entries
+    entries, _warnings = resolve_model_pool_references()
+    result = []
+    for entry in entries:
+        aliases = entry.pop('aliases', [])
+        for alias in aliases:
+            item = dict(entry)
+            item['direct_alias'] = alias
+            item['mappings'] = [{'call_id': alias, 'upstream_id': entry['models'][0], 'provider': entry['provider']}]
+            result.append(item)
+    return result

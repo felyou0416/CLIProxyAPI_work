@@ -24,7 +24,7 @@
       </div>
 
       <div id="model-pool-detail-form" style="display: none; flex-direction: column; gap: 14px;">
-        <!-- Top: Call Model ID -->
+        <!-- Top: Pool and preset aliases -->
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--panel-2); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);">
           <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
             <span style="font-weight: 700; font-size: 13px; color: var(--text-muted); white-space: nowrap;">调用 Model ID:</span>
@@ -33,8 +33,10 @@
           <button type="button" class="secondary" style="color: var(--danger, #ef4444); border-color: var(--danger, #ef4444); font-size: 11px; padding: 4px 8px;" onclick="deleteActiveModelPool()">删除此模型</button>
         </div>
 
+        <div id="model-pool-presets-container" style="display: flex; flex-direction: column; gap: 8px; background: var(--panel-2); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);"></div>
+
         <!-- Nodes List -->
-        <div style="font-weight: 700; font-size: 13px; margin-top: 4px; color: var(--text-muted);">上游节点配置 (URL / API Key / Model ID)</div>
+        <div style="display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 13px; margin-top: 4px; color: var(--text-muted);"><span>上游节点配置 (面板管理真实 URL / API Key / Model)</span><button type="button" class="secondary" style="padding: 2px 8px; font-size: 12px;" onclick="addModelPoolPreset()">+ 添加模型预设</button></div>
         <div id="model-pool-nodes-container" style="display: flex; flex-direction: column; gap: 10px;"></div>
 
         <!-- Add Node Button -->

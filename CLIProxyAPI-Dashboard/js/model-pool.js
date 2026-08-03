@@ -111,7 +111,54 @@ function selectModelPool(id) {
   if (detailForm) detailForm.style.display = 'flex';
 
   document.getElementById('pool-input-call-id').value = pool.call_id || '';
+  renderModelPoolPresets(pool);
   renderModelPoolNodes(pool.nodes || []);
+}
+
+function renderModelPoolPresets(pool) {
+  const container = document.getElementById('model-pool-presets-container');
+  if (!container) return;
+  const presets = Array.isArray(pool.presets) ? pool.presets : [];
+  container.innerHTML = `<div style="font-size: 12px; font-weight: 700; color: var(--text-muted);">模型预设 / 调用代号</div>` + presets.map((preset, index) => `
+    <div class="model-pool-preset-row" data-preset-index="${index}" style="display:flex;align-items:center;gap:8px;">
+      <input class="preset-input-id" value="${escapeHtml(preset.preset_id || '')}" placeholder="preset_id" style="flex:1;height:28px;padding:0 8px;">
+      <input class="preset-input-call-id" value="${escapeHtml(preset.call_id || preset.preset_id || '')}" placeholder="调用代号" style="flex:1;height:28px;padding:0 8px;">
+      <button type="button" class="secondary" style="padding:2px 7px;color:var(--danger,#ef4444);" onclick="removeModelPoolPreset(${index})">删除</button>
+    </div>`).join('');
+  container.querySelectorAll('.model-pool-preset-row input').forEach(input => input.addEventListener('input', () => {
+    syncModelPoolPresetsFromDOM(pool);
+    triggerAutoSave();
+  }));
+}
+
+function syncModelPoolPresetsFromDOM(pool) {
+  const rows = document.querySelectorAll('#model-pool-presets-container .model-pool-preset-row');
+  pool.presets = Array.from(rows).map((row, index) => {
+    const old = (pool.presets || [])[index] || {};
+    const presetId = row.querySelector('.preset-input-id').value.trim();
+    const callId = row.querySelector('.preset-input-call-id').value.trim() || presetId;
+    return { ...old, preset_id: presetId || callId, call_id: callId, enabled: old.enabled !== false, node_refs: old.node_refs || [] };
+  }).filter(preset => preset.preset_id);
+}
+
+function addModelPoolPreset() {
+  const pool = modelPoolsData.find(p => p.id === activeModelPoolId);
+  if (!pool) return;
+  syncActivePoolFromDOM();
+  pool.presets = Array.isArray(pool.presets) ? pool.presets : [];
+  const presetId = `${pool.call_id || 'model'}-${pool.presets.length + 1}`;
+  const refs = (pool.nodes || []).map(node => ({ node_ref: node.node_ref || node.id, weight: node.weight || 1, enabled: node.enabled !== false, upstream_id: node.upstream_id || '' }));
+  pool.presets.push({ preset_id: presetId, call_id: presetId, enabled: true, node_refs: refs });
+  renderModelPoolPresets(pool);
+  saveActiveModelPoolSilently();
+}
+
+function removeModelPoolPreset(index) {
+  const pool = modelPoolsData.find(p => p.id === activeModelPoolId);
+  if (!pool || !Array.isArray(pool.presets)) return;
+  pool.presets.splice(index, 1);
+  renderModelPoolPresets(pool);
+  saveActiveModelPoolSilently();
 }
 
 function syncPoolCallId(val) {
