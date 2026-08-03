@@ -37,7 +37,7 @@ function updateApiKeyModelCount() {
 
 function currentApiKeyPreset() {
   const provider = String(document.getElementById('api-key-provider-select')?.value || '').trim();
-  return apiKeyIntakePresets.find((item) => String(item.provider || '') === provider) || null;
+  return apiKeyIntakePresets.find((item) => String(item.provider || '').toLowerCase() === provider.toLowerCase()) || null;
 }
 
 function setApiKeyIntakeMode(mode) {
@@ -53,19 +53,24 @@ function setApiKeyIntakeMode(mode) {
   if (apiKeyIntakeMode === 'existing') {
     selectApiKeyPreset(select?.value || '');
   } else {
-    const note = document.getElementById('api-key-provider-note');
-    if (note) note.textContent = '自定义模式会按你填写的 provider 和 Base URL 保存。';
+    const customVal = custom?.value?.trim() || '';
+    if (customVal) {
+      onApiKeyCustomProviderInput(customVal);
+    } else {
+      const note = document.getElementById('api-key-provider-note');
+      if (note) note.textContent = '自定义模式：可选择或输入已有 Provider 自动填入默认 Base URL，或自行填写新 Base URL。';
+    }
   }
 }
 
 function selectApiKeyPreset(provider) {
-  const selectedProvider = String(provider || '');
-  const preset = apiKeyIntakePresets.find((item) => String(item.provider || '') === selectedProvider);
+  const selectedProvider = String(provider || '').trim();
+  const preset = apiKeyIntakePresets.find((item) => String(item.provider || '').toLowerCase() === selectedProvider.toLowerCase());
   const baseInput = document.getElementById('api-key-base-url');
   const secretInput = document.getElementById('api-key-secret');
   const remarkInput = document.getElementById('api-key-remark');
   const note = document.getElementById('api-key-provider-note');
-  const providerChanged = apiKeyIntakeSelectedProvider && apiKeyIntakeSelectedProvider !== selectedProvider;
+  const providerChanged = apiKeyIntakeSelectedProvider && apiKeyIntakeSelectedProvider.toLowerCase() !== selectedProvider.toLowerCase();
   apiKeyIntakeSelectedProvider = selectedProvider;
   if (preset && baseInput) {
     baseInput.value = preset.base_url || '';
@@ -77,8 +82,26 @@ function selectApiKeyPreset(provider) {
   if (note) {
     const modelCount = Array.isArray(preset?.models) ? preset.models.length : 0;
     note.textContent = preset
-      ? `${preset.provider} · 默认 URL: ${preset.base_url || '-'} · 已有 ${modelCount} 个模型`
+      ? `${preset.provider} · 默认 Base URL: ${preset.base_url || '-'} · 已有 ${modelCount} 个模型`
       : '选择已有 provider 后会自动填入默认 Base URL。';
+  }
+}
+
+function onApiKeyCustomProviderInput(value) {
+  const providerName = String(value || '').trim();
+  const preset = apiKeyIntakePresets.find((item) => String(item.provider || '').toLowerCase() === providerName.toLowerCase());
+  const baseInput = document.getElementById('api-key-base-url');
+  const note = document.getElementById('api-key-provider-note');
+  if (preset && preset.base_url && baseInput) {
+    baseInput.value = preset.base_url;
+    if (note) {
+      const modelCount = Array.isArray(preset.models) ? preset.models.length : 0;
+      note.textContent = `匹配到已有 Provider (${preset.provider}) · 自动填入 Base URL: ${preset.base_url} · 已有 ${modelCount} 个模型`;
+    }
+  } else if (note) {
+    note.textContent = providerName
+      ? '自定义模式：按你填写的 Provider 和 Base URL 保存。'
+      : '自定义模式：可选择或输入已有 Provider 自动填入默认 Base URL，或自行填写新 Base URL。';
   }
 }
 
@@ -146,6 +169,12 @@ async function loadApiKeyIntakePanel(force = false) {
       apiKeyIntakePresets = Array.isArray(data.items) ? data.items : [];
     }
     const select = document.getElementById('api-key-provider-select');
+    const datalist = document.getElementById('api-key-provider-presets');
+    if (datalist) {
+      datalist.innerHTML = apiKeyIntakePresets.map((item) => `
+        <option value="${apiKeyIntakeEscape(item.provider)}"></option>
+      `).join('');
+    }
     if (select) {
       const current = select.value;
       select.innerHTML = apiKeyIntakePresets.map((item) => `

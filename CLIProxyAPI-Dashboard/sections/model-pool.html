@@ -1,0 +1,45 @@
+<section id="section-model-pool" class="panel panel-scroll section-view" hidden>
+  <div class="panel-head">
+    <h2 class="section-title">模型轮询池</h2>
+    <div class="action-row" style="display: flex; align-items: center; gap: 10px;">
+      <span id="model-pool-autosave-indicator" style="font-size: 12px; color: var(--success, #10b981); font-weight: 600;">✓ 已自动保存</span>
+      <button class="secondary" type="button" onclick="loadModelPools(true)">刷新</button>
+    </div>
+  </div>
+
+  <div class="model-proxy-layout" style="margin-top: 12px; grid-template-columns: 220px 1fr; gap: 12px;">
+    <!-- Left Sidebar: Pool List -->
+    <div class="aggregate-panel-card" style="padding: 12px; margin: 0; background: var(--panel);">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border);">
+        <strong style="font-size: 13px; color: var(--text);">模型列表</strong>
+        <button type="button" class="secondary" style="padding: 2px 8px; font-size: 12px;" onclick="createNewModelPool()">+ 新增</button>
+      </div>
+      <div id="model-pool-sidebar-list"></div>
+    </div>
+
+    <!-- Right Pane: Minimalist Form -->
+    <div class="aggregate-panel-card" style="padding: 16px; background: var(--panel);">
+      <div id="model-pool-empty-state" style="text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 13px;">
+        请从左侧选择一个模型，或点击“+ 新增”创建。
+      </div>
+
+      <div id="model-pool-detail-form" style="display: none; flex-direction: column; gap: 14px;">
+        <!-- Top: Call Model ID -->
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--panel-2); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);">
+          <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
+            <span style="font-weight: 700; font-size: 13px; color: var(--text-muted); white-space: nowrap;">调用 Model ID:</span>
+            <input id="pool-input-call-id" type="text" placeholder="例如：gpt-4o" style="height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 13px; flex: 1; max-width: 300px;" oninput="syncPoolCallId(this.value)" />
+          </div>
+          <button type="button" class="secondary" style="color: var(--danger, #ef4444); border-color: var(--danger, #ef4444); font-size: 11px; padding: 4px 8px;" onclick="deleteActiveModelPool()">删除此模型</button>
+        </div>
+
+        <!-- Nodes List -->
+        <div style="font-weight: 700; font-size: 13px; margin-top: 4px; color: var(--text-muted);">上游节点配置 (URL / API Key / Model ID)</div>
+        <div id="model-pool-nodes-container" style="display: flex; flex-direction: column; gap: 10px;"></div>
+
+        <!-- Add Node Button -->
+        <button type="button" class="secondary" style="width: 100%; height: 36px; font-weight: 700; margin-top: 4px; border-style: dashed;" onclick="addNodeToActivePool()">+ 添加上游节点</button>
+      </div>
+    </div>
+  </div>
+</section>

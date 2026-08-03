@@ -619,7 +619,7 @@ async function startProxy(button) {
 }
 
 async function restartProxy(button) {
-  return handleActionWithIndicator('proxy', button, t('runtime.restartingProxy', '重启'), '/api/restart-proxy');
+  return handleActionWithIndicator('proxy', button, t('runtime.reloadingProxy', '热加载'), '/api/reload-proxy');
 }
 
 async function stopProxy(button) {

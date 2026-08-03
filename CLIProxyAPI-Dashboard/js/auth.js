@@ -921,12 +921,38 @@ async function loadAuthFiles(force = false) {
 
 
 // Manual Auth Modal Logic
+let manualAuthPresets = [];
+
+async function ensureManualAuthPresets() {
+  try {
+    if (!manualAuthPresets.length) {
+      const data = typeof api === 'function' ? await api('/api/manual-provider-presets') : await (await fetch('/api/manual-provider-presets')).json();
+      manualAuthPresets = Array.isArray(data.items) ? data.items : [];
+    }
+    const datalist = document.getElementById('manual-auth-provider-list');
+    if (datalist && manualAuthPresets.length) {
+      datalist.innerHTML = manualAuthPresets.map((item) => `<option value="${escapeHtml(item.provider)}"></option>`).join('');
+    }
+  } catch (e) {}
+}
+
+function onManualAuthProviderInput(val) {
+  const providerName = String(val || '').trim().toLowerCase();
+  if (!providerName) return;
+  const preset = manualAuthPresets.find((item) => String(item.provider || '').toLowerCase() === providerName);
+  const baseInput = document.getElementById('manual-auth-base-url');
+  if (preset && preset.base_url && baseInput) {
+    baseInput.value = preset.base_url;
+  }
+}
+
 function showManualAuthModal() {
   document.getElementById('manual-auth-provider').value = '';
   document.getElementById('manual-auth-base-url').value = '';
   document.getElementById('manual-auth-model').value = '';
   document.getElementById('manual-auth-api-key').value = '';
   document.getElementById('manual-auth-remark').value = '';
+  ensureManualAuthPresets();
   const modal = document.getElementById('manual-auth-modal');
   if (modal) modal.hidden = false;
 }

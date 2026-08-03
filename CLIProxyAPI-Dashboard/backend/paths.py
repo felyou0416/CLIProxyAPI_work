@@ -139,6 +139,8 @@ AGGREGATE_MODEL_ALIASES_FILE = MODELS_DIR / 'aggregate_model_aliases.json'
 PROVIDER_MODEL_TEST_STATE_FILE = MODELS_DIR / 'provider_model_test_state.json'
 MODEL_PROXY_SETTINGS_FILE = MODELS_DIR / 'model_proxy_settings.json'
 MODEL_THINKING_CONFIGS_FILE = MODELS_DIR / 'model_thinking_configs.json'
+MODEL_POOLS_FILE = MODELS_DIR / 'model_pools.json'
+MODEL_POOLS_AUTH_DIR = AUTH_DIR / 'model_pools'
 QUOTA_CACHE_FILE = CACHE_DIR / 'quota_cache.json'
 
 DEVICE_LOGIN_STDOUT = LOGS_DIR / 'device-login.stdout.log'

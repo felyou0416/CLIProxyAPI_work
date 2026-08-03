@@ -643,6 +643,31 @@ def handle_post(handler, parsed, data):
     if parsed.path == '/api/stop-proxy':
         send_json(handler, stop_proxy())
         return True
+    if parsed.path == '/api/reload-proxy':
+        try:
+            state = load_state()
+            rebuild = rebuild_runtime_config_from_state(state)
+            status = current_status(include_logs=False)
+            proxy_running = bool(status.get('proxy_running'))
+            rebuilt = bool(rebuild.get('rebuilt'))
+            send_json(handler, {
+                'ok': rebuilt,
+                'message': (
+                    '运行时配置已重建，核心 watcher 将在当前进程内热加载。'
+                    if rebuilt and proxy_running else
+                    '运行时配置已保存，下次启动核心时生效。'
+                    if rebuilt else
+                    rebuild.get('error') or rebuild.get('reason') or '运行时配置重建失败'
+                ),
+                'runtime_rebuilt': rebuilt,
+                'reload_requested': bool(rebuilt and proxy_running),
+                'restarted': False,
+                'proxy_running': proxy_running,
+                'runtime': rebuild,
+            }, status=200 if rebuilt else 500)
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': f'热加载配置失败: {e}', 'restarted': False}, status=500)
+        return True
     if parsed.path == '/api/restart-proxy':
         result = restart_proxy()
         send_json(handler, result, status=200 if result.get('ok') else 400)
@@ -1055,7 +1080,156 @@ def handle_post(handler, parsed, data):
         except Exception as e:
             send_json(handler, {'ok': False, 'message': f'Failed to save advanced config: {e}'}, status=500)
         return True
+    if parsed.path == '/api/model-pools':
+        if not isinstance(data, dict):
+            send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
+            return True
+        try:
+            from backend.model_pool import load_model_pools, save_model_pools
+            pools = data.get('pools')
+            if isinstance(pools, list):
+                updated_list = pools
+            elif isinstance(data.get('pool'), dict):
+                updated_list = load_model_pools()
+                new_pool = data['pool']
+                updated_list = [p for p in updated_list if isinstance(p, dict) and p.get('id') != new_pool.get('id')] + [new_pool]
+            elif 'provider' in data or 'call_id' in data:
+                updated_list = load_model_pools()
+                updated_list = [p for p in updated_list if isinstance(p, dict) and p.get('id') != data.get('id')] + [data]
+            else:
+                updated_list = load_model_pools()
+
+            saved_ok = save_model_pools(updated_list)
+            if not saved_ok:
+                send_json(handler, {'ok': False, 'message': '写入 model_pools.json 失败'}, status=500)
+                return True
+
+            state = load_state()
+            rebuild = rebuild_runtime_config_from_state(state)
+            proxy_running = bool(current_status(include_logs=False).get('proxy_running'))
+            reload_requested = bool(rebuild.get('rebuilt') and proxy_running)
+            send_json(handler, {
+                'ok': True,
+                'message': '模型轮询池已保存，核心将热加载新配置。' if reload_requested else '模型轮询池已保存，启动核心后生效。',
+                'runtime_rebuilt': bool(rebuild.get('rebuilt')),
+                'reload_requested': reload_requested,
+                'restarted': False,
+                'items': updated_list
+            })
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': f'保存模型轮询池失败: {e}'}, status=500)
+        return True
+    if parsed.path == '/api/model-pools/delete':
+        if not isinstance(data, dict):
+            send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
+            return True
+        pool_id = str(data.get('id') or '').strip()
+        if not pool_id:
+            send_json(handler, {'ok': False, 'message': 'pool id is required'}, status=400)
+            return True
+        try:
+            from backend.model_pool import load_model_pools, save_model_pools
+            existing_pools = load_model_pools()
+            updated_list = [p for p in existing_pools if isinstance(p, dict) and p.get('id') != pool_id]
+            save_model_pools(updated_list)
+
+            state = load_state()
+            rebuild = rebuild_runtime_config_from_state(state)
+            proxy_running = bool(current_status(include_logs=False).get('proxy_running'))
+            reload_requested = bool(rebuild.get('rebuilt') and proxy_running)
+            send_json(handler, {
+                'ok': True,
+                'message': '模型轮询池已删除，核心将热加载新配置。' if reload_requested else '模型轮询池已删除，启动核心后生效。',
+                'runtime_rebuilt': bool(rebuild.get('rebuilt')),
+                'reload_requested': reload_requested,
+                'restarted': False,
+                'items': updated_list
+            })
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': f'删除模型轮询池失败: {e}'}, status=500)
+        return True
+    if parsed.path == '/api/model-pools/test-node':
+        if not isinstance(data, dict):
+            send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
+            return True
+        base_url = str(data.get('base_url') or '').strip()
+        api_key = str(data.get('api_key') or '').strip()
+        proxy_url = str(data.get('proxy_url') or '').strip()
+        if not base_url or not api_key:
+            send_json(handler, {'ok': False, 'message': 'base_url 与 api_key 不能为空'}, status=400)
+            return True
+
+        start_ts = time.time()
+        try:
+            import urllib.request
+            import urllib.error
+            import ssl
+
+            clean_url = base_url.rstrip('/')
+            if clean_url.endswith('/chat/completions'):
+                clean_url = clean_url[:-len('/chat/completions')].rstrip('/')
+            if clean_url.endswith('/completions'):
+                clean_url = clean_url[:-len('/completions')].rstrip('/')
+
+            urls_to_try = [clean_url]
+            if not clean_url.endswith('/models'):
+                if clean_url.endswith('/v1'):
+                    urls_to_try.insert(0, clean_url + '/models')
+                else:
+                    urls_to_try.insert(0, clean_url + '/v1/models')
+                    urls_to_try.insert(1, clean_url + '/models')
+
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+
+            handlers = [urllib.request.HTTPSHandler(context=ctx)]
+            if proxy_url:
+                handlers.append(urllib.request.ProxyHandler({'http': proxy_url, 'https': proxy_url}))
+            opener = urllib.request.build_opener(*handlers)
+
+            last_error = None
+            for test_url in urls_to_try:
+                try:
+                    req = urllib.request.Request(test_url, headers={
+                        'Authorization': f'Bearer {api_key}',
+                        'User-Agent': 'CLIProxyAPI-Dashboard/1.0',
+                        'Accept': 'application/json'
+                    })
+                    with opener.open(req, timeout=6) as resp:
+                        status_code = resp.getcode()
+                        latency_ms = int((time.time() - start_ts) * 1000)
+                        send_json(handler, {
+                            'ok': True,
+                            'status_code': status_code,
+                            'latency_ms': latency_ms,
+                            'message': f'连通正常 ({status_code}) - {latency_ms}ms'
+                        })
+                        return True
+                except urllib.error.HTTPError as http_err:
+                    latency_ms = int((time.time() - start_ts) * 1000)
+                    code = http_err.code
+                    if code in (200, 201, 204):
+                        send_json(handler, {'ok': True, 'status_code': code, 'latency_ms': latency_ms, 'message': f'连通正常 ({code}) - {latency_ms}ms'})
+                        return True
+                    elif code in (401, 403):
+                        send_json(handler, {'ok': False, 'status_code': code, 'latency_ms': latency_ms, 'message': f'已连通，但 Key 无效 (HTTP {code})'})
+                        return True
+                    elif code in (400, 404, 405, 429):
+                        send_json(handler, {'ok': True, 'status_code': code, 'latency_ms': latency_ms, 'message': f'网络连通正常 (HTTP {code}) - {latency_ms}ms'})
+                        return True
+                    else:
+                        last_error = f'HTTP {code}'
+                except Exception as err:
+                    last_error = str(err)
+
+            latency_ms = int((time.time() - start_ts) * 1000)
+            send_json(handler, {'ok': False, 'message': f'无法连通: {last_error or "连接超时"}'})
+        except Exception as err:
+            send_json(handler, {'ok': False, 'message': f'测试连接失败: {err}'})
+        return True
     if parsed.path == '/api/cloaking-config':
+
         if not isinstance(data, dict):
             send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
             return True

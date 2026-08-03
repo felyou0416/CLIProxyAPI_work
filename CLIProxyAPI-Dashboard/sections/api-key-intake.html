@@ -32,7 +32,8 @@
       </div>
       <label class="form-label">Provider</label>
       <select id="api-key-provider-select" class="form-input" onchange="selectApiKeyPreset(this.value)"></select>
-      <input id="api-key-provider-custom" class="form-input" type="text" placeholder="例如: my-provider" hidden />
+      <input id="api-key-provider-custom" class="form-input" type="text" placeholder="例如: my-provider" hidden list="api-key-provider-presets" oninput="onApiKeyCustomProviderInput(this.value)" />
+      <datalist id="api-key-provider-presets"></datalist>
       <div class="metric-note" id="api-key-provider-note">选择已有 provider 后会自动填入默认 Base URL。</div>
     </div>
 

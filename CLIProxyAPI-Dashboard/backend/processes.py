@@ -3289,7 +3289,14 @@ def start_cloudflared_tunnel():
     cmd_str = f"cloudflared tunnel run --token {token}"
     script = f"""
 $ErrorActionPreference = 'Stop'
-Start-Process -Verb RunAs -FilePath powershell -ArgumentList '-NoProfile', '-WindowStyle', 'Hidden', '-Command', '{cmd_str}'
+$svc = Get-Service -Name Cloudflared -ErrorAction SilentlyContinue
+if ($svc) {{
+    if ($svc.Status -ne 'Running') {{
+        Start-Service -Name Cloudflared
+    }}
+}} else {{
+    Start-Process -Verb RunAs -FilePath powershell -ArgumentList '-NoProfile', '-WindowStyle', 'Hidden', '-Command', '{cmd_str}'
+}}
 """
     encoded = base64.b64encode(script.encode('utf-16le')).decode('ascii')
     try:
@@ -3311,7 +3318,13 @@ def stop_cloudflared_tunnel():
     
     script = """
 $ErrorActionPreference = 'Stop'
-Stop-Process -Name cloudflared -Force
+$svc = Get-Service -Name Cloudflared -ErrorAction SilentlyContinue
+if ($svc) {
+    if ($svc.Status -eq 'Running') {
+        Stop-Service -Name Cloudflared -Force
+    }
+}
+Stop-Process -Name cloudflared -Force -ErrorAction SilentlyContinue
 """
     encoded = base64.b64encode(script.encode('utf-16le')).decode('ascii')
     try:

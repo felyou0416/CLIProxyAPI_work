@@ -760,7 +760,7 @@ def _extract_payload_fields(payload):
     return email, account_id
 
 
-def _extract_payload_models(payload):
+def _extract_payload_models(payload, path=None):
     if not isinstance(payload, dict):
         return []
 
@@ -774,6 +774,16 @@ def _extract_payload_models(payload):
     for value in (content.get('model'), payload.get('model')):
         if value:
             values.append(value)
+
+    if not values and path:
+        try:
+            p = Path(path).resolve()
+            if 'model_pools' in p.parts:
+                parent_name = p.parent.name.strip()
+                if parent_name and parent_name != 'model_pools':
+                    values.append(parent_name)
+        except Exception:
+            pass
 
     result = []
     for value in values:
@@ -3243,7 +3253,7 @@ def collect_provider_model_aliases(auth_refs: list[str] | None = None):
         provider = detect_provider(payload, path.name)
         if not provider:
             continue
-        models = _extract_payload_models(payload)
+        models = _extract_payload_models(payload, path)
         if provider not in alias_map:
             alias_map[provider] = []
         existing_aliases = {alias for _name, alias in alias_map[provider]}
@@ -3617,6 +3627,18 @@ def merge_provider_preset_models(provider: str, models: list[str] | None):
 
 
 def _group_manual_entry_models(entry: dict, overrides: dict | None = None):
+    if entry.get('direct_alias'):
+        direct_alias = str(entry.get('direct_alias')).strip()
+        source_provider = str(entry.get('provider') or '').strip().lower()
+        models = entry.get('models') or []
+        upstream_id = str(models[0] if models else direct_alias).strip() or direct_alias
+        return {
+            source_provider: [{
+                'name': upstream_id,
+                'alias': direct_alias
+            }]
+        }
+
     grouped = {}
     grouped_seen = {}
     grouped_aggregate = {}
@@ -3829,8 +3851,15 @@ def build_openai_compatibility_block(entries):
                     'proxy_url': group_proxy_url,
                 })
                 api_key = 'cliproxyapi' if is_agnes_media else str(entry.get('api_key') or '').strip()
-                if api_key and api_key not in proxy_group['api_keys']:
-                    proxy_group['api_keys'].append(api_key)
+                weight = int(entry.get('weight') or 1)
+                if api_key:
+                    existing_keys = [k['key'] if isinstance(k, dict) else k for k in proxy_group['api_keys']]
+                    if api_key not in existing_keys:
+                        proxy_group['api_keys'].append({
+                            'key': api_key,
+                            'weight': max(1, weight),
+                            'proxy_url': group_proxy_url
+                        })
                 model_key = (model_name, alias_name)
                 if model_key in proxy_group['seen_models']:
                     continue
@@ -3848,10 +3877,22 @@ def build_openai_compatibility_block(entries):
             f'    base-url: "{group["base_url"]}"',
             '    api-key-entries:',
         ])
-        for api_key in group['api_keys']:
-            lines.append(f'      - api-key: "{api_key}"')
-            if group.get('proxy_url'):
-                lines.append(f'        proxy-url: "{group["proxy_url"]}"')
+        for key_item in group['api_keys']:
+            if isinstance(key_item, dict):
+                key_str = key_item['key']
+                w_val = key_item.get('weight', 1)
+                p_val = key_item.get('proxy_url') or group.get('proxy_url')
+            else:
+                key_str = str(key_item)
+                w_val = 1
+                p_val = group.get('proxy_url')
+
+            lines.append(f'      - api-key: "{key_str}"')
+            if w_val > 1:
+                lines.append(f'        weight: {w_val}')
+            if p_val:
+                lines.append(f'        proxy-url: "{p_val}"')
+
         headers = group.get('headers') or {}
         if headers:
             lines.append('    headers:')
@@ -3870,7 +3911,13 @@ def build_openai_compatibility_block(entries):
 
 def rewrite_openai_compatibility(config_text: str, entries):
     cleaned = _strip_top_level_block(config_text, 'openai-compatibility')
-    block = build_openai_compatibility_block(entries)
+    try:
+        from backend.model_pool import get_model_pool_manual_entries
+        pool_entries = get_model_pool_manual_entries()
+    except Exception:
+        pool_entries = []
+    combined_entries = list(entries or []) + list(pool_entries or [])
+    block = build_openai_compatibility_block(combined_entries)
     if not block:
         return cleaned
     return cleaned.rstrip() + '\n\n' + block
@@ -5012,7 +5059,13 @@ def build_runtime_config(
         except Exception:
             pass
         raise ValueError('Runtime config validation failed: temporary file contents do not match the generated config.')
-    temp_runtime_config.replace(RUNTIME_CONFIG)
+    # CPA watches this exact path. Replacing the file can invalidate that watch on
+    # Windows, so validate through a temporary file first, then update in place.
+    RUNTIME_CONFIG.write_text(runtime_text, encoding='utf-8')
+    try:
+        temp_runtime_config.unlink()
+    except OSError:
+        pass
     return copied
 
 

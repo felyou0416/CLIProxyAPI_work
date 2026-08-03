@@ -493,6 +493,13 @@ def handle_get(handler, parsed):
             'item': get_model_proxy_settings(),
         })
         return True
+    if parsed.path == '/api/model-pools':
+        from backend.model_pool import load_model_pools
+        send_json(handler, {
+            'ok': True,
+            'items': load_model_pools(),
+        })
+        return True
     if parsed.path == '/api/model-thinking-configs':
         configs = load_model_thinking_configs()
         send_json(handler, {

@@ -52,15 +52,9 @@ window.CONTROL_STATION_LAYERS = [
               },
             },
             {
-              action: 'service', op: 'restart', type: 'proxy',
-              label: '重启', i18n: 'btn.restartProxy',
-              api: '/api/restart-proxy', className: 'secondary',
-              wait: {
-                field: 'proxy_running', expect: true,
-                timeoutMs: 150000, intervalMs: 1500,
-                readyMessage: '代理服务已重启并可用。',
-                timeoutMessage: '重启命令已发出，但 2.5 分钟内未检测到代理就绪。请查看代理日志后重试。',
-              },
+              action: 'service', op: 'reload', type: 'proxy',
+              label: '热加载', i18n: 'btn.reloadProxy',
+              api: '/api/reload-proxy', className: 'secondary',
             },
             {
               action: 'service', op: 'stop', type: 'proxy',

@@ -949,6 +949,9 @@ async function showSection(name, options = {}) {
   if (name === 'aggregates' && typeof loadAggregateModels === 'function') {
     loadAggregateModels();
   }
+  if (name === 'model-pool' && typeof loadModelPools === 'function') {
+    loadModelPools();
+  }
   if (name === 'model-proxy' && typeof loadModelProxyPanel === 'function') {
     loadModelProxyPanel();
   }
