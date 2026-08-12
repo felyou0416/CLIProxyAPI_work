@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-08-12
+### Added
+- Standardized request monitor (`#requests`) pagination with 50 items/page, top-aligned navigation controls, and direct page jumping.
+- Expanded request table layout into 8 balanced columns (Time/Latency, Status, Client/IP, Endpoint/Mode, Model Routing, Provider/Auth, Usage/Speed, Details) eliminating wide-screen empty space.
+- Modern high-density request detail modal (`#request-detail-modal`) with Inter and JetBrains Mono typography, high-contrast metrics, 3-column key-value grid, and zero excess whitespace.
+- Backdrop click (`onclick`) and `ESC` key shortcuts to close the request detail modal dialog seamlessly.
+- Visual tree indicators (`↳`, 3.5px sky-blue indicator bar, soft cyan background tint, dashed borders) for expanded child rows in grouped/folded request entries.
+
+### Fixed
+- Fixed unhandled `TypeError` in `showRequestDetailModal` caused by missing element references during modal layout refactoring.
+- Fixed `ReferenceError: getLanguage is not defined` scope crash in request routing helpers.
+
 ## [1.2.0] - 2026-07-22
 ### Added
 - Synced CPA Go proxy kernel to official v7.2.94 (`UPSTREAM_VERSION`).
