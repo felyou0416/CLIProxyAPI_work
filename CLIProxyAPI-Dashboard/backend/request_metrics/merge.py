@@ -1,4 +1,5 @@
 from backend.auth import get_configured_aggregate_models
+from backend.request_metrics.parsing import get_auth_id_index_snapshot
 
 
 def _provider_lookup(provider_models: list[dict]) -> tuple[dict[str, str], dict[str, dict]]:
@@ -34,6 +35,35 @@ def _provider_lookup(provider_models: list[dict]) -> tuple[dict[str, str], dict[
         pass
 
     return by_call_id, by_upstream
+
+
+_EXTRA_MERGE_FIELDS = (
+    'request_time',
+    'upstream_request_time',
+    'upstream_response_time',
+    'response_time',
+    'client_ip_source',
+    'user_agent',
+    'session_id',
+    'upstream_latency_ms',
+    'overhead_ms',
+    'tps',
+    'cached_tokens',
+    'reasoning_tokens',
+    'auth_label',
+    'auth_id',
+    'auth_file',
+    'auth_type',
+    'upstream_url',
+    'upstream_method',
+    'stream',
+    'trace_id',
+    'upstream_request_id',
+    'finish_reason',
+    'prompt_preview',
+    'response_preview',
+    'log_file',
+)
 
 
 def _merge_route_fields(target: dict, source: dict) -> None:
@@ -132,6 +162,13 @@ def merge_request_events(proxy_events: list[dict], precise_events: list[dict], e
                 copy['total_tokens'] = matched.get('total_tokens')
             if not str(copy.get('api_key_masked') or '').strip() and str(matched.get('api_key_masked') or '').strip():
                 copy['api_key_masked'] = str(matched.get('api_key_masked') or '').strip()
+            if matched.get('latency_ms') is not None:
+                copy['latency_ms'] = matched.get('latency_ms')
+            if matched.get('tps') is not None:
+                copy['tps'] = matched.get('tps')
+            for field in _EXTRA_MERGE_FIELDS:
+                if (copy.get(field) is None or copy.get(field) == '' or copy.get(field) is False) and (matched.get(field) is not None and matched.get(field) != ''):
+                    copy[field] = matched.get(field)
             _merge_route_fields(copy, matched)
             notes = list(copy.get('notes') or [])
             for note in matched.get('notes') or []:
@@ -158,6 +195,10 @@ def merge_request_events(proxy_events: list[dict], precise_events: list[dict], e
                 if note not in notes:
                     notes.append(note)
             copy['notes'] = notes
+        if matched_error:
+            for field in _EXTRA_MERGE_FIELDS:
+                if (copy.get(field) is None or copy.get(field) == '' or copy.get(field) is False) and (matched_error.get(field) is not None and matched_error.get(field) != ''):
+                    copy[field] = matched_error.get(field)
         _resolve_route_fields(copy, by_call_id, by_upstream)
         if not str(copy.get('route_source') or '').strip():
             _set_route_metadata(copy, 'unknown', 0.0, 'no route source resolved')
@@ -174,6 +215,21 @@ def merge_request_events(proxy_events: list[dict], precise_events: list[dict], e
         if not str(copy.get('route_source') or '').strip():
             _set_route_metadata(copy, 'unknown', 0.0, 'no route source resolved')
         items.append(copy)
+
+    # 补全 auth_file：旧的归档 jsonl（在反查功能上线前写入）没有这个字段，
+    # 这里用 auth_id 现算一次兜底，确保面板始终能显示具体账号文件路径。
+    # 注意：只在这里取一次索引快照（内部有 mtime 缓存，不会重复扫盘），
+    # 循环内部只做内存字典查找，避免给每条事件都触发一次 stat() 系统调用。
+    need_backfill = any(not str(item.get('auth_file') or '').strip() and str(item.get('auth_id') or '').strip() for item in items)
+    if need_backfill:
+        auth_idx = get_auth_id_index_snapshot()
+        for item in items:
+            if not str(item.get('auth_file') or '').strip():
+                auth_id = str(item.get('auth_id') or '').strip()
+                if auth_id:
+                    entry = auth_idx.get(auth_id)
+                    if entry and entry.get('auth_file'):
+                        item['auth_file'] = entry['auth_file']
 
     items.sort(key=lambda item: int(item.get('timestamp') or 0), reverse=True)
     return items

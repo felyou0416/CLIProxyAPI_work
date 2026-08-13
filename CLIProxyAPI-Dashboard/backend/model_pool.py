@@ -99,11 +99,37 @@ def _normalize_pool(pool: dict) -> dict:
 
 
 def load_model_pools() -> list[dict]:
-    """Load panel pools, with legacy auth files as a fallback only."""
+    """Load panel pools and migrate legacy auth files on first read."""
     indexed = [_normalize_pool(p) for p in _load_model_pool_index() if isinstance(p, dict)]
-    if indexed:
+    legacy = _load_legacy_model_pools()
+    if not legacy:
         return indexed
-    return _load_legacy_model_pools()
+
+    merged = list(indexed)
+    by_key = {
+        str(pool.get('call_id') or pool.get('pool_ref') or pool.get('id') or '').strip().lower(): index
+        for index, pool in enumerate(merged)
+    }
+    changed = False
+    for legacy_pool in legacy:
+        key = str(legacy_pool.get('call_id') or legacy_pool.get('pool_ref') or legacy_pool.get('id') or '').strip().lower()
+        existing_index = by_key.get(key)
+        if existing_index is None:
+            by_key[key] = len(merged)
+            merged.append(legacy_pool)
+            changed = True
+            continue
+        existing = merged[existing_index]
+        if legacy_pool.get('nodes'):
+            existing['nodes'] = legacy_pool['nodes']
+            existing['presets'] = legacy_pool.get('presets') or existing.get('presets', [])
+            changed = True
+
+    if changed or legacy:
+        # Persist the normalized index and reference manifests immediately so
+        # old root-level base_config/node files cannot remain authoritative.
+        save_model_pools(merged)
+    return merged
 
 
 def _load_legacy_model_pools() -> list[dict]:
@@ -188,6 +214,31 @@ def save_model_pools(pools: list[dict]) -> bool:
     except Exception as err:
         logger.error('Failed to save model pools: %s', err)
         return False
+
+
+def remap_local_pool_proxy_urls(proxy_url: str) -> dict:
+    """Persistently update local egress overrides stored on pool nodes."""
+    try:
+        from backend.local_proxy import remap_local_proxy_url
+    except Exception as exc:
+        return {'ok': False, 'changed_nodes': 0, 'error': str(exc)}
+
+    pools = load_model_pools()
+    changed_nodes = 0
+    normalized = []
+    for raw_pool in pools:
+        pool = _normalize_pool(raw_pool)
+        for node in pool.get('nodes') or []:
+            previous = str(node.get('proxy_url') or '').strip()
+            updated = remap_local_proxy_url(previous, proxy_url)
+            if updated != previous:
+                node['proxy_url'] = updated
+                changed_nodes += 1
+        normalized.append(pool)
+
+    if changed_nodes and not save_model_pools(normalized):
+        return {'ok': False, 'changed_nodes': 0, 'error': 'Failed to save model pool settings.'}
+    return {'ok': True, 'changed_nodes': changed_nodes}
 
 
 def resolve_model_pool_references(pools: list[dict] | None = None) -> tuple[list[dict], list[str]]:

@@ -9,16 +9,38 @@ function formatClientTs(ts) {
   return res;
 }
 
+function formatClientRelativeTime(ts) {
+  if (!ts) return '-';
+  const now = Math.floor(Date.now() / 1000);
+  const diff = now - Number(ts);
+  if (diff < 0) return '刚刚';
+  if (diff < 60) return `${diff} 秒前`;
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+  if (diff < 2592000) return `${Math.floor(diff / 86400)} 天前`;
+  return formatClientTs(ts);
+}
+
 function formatClientNumber(value) {
   const number = Number(value || 0);
   if (!Number.isFinite(number)) return '0';
   return number.toLocaleString();
 }
 
+function formatCompactNumber(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num) || num === 0) return '0';
+  if (num >= 1000000000) return `${(num / 1000000000).toFixed(2).replace(/\.00$/, '')}B`;
+  if (num >= 1000000) return `${(num / 1000000).toFixed(2).replace(/\.00$/, '')}M`;
+  if (num >= 10000) return `${(num / 1000).toFixed(1).replace(/\.0$/, '')}K`;
+  if (num >= 1000) return num.toLocaleString();
+  return String(num);
+}
+
 function formatClientPercent(value) {
   const number = Number(value || 0);
   if (!Number.isFinite(number)) return '0%';
-  return `${Math.round(number * 100)}%`;
+  return `${(number * 100).toFixed(1).replace(/\.0$/, '')}%`;
 }
 
 function clientStatusCopy(status) {
@@ -30,68 +52,15 @@ function clientStatusCopy(status) {
   return labels[status] || '未知';
 }
 
-function showClientTextPopover(element, event) {
-  if (!element || !event) return;
-  event.stopPropagation();
-  const fullText = element.getAttribute('title') || element.textContent;
-  if (!fullText || fullText === '-') return;
-  document.querySelectorAll('.text-popover').forEach(el => el.remove());
-  const popover = document.createElement('div');
-  popover.className = 'text-popover';
-  popover.textContent = fullText;
-  Object.assign(popover.style, {
-    position: 'absolute',
-    background: 'color-mix(in srgb, var(--panel) 98%, white)',
-    border: '1px solid var(--border)',
-    borderRadius: '8px',
-    padding: '10px 12px',
-    boxShadow: '0 10px 25px rgba(15, 23, 42, 0.12)',
-    zIndex: '1000',
-    maxWidth: '360px',
-    maxHeight: '220px',
-    overflowY: 'auto',
-    fontSize: '11px',
-    color: 'var(--text)',
-    wordBreak: 'break-all',
-    lineHeight: '1.4',
-  });
-  document.body.appendChild(popover);
-  const rect = element.getBoundingClientRect();
-  let left = rect.left + window.scrollX;
-  if (left + popover.offsetWidth > window.innerWidth - 16) left = window.innerWidth - popover.offsetWidth - 16;
-  if (left < 16) left = 16;
-  let top = rect.bottom + window.scrollY + 6;
-  if (top + popover.offsetHeight > window.innerHeight + window.scrollY - 16) top = rect.top + window.scrollY - popover.offsetHeight - 6;
-  popover.style.left = `${left}px`;
-  popover.style.top = `${top}px`;
-  const dismiss = () => {
-    popover.remove();
-    document.removeEventListener('click', dismiss);
-  };
-  popover.addEventListener('click', e => e.stopPropagation());
-  setTimeout(() => document.addEventListener('click', dismiss), 10);
-}
-
-function clientSummaryHtml(items) {
-  const totalClients = items.length;
-  const totalRequests = items.reduce((sum, item) => sum + Number(item.total_requests || 0), 0);
-  const totalErrors = items.reduce((sum, item) => sum + Number(item.failure_count || 0), 0);
-  const totalTokens = items.reduce((sum, item) => sum + Number(item.total_tokens || 0), 0);
-  const keyClients = items.filter(item => item.is_api_key).length;
-  const weightedSuccess = totalRequests > 0 ? 1 - (totalErrors / totalRequests) : 0;
-  const cards = [
-    ['客户数', formatClientNumber(totalClients), `${keyClients} 个 API Key 客户`],
-    ['请求总量', formatClientNumber(totalRequests), `错误 ${formatClientNumber(totalErrors)} 次`],
-    ['整体成功率', formatClientPercent(weightedSuccess), '按请求数加权'],
-    ['Token 消耗', formatClientNumber(totalTokens), '累计消耗'],
-  ];
-  return cards.map(([label, value, hint]) => `
-    <div class="clients-summary-card">
-      <div class="clients-summary-label">${escapeHtml(label)}</div>
-      <div class="clients-summary-value">${escapeHtml(value)}</div>
-      <div class="clients-summary-hint">${escapeHtml(hint)}</div>
-    </div>
-  `).join('');
+function copyClientText(text, btnElement, event) {
+  if (event) event.stopPropagation();
+  if (!text || text === '-') return;
+  navigator.clipboard.writeText(String(text)).then(() => {
+    if (btnElement) {
+      btnElement.classList.add('is-copied');
+      setTimeout(() => btnElement.classList.remove('is-copied'), 1200);
+    }
+  }).catch(() => {});
 }
 
 function getFilteredClientItems() {
@@ -99,14 +68,16 @@ function getFilteredClientItems() {
   const status = String(document.getElementById('client-status-filter')?.value || '').trim();
   const type = String(document.getElementById('client-type-filter')?.value || '').trim();
   const [sortKey, sortDir] = String(document.getElementById('client-sort-select')?.value || 'total_requests:desc').split(':');
+
   const items = clientsPanelItems.filter(item => {
     if (status && item.status !== status) return false;
-    // type filter now matches api_key vs ip fallback
     if (type === 'apikey' && !item.is_api_key) return false;
     if (type === 'ip' && item.is_api_key) return false;
     if (!query) return true;
-    return [item.label, item.key, item.top_model, item.top_path].some(value => String(value || '').toLowerCase().includes(query));
+    return [item.label, item.key, item.top_model, item.top_path, ...(item.ips || [])]
+      .some(value => String(value || '').toLowerCase().includes(query));
   });
+
   items.sort((a, b) => {
     const av = Number(a[sortKey] ?? 0);
     const bv = Number(b[sortKey] ?? 0);
@@ -120,25 +91,55 @@ function clientRowHtml(item) {
   const clientKey = String(item.key || 'unknown');
   const label = String(item.label || clientKey);
   const selected = clientKey === selectedClientKey ? ' is-selected' : '';
-  const typeClass = item.is_api_key ? 'apikey' : (item.ip_types && item.ip_types[0] ? item.ip_types[0] : 'unknown');
-  const typeLabel = item.is_api_key ? 'API Key' : (item.ip_types && item.ip_types[0] ? typeClass : '未知');
+  const typeClass = item.is_api_key ? 'apikey' : 'ip';
+  const typeLabel = item.is_api_key ? 'Key' : 'IP';
+  const statusClass = item.status || 'unknown';
+  const successRate = Number(item.success_rate || 0);
+
   return `
     <tr class="client-row${selected}" onclick="selectClient('${escapeHtml(clientKey)}')">
       <td>
         <div class="client-identity">
-          <code title="${escapeHtml(clientKey)}">${escapeHtml(label)}</code>
           <span class="client-type-pill ${escapeHtml(typeClass)}">${escapeHtml(typeLabel)}</span>
+          <code class="client-name" title="${escapeHtml(clientKey)}">${escapeHtml(label)}</code>
+          <button class="client-copy-icon" onclick="copyClientText('${escapeHtml(clientKey)}', this, event)" title="复制 Key">
+            <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11"/></svg>
+          </button>
         </div>
       </td>
-      <td><span class="client-status-pill ${escapeHtml(item.status || 'unknown')}">${escapeHtml(clientStatusCopy(item.status))}</span></td>
-      <td>${formatClientNumber(item.total_requests)}</td>
-      <td><span class="client-error-stack"><b>${formatClientNumber(item.failure_count)}</b><small>4xx ${formatClientNumber(item.count_4xx)} / 5xx ${formatClientNumber(item.count_5xx)}</small></span></td>
-      <td><div class="client-rate"><span>${formatClientPercent(item.success_rate)}</span><i style="width:${Math.max(0, Math.min(100, Number(item.success_rate || 0) * 100))}%"></i></div></td>
-      <td>${item.avg_latency_ms != null ? `${formatClientNumber(item.avg_latency_ms)} ms` : '-'}</td>
-      <td>${formatClientNumber(item.total_tokens)}</td>
-      <td class="ellipsis-cell path-col" title="${escapeHtml(item.top_path || '')}" onclick="showClientTextPopover(this, event)"><code>${escapeHtml(item.top_path || '-')}</code></td>
-      <td class="ellipsis-cell model-col" title="${escapeHtml(item.top_model || '')}" onclick="showClientTextPopover(this, event)"><code>${escapeHtml(item.top_model || '-')}</code></td>
-      <td>${escapeHtml(formatClientTs(item.last_seen))}</td>
+      <td>
+        <span class="client-status-pill ${escapeHtml(statusClass)}">
+          <span class="status-dot"></span>
+          <span>${escapeHtml(clientStatusCopy(item.status))}</span>
+        </span>
+      </td>
+      <td style="text-align: right;">
+        <span class="tabular-stat">${formatClientNumber(item.total_requests)}</span>
+        ${item.failure_count > 0 ? `<small class="err-count-sub" title="错误数">${item.failure_count} 错</small>` : ''}
+      </td>
+      <td style="text-align: right;">
+        <span class="tabular-stat ${successRate >= 0.95 ? 'text-healthy' : successRate >= 0.8 ? 'text-notice' : 'text-warning'}">
+          ${formatClientPercent(item.success_rate)}
+        </span>
+      </td>
+      <td style="text-align: right;">
+        <span class="tabular-stat">${item.avg_latency_ms != null ? `${item.avg_latency_ms}ms` : '-'}</span>
+      </td>
+      <td style="text-align: right;">
+        <span class="tabular-stat token-val" title="${formatClientNumber(item.total_tokens)} Tokens">
+          ${formatCompactNumber(item.total_tokens)}
+        </span>
+      </td>
+      <td>
+        <span class="model-badge" title="${escapeHtml(item.top_model || '-')}">
+          <code>${escapeHtml(item.top_model || '-')}</code>
+        </span>
+      </td>
+      <td>
+        <span class="time-cell" title="${escapeHtml(formatClientTs(item.last_seen))}">
+          ${escapeHtml(formatClientRelativeTime(item.last_seen))}
+        </span>
+      </td>
     </tr>
   `;
 }
@@ -148,54 +149,117 @@ function renderClientDetail(items) {
   if (!detail) return;
   const item = items.find(entry => String(entry.key || 'unknown') === selectedClientKey) || items[0];
   if (!item) {
-    detail.innerHTML = '<div class="clients-detail-empty">暂无客户端详情</div>';
+    detail.innerHTML = '<div class="clients-detail-empty">选择左侧客户端查看明细</div>';
     return;
   }
   selectedClientKey = String(item.key || 'unknown');
+  const clientKey = String(item.key || 'unknown');
+  const label = String(item.label || clientKey);
+  const statusClass = item.status || 'unknown';
+  const promptTokens = Number(item.prompt_tokens || 0);
+  const completionTokens = Number(item.completion_tokens || 0);
+  const totalTokens = Number(item.total_tokens || 0) || (promptTokens + completionTokens);
+
   detail.innerHTML = `
-    <div class="clients-detail-head">
-      <span class="client-status-pill ${escapeHtml(item.status || 'unknown')}">${escapeHtml(clientStatusCopy(item.status))}</span>
-      <code>${escapeHtml(String(item.label || item.key || 'unknown'))}</code>
-      <p>${item.is_api_key ? 'API Key 客户' : 'IP 客户'}</p>
+    <div class="detail-header">
+      <div class="detail-header-top">
+        <span class="client-status-pill ${escapeHtml(statusClass)}">
+          <span class="status-dot"></span>
+          <span>${escapeHtml(clientStatusCopy(item.status))}</span>
+        </span>
+        <span class="detail-type-tag">${item.is_api_key ? 'API Key 客户' : 'IP 直连'}</span>
+      </div>
+      <div class="detail-key-box">
+        <code class="detail-key-text" title="${escapeHtml(clientKey)}">${escapeHtml(label)}</code>
+        <button class="detail-copy-btn" onclick="copyClientText('${escapeHtml(clientKey)}', this, event)" title="复制完整 Key">
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11"/></svg>
+        </button>
+      </div>
     </div>
-    <div class="clients-detail-metrics">
-      <div><span>请求</span><b>${formatClientNumber(item.total_requests)}</b></div>
-      <div><span>成功率</span><b>${formatClientPercent(item.success_rate)}</b></div>
-      <div><span>错误</span><b>${formatClientNumber(item.failure_count)}</b></div>
-      <div><span>平均延迟</span><b>${item.avg_latency_ms != null ? `${formatClientNumber(item.avg_latency_ms)} ms` : '-'}</b></div>
+
+    <!-- 4 Stats Grid -->
+    <div class="detail-stats-grid">
+      <div class="detail-stat-item">
+        <span class="stat-label">请求数</span>
+        <b class="stat-val">${formatClientNumber(item.total_requests)}</b>
+      </div>
+      <div class="detail-stat-item">
+        <span class="stat-label">成功率</span>
+        <b class="stat-val ${Number(item.success_rate || 0) >= 0.95 ? 'text-healthy' : 'text-warning'}">${formatClientPercent(item.success_rate)}</b>
+      </div>
+      <div class="detail-stat-item">
+        <span class="stat-label">错误数</span>
+        <b class="stat-val ${item.failure_count > 0 ? 'text-warning' : ''}">${formatClientNumber(item.failure_count)}</b>
+      </div>
+      <div class="detail-stat-item">
+        <span class="stat-label">平均延迟</span>
+        <b class="stat-val">${item.avg_latency_ms != null ? `${item.avg_latency_ms} ms` : '-'}</b>
+      </div>
     </div>
-    <div class="clients-detail-section">
-      <span>识别 Key</span>
-      <code>${escapeHtml(item.is_api_key ? String(item.key || '') : '无 (IP 识别)')}</code>
+
+    <!-- Token -->
+    <div class="detail-section">
+      <div class="detail-section-row">
+        <span class="section-title">Token 消耗</span>
+        <span class="token-sum">${formatCompactNumber(totalTokens)}</span>
+      </div>
+      <div class="token-sub-line">
+        <span>Prompt: <b>${formatCompactNumber(promptTokens)}</b></span>
+        <span>Completion: <b>${formatCompactNumber(completionTokens)}</b></span>
+      </div>
     </div>
-    <div class="clients-detail-section">
-      <span>常用路径</span>
-      <code>${escapeHtml(item.top_path || '-')}</code>
+
+    <!-- Route & Model -->
+    <div class="detail-section">
+      <span class="section-title">常用路径</span>
+      <code class="detail-mono-val">${escapeHtml(item.top_path || '-')}</code>
     </div>
-    <div class="clients-detail-section">
-      <span>常用模型</span>
-      <code>${escapeHtml(item.top_model || '-')}</code>
+
+    <div class="detail-section">
+      <span class="section-title">常用模型</span>
+      <code class="detail-mono-val">${escapeHtml(item.top_model || '-')}</code>
     </div>
-    <div class="clients-detail-section">
-      <span>Token</span>
-      <p>Prompt ${formatClientNumber(item.prompt_tokens)} / Completion ${formatClientNumber(item.completion_tokens)} / Total ${formatClientNumber(item.total_tokens)}</p>
+
+    <div class="detail-section">
+      <span class="section-title">最后活跃</span>
+      <span class="detail-text-val">${escapeHtml(formatClientTs(item.last_seen))} (${escapeHtml(formatClientRelativeTime(item.last_seen))})</span>
     </div>
-    <div class="clients-detail-section">
-      <span>最近访问</span>
-      <p>${escapeHtml(formatClientTs(item.last_seen))}</p>
+
+    <!-- Action -->
+    <div class="detail-action-wrap">
+      <button class="detail-jump-btn" type="button" onclick="jumpToClientRequests('${escapeHtml(clientKey)}')">
+        查看此客户端请求日志 →
+      </button>
     </div>
   `;
 }
 
+function jumpToClientRequests(clientKey) {
+  if (typeof showSection === 'function') {
+    showSection('requests');
+    setTimeout(() => {
+      const searchBox = document.getElementById('request-search') || document.getElementById('request-filter-ip');
+      if (searchBox) {
+        searchBox.value = clientKey;
+        if (typeof applyRequestFilters === 'function') applyRequestFilters();
+      }
+    }, 150);
+  }
+}
+
 function renderClientsPanel() {
-  const summary = document.getElementById('clients-summary-grid');
+  const countBadge = document.getElementById('request-clients-count');
   const body = document.getElementById('request-clients-body');
   const items = getFilteredClientItems();
-  if (summary) summary.innerHTML = clientSummaryHtml(clientsPanelItems);
+
+  if (countBadge) countBadge.textContent = String(clientsPanelItems.length);
+
   if (body) {
-    body.innerHTML = items.length
-      ? items.map(clientRowHtml).join('')
-      : '<tr><td colspan="10" class="clients-empty-row">暂无匹配的客户端统计</td></tr>';
+    if (items.length) {
+      body.innerHTML = items.map(clientRowHtml).join('');
+    } else {
+      body.innerHTML = '<tr><td colspan="8" class="clients-empty-row">暂无匹配的客户端记录</td></tr>';
+    }
   }
   renderClientDetail(items);
 }
@@ -209,18 +273,20 @@ async function loadClientsPanel(force = false) {
   if (clientsPanelLoaded && !force) return;
   const body = document.getElementById('request-clients-body');
   const meta = document.getElementById('request-clients-meta');
+  const countBadge = document.getElementById('request-clients-count');
   const limit = force ? 500 : 100;
-  if (body) body.innerHTML = '<tr><td colspan="10" class="clients-empty-row">loading...</td></tr>';
+  if (body) body.innerHTML = '<tr><td colspan="8" class="clients-empty-row">正在加载客户端指标...</td></tr>';
   try {
     const data = await api(`/api/request-clients?limit=${limit}`);
     clientsPanelItems = Array.isArray(data.items) ? data.items : [];
-    if (meta) meta.textContent = `${clientsPanelItems.length} 个客户端 · ${formatFreshness(data.refreshed_at)}`;
+    if (countBadge) countBadge.textContent = String(clientsPanelItems.length);
+    if (meta) meta.textContent = `更新于 ${formatFreshness(data.refreshed_at)}`;
     if (!clientsPanelItems.some(item => String(item.key || 'unknown') === selectedClientKey)) {
       selectedClientKey = String(clientsPanelItems[0]?.key || '');
     }
     clientsPanelLoaded = true;
     renderClientsPanel();
   } catch (error) {
-    if (body) body.innerHTML = `<tr><td colspan="10" class="clients-empty-row">${escapeHtml(error.message || 'load failed')}</td></tr>`;
+    if (body) body.innerHTML = `<tr><td colspan="8" class="clients-empty-row error">${escapeHtml(error.message || '加载失败')}</td></tr>`;
   }
 }

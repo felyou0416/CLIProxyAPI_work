@@ -5,15 +5,20 @@ from backend.auth import list_auth_files, get_configured_provider_models, get_mo
 from backend.state import load_state, normalize_route_strategy, save_state
 from backend.processes import current_status, firewall_access_status, custom_firewall_status, normalize_firewall_ports, normalize_firewall_protocols, port_binding_status, ip_helper_status, grok2api_port
 from backend.security import generate_security_report
-from backend.tools import get_tool_outputs, query_models, test_proxy, get_provider_model_test_state, materialize_generated_video, fetch_remote_media, validate_remote_media_url, list_generated_media
+from backend.tools import get_tool_outputs, query_models, test_proxy, get_provider_model_test_state, materialize_generated_video, fetch_remote_media, validate_remote_media_url, list_generated_media, load_auth_test_cache
 from backend.model_thinking import load_model_thinking_configs, collect_thinking_candidates, collect_all_configured_models
 from backend.terminals import list_terminals, read_terminal
-from backend.request_metrics import parse_proxy_requests, parse_precise_request_events, parse_error_logs, merge_request_events, summarize_clients, summarize_models, summarize_model_test_stats, summarize_auth_health, ensure_observability_cache, refresh_observability_cache, get_cumulative_stats, merge_cumulative_model_test_stats
+from backend.request_metrics import parse_proxy_requests, parse_precise_request_events, parse_error_logs, merge_request_events, summarize_clients, summarize_models, summarize_model_test_stats, summarize_auth_health, ensure_observability_cache, refresh_observability_cache, get_cumulative_stats, merge_cumulative_model_test_stats, get_precise_request_events_page, estimate_archived_event_count
 from backend.routes.helpers import send_json, send_file, send_bytes
 from backend.system_proxy import get_system_proxy_status
+from backend.local_workspace import public_local_workspace
 from pathlib import Path
 import time
 import mimetypes
+import json
+
+
+_FRESH_DASHBOARD_HEADERS = {'Cache-Control': 'no-cache, max-age=0'}
 
 
 def _image_test_candidates():
@@ -67,6 +72,9 @@ def _image_test_candidates():
 
 def handle_get(handler, parsed):
     params = parse_qs(parsed.query)
+    if parsed.path == '/api/local-workspace':
+        send_json(handler, {'ok': True, 'item': public_local_workspace()})
+        return True
     if parsed.path in ('/', '/index.html'):
         try:
             import re
@@ -103,16 +111,17 @@ def handle_get(handler, parsed):
                 handler.send_response(200)
                 handler.send_header('Content-Type', 'text/html; charset=utf-8')
                 handler.send_header('Content-Length', str(len(compiled)))
+                handler.send_header('Cache-Control', 'no-cache, max-age=0')
                 handler.end_headers()
                 handler.wfile.write(compiled)
                 return True
         except Exception as e:
             # Fall back to standard send_file if dynamic compiling fails
             pass
-        send_file(handler, ROOT / 'index.html', root=ROOT)
+        send_file(handler, ROOT / 'index.html', root=ROOT, extra_headers=_FRESH_DASHBOARD_HEADERS)
         return True
     if parsed.path == '/dashboard.css':
-        send_file(handler, ROOT / 'dashboard.css', 'text/css; charset=utf-8', root=ROOT)
+        send_file(handler, ROOT / 'dashboard.css', 'text/css; charset=utf-8', root=ROOT, extra_headers=_FRESH_DASHBOARD_HEADERS)
         return True
     if parsed.path == '/favicon.svg':
         send_file(handler, ROOT / 'favicon.svg', 'image/svg+xml', root=ROOT, extra_headers={'Cache-Control': 'no-cache, max-age=0'})
@@ -122,13 +131,13 @@ def handle_get(handler, parsed):
         send_file(handler, ROOT / parsed.path.lstrip('/'), content_type, root=ROOT, extra_headers={'Cache-Control': 'no-cache, max-age=0'})
         return True
     if parsed.path.startswith('/js/'):
-        send_file(handler, ROOT / parsed.path.lstrip('/'), 'application/javascript; charset=utf-8', root=ROOT)
+        send_file(handler, ROOT / parsed.path.lstrip('/'), 'application/javascript; charset=utf-8', root=ROOT, extra_headers=_FRESH_DASHBOARD_HEADERS)
         return True
     if parsed.path.startswith('/css/'):
-        send_file(handler, ROOT / parsed.path.lstrip('/'), 'text/css; charset=utf-8', root=ROOT)
+        send_file(handler, ROOT / parsed.path.lstrip('/'), 'text/css; charset=utf-8', root=ROOT, extra_headers=_FRESH_DASHBOARD_HEADERS)
         return True
     if parsed.path.startswith('/sections/'):
-        send_file(handler, ROOT / parsed.path.lstrip('/'), 'text/html; charset=utf-8', root=ROOT)
+        send_file(handler, ROOT / parsed.path.lstrip('/'), 'text/html; charset=utf-8', root=ROOT, extra_headers=_FRESH_DASHBOARD_HEADERS)
         return True
     if parsed.path.startswith('/generated/images/'):
         rel_path = unquote(parsed.path.removeprefix('/generated/images/'))
@@ -261,16 +270,52 @@ def handle_get(handler, parsed):
         state['selected_auth_ref'] = enabled_refs[0] if enabled_refs else None
         state['selected_auths'] = enabled_names
         state['selected_auth'] = enabled_names[0] if enabled_names else None
-        save_state(state)
+        test_cache = load_auth_test_cache()
 
         send_json(handler, {
             'ok': True,
             'pool_mode': 'storage_auth',
             'items': items_snapshot,
+            'test_cache': test_cache,
             'selected_auth': state.get('selected_auth'),
             'selected_auth_ref': state.get('selected_auth_ref'),
             'selected_auths': state.get('selected_auths') or [],
             'selected_auth_refs': state.get('selected_auth_refs') or [],
+        })
+        return True
+    if parsed.path == '/api/auth-file/content':
+        query = parse_qs(parsed.query)
+        auth_ref = (query.get('id') or query.get('auth_ref') or [''])[0].strip()
+        if not auth_ref:
+            send_json(handler, {'ok': False, 'message': 'auth_ref is required.'}, status=400)
+            return True
+        from backend.auth import resolve_auth_reference, _read_auth_payload
+        resolved = resolve_auth_reference(auth_ref=auth_ref)
+        if not resolved:
+            send_json(handler, {'ok': False, 'message': f'Auth file not found: {auth_ref}'}, status=404)
+            return True
+        source_id, source_path = resolved
+        if not source_path.exists():
+            send_json(handler, {'ok': False, 'message': f'Auth file path missing: {source_path}'}, status=404)
+            return True
+        payload = _read_auth_payload(source_path)
+        if payload is None:
+            payload = {}
+        raw_json = json.dumps(payload, ensure_ascii=False, indent=2)
+        send_json(handler, {
+            'ok': True,
+            'id': auth_ref,
+            'source_id': source_id,
+            'name': source_path.name,
+            'path': str(source_path),
+            'payload': payload,
+            'raw_json': raw_json,
+        })
+        return True
+    if parsed.path == '/api/auth-test-cache':
+        send_json(handler, {
+            'ok': True,
+            'items': load_auth_test_cache(),
         })
         return True
     if parsed.path == '/api/provider-models':
@@ -350,14 +395,48 @@ def handle_get(handler, parsed):
         except Exception:
             offset = 0
         refresh = str((params.get('refresh') or [''])[0] or '').strip().lower() in ('1', 'true', 'yes')
-        cache = refresh_observability_cache(force=True) if refresh else ensure_observability_cache()
-        items = cache.get('events') or []
         ip_filter = str((params.get('ip') or [''])[0] or '').strip().lower()
         model_filter = str((params.get('model') or [''])[0] or '').strip().lower()
         provider_filter = str((params.get('provider') or [''])[0] or '').strip().lower()
         status_filter = str((params.get('status') or [''])[0] or '').strip()
         success_filter = str((params.get('success') or [''])[0] or '').strip().lower()
         include_models = str((params.get('include_models') or [''])[0] or '').strip().lower() in ('1', 'true', 'yes')
+        has_filter = bool(ip_filter or model_filter or provider_filter or status_filter or success_filter in ('true', 'false'))
+
+        # 无筛选条件时走“按需分页”快速路径：翻页只解析当前这一页对应的精细日志
+        # 文件（外加数量很小的 proxy.stdout.log / error 日志全量），不会像下面的
+        # 全量路径那样把当前保留的所有历史日志文件都解析一遍。
+        # 一旦用户加了筛选条件（按模型/服务商/IP/状态筛选），必须先知道每条记录
+        # 解析后的字段才能判断是否命中，这就退回全量解析路径（ensure/refresh_
+        # observability_cache），牺牲一次性速度换取筛选的完整覆盖范围。
+        if not refresh and not has_filter:
+            proxy_items = parse_proxy_requests(limit=300)
+            error_items = parse_error_logs(limit=300)
+            precise_page, precise_total = get_precise_request_events_page(offset, limit)
+            provider_models = get_configured_provider_models()
+            page_events = merge_request_events(proxy_items, precise_page, error_items, provider_models)
+            if not include_models:
+                page_events = [
+                    item for item in page_events
+                    if str(item.get('path') or '').strip().split('?', 1)[0].rstrip('/') != '/v1/models'
+                ]
+            page_events.sort(key=lambda item: int(item.get('timestamp') or 0), reverse=True)
+            # total 补上归档 jsonl 里的历史事件数量（估算），避免用户从"无筛选"
+            # 切到"有筛选"（退回全量路径，total 语义变成"精细+proxy+error+归档"
+            # 去重后的总数）时看到总条数断崖式跳变，误以为数据不一致。
+            estimated_total = precise_total + estimate_archived_event_count()
+            send_json(handler, {
+                'ok': True,
+                'items': page_events[:limit],
+                'total': estimated_total,
+                'cached': True,
+                'refreshed_at': time.time(),
+                'lazy': True,
+            })
+            return True
+
+        cache = refresh_observability_cache(force=True) if refresh else ensure_observability_cache()
+        items = cache.get('events') or []
         filtered = []
         for item in items:
             item_path = str(item.get('path') or '').strip()
@@ -388,6 +467,33 @@ def handle_get(handler, parsed):
             'cached': bool(cache.get('ready')),
             'refreshed_at': cache.get('refreshed_at') or 0,
         })
+        return True
+    if parsed.path == '/api/request-log-raw':
+        params = parse_qs(parsed.query)
+        filename = (params.get('file') or [''])[0].strip()
+        if not filename or '/' in filename or '\\' in filename or not filename.endswith('.log'):
+            send_json(handler, {'ok': False, 'message': 'Invalid log filename'}, status=400)
+            return True
+        from backend.request_metrics.parsing import _request_log_dirs
+        target_path = None
+        for log_dir in _request_log_dirs():
+            candidate = log_dir / filename
+            if candidate.exists() and candidate.is_file():
+                target_path = candidate
+                break
+        if not target_path:
+            send_json(handler, {'ok': False, 'message': 'Log file not found'}, status=404)
+            return True
+        try:
+            content = target_path.read_text(encoding='utf-8', errors='ignore')
+            send_json(handler, {
+                'ok': True,
+                'filename': filename,
+                'content': content,
+                'size': len(content),
+            })
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': str(e)}, status=500)
         return True
     if parsed.path == '/api/request-clients':
         params = parse_qs(parsed.query)
@@ -494,6 +600,9 @@ def handle_get(handler, parsed):
         })
         return True
     if parsed.path == '/api/model-pools':
+        if load_state().get('model_pool_archived', True):
+            send_json(handler, {'ok': False, 'code': 'model_pool_archived', 'message': '模型轮询池功能已归档。'}, status=410)
+            return True
         from backend.model_pool import load_model_pools
         send_json(handler, {
             'ok': True,

@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -179,6 +180,17 @@ class Handler(BaseHTTPRequestHandler):
         send_json(self, {'ok': False, 'message': 'Not found'}, status=404)
 
 
+class DashboardHTTPServer(ThreadingHTTPServer):
+    """A Dashboard instance must exclusively own its configured TCP port."""
+
+    allow_reuse_address = False
+
+    def server_bind(self):
+        if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def _auto_start_proxy_async():
     """Start RelayX after HTTP is already accepting connections.
 
@@ -195,7 +207,7 @@ def _auto_start_proxy_async():
 def main():
     host = (os.environ.get('CLIPROXYAPI_DASHBOARD_HOST', DEFAULT_DASHBOARD_HOST) or DEFAULT_DASHBOARD_HOST).strip() or DEFAULT_DASHBOARD_HOST
     port = int((os.environ.get('CLIPROXYAPI_DASHBOARD_PORT', '8765') or '8765').strip() or '8765')
-    server = ThreadingHTTPServer((host, port), Handler)
+    server = DashboardHTTPServer((host, port), Handler)
     display_host = '127.0.0.1' if host in ('0.0.0.0', '') else host
     print(f'Dashboard running at http://{display_host}:{port} (bind: {host})')
     print(f'Dashboard root: {DASHBOARD_ROOT}')

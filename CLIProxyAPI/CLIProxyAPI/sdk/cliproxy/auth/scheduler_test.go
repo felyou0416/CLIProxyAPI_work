@@ -86,8 +86,9 @@ type inactivePluginScheduler struct {
 }
 
 type authKindHomeDispatcher struct {
-	auths  []Auth
-	counts []int
+	auths    []Auth
+	counts   []int
+	policies []string
 }
 
 func (d *authKindHomeDispatcher) HeartbeatOK() bool {
@@ -100,6 +101,11 @@ func (d *authKindHomeDispatcher) RPopAuth(_ context.Context, _ string, _ string,
 		return nil, home.ErrAuthNotFound
 	}
 	return json.Marshal(homeAuthDispatchResponse{Auth: d.auths[count-1]})
+}
+
+func (d *authKindHomeDispatcher) RPopAuthWithPolicy(ctx context.Context, model string, sessionID string, headers http.Header, count int, policy string) ([]byte, error) {
+	d.policies = append(d.policies, policy)
+	return d.RPopAuth(ctx, model, sessionID, headers, count)
 }
 
 func (*authKindHomeDispatcher) AbortAmbiguousDispatch() {}
@@ -721,6 +727,57 @@ func TestManagerSelectAuthByKindSkipsAPIKey(t *testing.T) {
 	}
 }
 
+func TestManagerCodexAlphaSearchPolicyFiltersBeforePluginScheduler(t *testing.T) {
+	manager := NewManager(nil, &RoundRobinSelector{}, nil)
+	manager.executors["codex"] = schedulerTestExecutor{}
+	for _, candidate := range []*Auth{
+		{ID: "ordinary-api-key", Provider: "codex", Attributes: map[string]string{AttributeAPIKey: "ordinary"}},
+		{ID: "alpha-api-key", Provider: "codex", Attributes: map[string]string{AttributeAPIKey: "alpha", AttributeCodexAlphaSearch: "true", "base_url": "https://codex.example.com"}},
+	} {
+		if _, errRegister := manager.Register(context.Background(), candidate); errRegister != nil {
+			t.Fatalf("Register(%s) error = %v", candidate.ID, errRegister)
+		}
+	}
+
+	scheduler := &fakePluginScheduler{
+		resp:    pluginapi.SchedulerPickResponse{Handled: true, AuthID: "alpha-api-key"},
+		handled: true,
+	}
+	manager.SetPluginScheduler(scheduler)
+
+	selected, errSelect := manager.SelectAuthWithCredentialPolicy(context.Background(), "codex", "", CredentialPolicyCodexAlphaSearchV1, cliproxyexecutor.Options{})
+	if errSelect != nil {
+		t.Fatalf("SelectAuthWithCredentialPolicy() error = %v", errSelect)
+	}
+	if selected == nil || selected.ID != "alpha-api-key" {
+		t.Fatalf("SelectAuthWithCredentialPolicy() auth = %#v, want alpha-api-key", selected)
+	}
+	if len(scheduler.requests) != 1 || len(scheduler.requests[0].Candidates) != 1 || scheduler.requests[0].Candidates[0].ID != "alpha-api-key" {
+		t.Fatalf("scheduler candidates = %#v, want only alpha-api-key", scheduler.requests)
+	}
+}
+
+func TestManagerCodexAlphaSearchPolicyRejectsOrdinaryAPIKey(t *testing.T) {
+	manager := NewManager(nil, &RoundRobinSelector{}, nil)
+	manager.executors["codex"] = schedulerTestExecutor{}
+	if _, errRegister := manager.Register(context.Background(), &Auth{
+		ID:         "ordinary-api-key",
+		Provider:   "codex",
+		Attributes: map[string]string{AttributeAPIKey: "ordinary"},
+	}); errRegister != nil {
+		t.Fatalf("Register() error = %v", errRegister)
+	}
+
+	selected, errSelect := manager.SelectAuthWithCredentialPolicy(context.Background(), "codex", "", CredentialPolicyCodexAlphaSearchV1, cliproxyexecutor.Options{})
+	if selected != nil {
+		t.Fatalf("SelectAuthWithCredentialPolicy() auth = %#v, want nil", selected)
+	}
+	var authErr *Error
+	if !errors.As(errSelect, &authErr) || authErr.Code != "auth_not_found" {
+		t.Fatalf("SelectAuthWithCredentialPolicy() error = %#v, want auth_not_found", errSelect)
+	}
+}
+
 func TestManagerSelectAuthByKindWeightedRoundRobinIgnoresIneligibleAPIKeyWeight(t *testing.T) {
 	manager := NewManager(nil, &WeightedRoundRobinSelector{}, nil)
 	manager.executors["codex"] = schedulerTestExecutor{}
@@ -957,6 +1014,36 @@ func TestSelectHomeAuthByKindSkipsProviderMismatch(t *testing.T) {
 		t.Fatalf("home auth counts = %v, want [1 2]", got)
 	}
 	selection.End("test_complete")
+}
+
+func TestSelectHomeAuthWithCredentialPolicyTransportsAndValidatesPolicy(t *testing.T) {
+	dispatcher := &authKindHomeDispatcher{auths: []Auth{
+		{ID: "ordinary-api-key", Provider: "codex", Attributes: map[string]string{AttributeAPIKey: "ordinary", "base_url": "https://ordinary.example.com"}},
+		{ID: "alpha-api-key", Provider: "codex", Attributes: map[string]string{AttributeAPIKey: "alpha", AttributeCodexAlphaSearch: "true", "base_url": "https://alpha.example.com"}},
+	}}
+	manager := NewManager(nil, nil, nil)
+	manager.SetConfig(&internalconfig.Config{Home: internalconfig.HomeConfig{Enabled: true}})
+	registry := executionregistry.New()
+	manager.PublishHomeDispatch(dispatcher, registry, 1)
+	manager.RegisterExecutor(schedulerTestExecutor{provider: "codex"})
+
+	selection, errSelect := manager.SelectHomeAuthWithCredentialPolicy(context.Background(), "codex", "gpt-5.4", CredentialPolicyCodexAlphaSearchV1, cliproxyexecutor.Options{})
+	if errSelect != nil {
+		t.Fatalf("SelectHomeAuthWithCredentialPolicy() error = %v", errSelect)
+	}
+	if selection == nil || selection.Auth == nil || selection.Auth.ID != "alpha-api-key" {
+		t.Fatalf("SelectHomeAuthWithCredentialPolicy() = %#v, want alpha-api-key", selection)
+	}
+	if got := dispatcher.counts; len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("Home auth counts = %v, want [1 2]", got)
+	}
+	if got := dispatcher.policies; len(got) != 2 || got[0] != CredentialPolicyCodexAlphaSearchV1 || got[1] != CredentialPolicyCodexAlphaSearchV1 {
+		t.Fatalf("Home credential policies = %v", got)
+	}
+	selection.End("test_complete")
+	if errDrain := registry.Drain(context.Background()); errDrain != nil {
+		t.Fatalf("Drain() error = %v", errDrain)
+	}
 }
 
 func TestSelectHomeAuthByKindKeepsLogicalProviderWhenUsingCompatibilityExecutor(t *testing.T) {
@@ -1559,6 +1646,73 @@ func TestManager_PickNextMixed_UsesSchedulerRotation(t *testing.T) {
 		if got.ID != wantIDs[index] {
 			t.Fatalf("pickNextMixed() #%d auth.ID = %q, want %q", index, got.ID, wantIDs[index])
 		}
+	}
+}
+
+func TestManager_SchedulerSharesThinkingSuffixCooldownAndRegistryState(t *testing.T) {
+	manager := NewManager(nil, &RoundRobinSelector{}, nil)
+	reg := registry.GetGlobalRegistry()
+	baseModel := "scheduler-thinking-model"
+	reg.RegisterClient("thinking-auth-a", "gemini", []*registry.ModelInfo{{ID: baseModel}})
+	reg.RegisterClient("thinking-auth-b", "gemini", []*registry.ModelInfo{{ID: baseModel}})
+	t.Cleanup(func() {
+		reg.UnregisterClient("thinking-auth-a")
+		reg.UnregisterClient("thinking-auth-b")
+	})
+	if _, errRegister := manager.Register(context.Background(), &Auth{ID: "thinking-auth-a", Provider: "gemini"}); errRegister != nil {
+		t.Fatalf("Register(thinking-auth-a) error = %v", errRegister)
+	}
+	if _, errRegister := manager.Register(context.Background(), &Auth{ID: "thinking-auth-b", Provider: "gemini"}); errRegister != nil {
+		t.Fatalf("Register(thinking-auth-b) error = %v", errRegister)
+	}
+
+	retryAfter := time.Hour
+	manager.MarkResult(context.Background(), Result{
+		AuthID:     "thinking-auth-a",
+		Provider:   "gemini",
+		Model:      baseModel + "(high)",
+		Success:    false,
+		Error:      &Error{HTTPStatus: 429, Message: "quota"},
+		RetryAfter: &retryAfter,
+	})
+
+	auth, ok := manager.GetByID("thinking-auth-a")
+	if !ok || auth == nil {
+		t.Fatal("thinking-auth-a was not found")
+	}
+	if len(auth.ModelStates) != 1 || auth.ModelStates[baseModel] == nil {
+		t.Fatalf("ModelStates = %+v, want only canonical key %q", auth.ModelStates, baseModel)
+	}
+	if count := reg.GetModelCount(baseModel); count != 0 {
+		t.Fatalf("registry model count during cooldown = %d, want 0", count)
+	}
+	for _, model := range []string{baseModel, baseModel + "(medium)", baseModel + "(low)"} {
+		got, errPick := manager.scheduler.pickSingle(context.Background(), "gemini", model, cliproxyexecutor.Options{}, nil)
+		if errPick != nil {
+			t.Fatalf("scheduler.pickSingle(%q) error = %v", model, errPick)
+		}
+		if got == nil || got.ID != "thinking-auth-b" {
+			t.Fatalf("scheduler.pickSingle(%q) auth = %v, want thinking-auth-b", model, got)
+		}
+	}
+
+	manager.MarkResult(context.Background(), Result{
+		AuthID:   "thinking-auth-a",
+		Provider: "gemini",
+		Model:    baseModel + "(low)",
+		Success:  true,
+	})
+
+	auth, ok = manager.GetByID("thinking-auth-a")
+	if !ok || auth == nil || auth.ModelStates[baseModel] == nil {
+		t.Fatal("canonical model state was not retained after success")
+	}
+	state := auth.ModelStates[baseModel]
+	if state.Unavailable || state.Quota.Exceeded || !state.NextRetryAfter.IsZero() {
+		t.Fatalf("canonical model state after success = %+v, want cleared", state)
+	}
+	if count := reg.GetModelCount(baseModel); count != 2 {
+		t.Fatalf("registry model count after recovery = %d, want 2", count)
 	}
 }
 

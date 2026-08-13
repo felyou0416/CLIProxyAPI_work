@@ -949,9 +949,6 @@ async function showSection(name, options = {}) {
   if (name === 'aggregates' && typeof loadAggregateModels === 'function') {
     loadAggregateModels();
   }
-  if (name === 'model-pool' && typeof loadModelPools === 'function') {
-    loadModelPools();
-  }
   if (name === 'model-proxy' && typeof loadModelProxyPanel === 'function') {
     loadModelProxyPanel();
   }
@@ -1006,6 +1003,9 @@ async function showSection(name, options = {}) {
     // 先挂控制台（幂等），再拉 IP Helper / 系统代理状态（依赖已渲染的固定 id）
     if (typeof mountControlStation === 'function') {
       mountControlStation();
+    }
+    if (typeof loadLocalWorkspace === 'function') {
+      loadLocalWorkspace();
     }
     if (typeof loadIpHelperStatus === 'function') {
       loadIpHelperStatus(true);

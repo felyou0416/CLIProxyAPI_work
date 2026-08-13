@@ -922,12 +922,19 @@ function restoreChatSessionView(session) {
   if (session.systemPrompt) {
     chatContext.unshift({ role: 'system', content: session.systemPrompt });
   }
-  renderPendingSessionState(session);
+  renderPendingSessionState(session, true);
   updateChatGeneratingState();
   updateChatSendState();
+  const hist = document.getElementById('chat-history');
+  if (hist) {
+    hist.scrollTop = hist.scrollHeight;
+    requestAnimationFrame(() => {
+      if (hist) hist.scrollTop = hist.scrollHeight;
+    });
+  }
 }
 
-function renderPendingSessionState(session) {
+function renderPendingSessionState(session, quiet = false) {
   if (!session || (!isSessionRunning(session) && session.status !== 'error')) return;
   if (isMediaMode()) {
     renderMediaWorkspace(session);
@@ -959,7 +966,11 @@ function renderPendingSessionState(session) {
   if (isSessionRunning(session)) {
     chatRequestViews[requestId] = { history, msgDiv, contentDiv };
   }
-  requestAnimationFrame(() => history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' }));
+  if (!quiet) {
+    requestAnimationFrame(() => history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' }));
+  } else {
+    history.scrollTop = history.scrollHeight;
+  }
 }
 
 function switchToSession(id) {
@@ -1677,7 +1688,7 @@ function renderMediaWorkspace(focusSession = null) {
   const kind = isVideoMode() ? 'video' : 'image';
   // Videos are link-only (no disk gallery). Images merge shared local files.
   paintMediaWorkspace(history, focusSession, kind === 'image' ? (diskMediaCache.image || []) : []);
-  requestAnimationFrame(() => history.scrollTo({ top: 0, behavior: 'smooth' }));
+  history.scrollTop = 0;
 
   if (kind !== 'image') return;
   fetchDiskMedia('image').then((items) => {
@@ -2011,9 +2022,11 @@ function appendMessage(role, content, quiet) {
   }
 
   history.appendChild(msgDiv);
-  requestAnimationFrame(() => {
-    history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' });
-  });
+  if (!quiet) {
+    requestAnimationFrame(() => {
+      history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' });
+    });
+  }
 }
 
 // ─── Input handling ───

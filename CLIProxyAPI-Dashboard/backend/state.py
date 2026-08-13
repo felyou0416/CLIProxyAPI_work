@@ -96,6 +96,7 @@ def default_state():
         'notes': 'Select an auth file, then start RelayX for CC-switch / Claude.',
         'disable_cooling': False,
         'core_routing_strategy': 'round-robin',
+        'model_pool_archived': True,
         'force_model_prefix': False,
         'passthrough_headers': False,
         'request_retry': 3,

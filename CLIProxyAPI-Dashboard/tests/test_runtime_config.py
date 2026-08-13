@@ -80,6 +80,40 @@ class RuntimeCoreOptionsTests(unittest.TestCase):
         self.assertEqual(result['removed_active_auth_count'], 1)
         self.assertFalse(stale.exists())
 
+    def test_all_disabled_auth_files_remove_stale_runtime_credentials(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            pool_auth_dir = root / 'auth'
+            active_auth_dir = root / 'runtime-auth'
+            provider_dir = pool_auth_dir / 'codex'
+            provider_dir.mkdir(parents=True)
+            active_auth_dir.mkdir(parents=True)
+            (provider_dir / 'disabled.json').write_text(json.dumps({'disabled': True}), encoding='utf-8')
+            stale = active_auth_dir / 'stale.json'
+            stale.write_text('{"type":"codex"}', encoding='utf-8')
+
+            with patch.object(auth, 'POOL_AUTH_DIR', pool_auth_dir), \
+                 patch.object(auth, 'ACTIVE_AUTH_DIR', active_auth_dir):
+                result = auth.rebuild_runtime_config_from_state({})
+
+            self.assertEqual(result['reason'], 'no_auth_files')
+            self.assertFalse(stale.exists())
+
+    def test_auth_item_redacts_api_key_from_dashboard_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            auth_path = pathlib.Path(tmp) / 'key.json'
+            auth_path.write_text(json.dumps({
+                'content': {
+                    'type': 'api_key',
+                    'provider': 'test-provider',
+                    'api_key': 'secret-api-key-value',
+                },
+            }), encoding='utf-8')
+            item = auth.build_auth_item('test-provider', auth_path)
+
+        self.assertNotIn('apiKey', item)
+        self.assertEqual(item['apiKeyMasked'], 'secret...alue')
+
     def test_passthrough_image_mode_is_supported(self):
         rendered = auth.rewrite_disable_image_generation('disable-image-generation: false\n', 'passthrough')
         self.assertIn('disable-image-generation: "passthrough"', rendered)
@@ -152,6 +186,118 @@ class RuntimeConfigRequestLogTests(unittest.TestCase):
             self.assertEqual(normalized['access_token'], 'access-token')
             runtime_text = runtime_config.read_text(encoding='utf-8')
             self.assertIn(pathlib.Path(active_auth_dir).resolve().as_posix(), runtime_text)
+
+    def test_disabled_oauth_is_not_copied_to_runtime_auth_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            base_config = root / 'base-config.yaml'
+            runtime_config = root / 'runtime.yaml'
+            pool_auth_dir = root / 'auth'
+            active_auth_dir = root / 'runtime-auth'
+            provider_dir = pool_auth_dir / 'codex'
+            provider_dir.mkdir(parents=True)
+            oauth_payload = {
+                'metadata': {'email': 'disabled@example.com', 'provider': 'openai-codex'},
+                'content': {
+                    'type': 'oauth',
+                    'provider': 'openai-codex',
+                    'access': 'disabled-access',
+                    'refresh': 'disabled-refresh',
+                    'accountId': 'disabled-account',
+                },
+                'disabled': True,
+            }
+            enabled_payload = {
+                'metadata': {'email': 'enabled@example.com', 'provider': 'openai-codex'},
+                'content': {
+                    'type': 'oauth',
+                    'provider': 'openai-codex',
+                    'access': 'enabled-access',
+                    'refresh': 'enabled-refresh',
+                    'accountId': 'enabled-account',
+                },
+            }
+            (provider_dir / 'disabled.json').write_text(json.dumps(oauth_payload), encoding='utf-8')
+            (provider_dir / 'enabled.json').write_text(json.dumps(enabled_payload), encoding='utf-8')
+            base_config.write_text('host: "127.0.0.1"\nauth-dir: "old"\n', encoding='utf-8')
+
+            with patch.object(auth, 'BASE_CONFIG', base_config), \
+                 patch.object(auth, 'RUNTIME_CONFIG', runtime_config), \
+                 patch.object(auth, 'POOL_AUTH_DIR', pool_auth_dir), \
+                 patch.object(auth, 'ACTIVE_AUTH_DIR', active_auth_dir), \
+                 patch.object(auth, 'rewrite_oauth_model_aliases', side_effect=lambda text, providers, auth_refs=None: text), \
+                 patch.object(auth, 'rewrite_claude_api_key', side_effect=lambda text, entries: text), \
+                 patch.object(auth, 'rewrite_openai_compatibility', side_effect=lambda text, entries: text), \
+                 patch.object(auth, '_runtime_config_validation_issues', return_value=[]):
+                copied = auth.build_runtime_config(bind_host='127.0.0.1', access_api_keys=['cliproxyapi'], state={})
+
+            self.assertEqual(len(copied), 1)
+            self.assertEqual(json.loads(copied[0].read_text(encoding='utf-8'))['access_token'], 'enabled-access')
+            self.assertEqual({path.name for path in active_auth_dir.glob('*.json')}, {copied[0].name})
+
+    def test_disabled_files_are_excluded_from_provider_and_model_discovery(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            pool_auth_dir = root / 'auth'
+            provider_dir = pool_auth_dir / 'disabled-provider'
+            provider_dir.mkdir(parents=True)
+            (provider_dir / 'disabled.json').write_text(json.dumps({
+                'disabled': True,
+                'content': {
+                    'type': 'oauth',
+                    'provider': 'disabled-provider',
+                    'access': 'access-token',
+                    'refresh': 'refresh-token',
+                    'models': ['disabled-model'],
+                },
+            }), encoding='utf-8')
+
+            with patch.object(auth, 'POOL_AUTH_DIR', pool_auth_dir), \
+                 patch.object(auth, 'iter_auth_source_dirs', return_value=[('disabled-provider', provider_dir)]), \
+                 patch.object(auth, '_load_model_mapping_overrides', return_value={}):
+                self.assertEqual(auth.collect_detected_providers(), [])
+                aliases = auth.collect_provider_model_aliases()
+
+            self.assertNotIn('disabled-provider', aliases)
+
+    def test_disabled_manual_api_key_is_not_added_to_compatibility_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            base_config = root / 'base-config.yaml'
+            runtime_config = root / 'runtime.yaml'
+            pool_auth_dir = root / 'auth'
+            active_auth_dir = root / 'runtime-auth'
+            provider_dir = pool_auth_dir / 'openai'
+            provider_dir.mkdir(parents=True)
+            for name, provider, api_key, disabled in (
+                ('disabled.json', 'disabled-provider', 'disabled-key', True),
+                ('enabled.json', 'enabled-provider', 'enabled-key', False),
+            ):
+                payload = {
+                    'disabled': disabled,
+                    'content': {
+                        'type': 'api_key',
+                        'provider': provider,
+                        'base_url': 'https://example.invalid/v1',
+                        'api_key': api_key,
+                        'models': ['test-model'],
+                    },
+                }
+                (provider_dir / name).write_text(json.dumps(payload), encoding='utf-8')
+            base_config.write_text('host: "127.0.0.1"\n', encoding='utf-8')
+            captured = []
+
+            with patch.object(auth, 'BASE_CONFIG', base_config), \
+                 patch.object(auth, 'RUNTIME_CONFIG', runtime_config), \
+                 patch.object(auth, 'POOL_AUTH_DIR', pool_auth_dir), \
+                 patch.object(auth, 'ACTIVE_AUTH_DIR', active_auth_dir), \
+                 patch.object(auth, 'rewrite_oauth_model_aliases', side_effect=lambda text, providers, auth_refs=None: text), \
+                 patch.object(auth, 'rewrite_claude_api_key', side_effect=lambda text, entries: text), \
+                 patch.object(auth, 'rewrite_openai_compatibility', side_effect=lambda text, entries: captured.extend(entries) or text), \
+                 patch.object(auth, '_runtime_config_validation_issues', return_value=[]):
+                auth.build_runtime_config(bind_host='127.0.0.1', access_api_keys=['cliproxyapi'], state={})
+
+            self.assertEqual([entry['api_key'] for entry in captured], ['enabled-key'])
 
 class RuntimeConfigLocalPluginTests(unittest.TestCase):
     def test_agnes_media_models_use_media_proxy_group(self):

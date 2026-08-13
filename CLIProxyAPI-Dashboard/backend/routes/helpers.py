@@ -7,6 +7,7 @@ def send_json(handler, payload, status=200):
     handler.send_response(status)
     handler.send_header('Content-Type', 'application/json; charset=utf-8')
     handler.send_header('Content-Length', str(len(data)))
+    handler.send_header('Cache-Control', 'no-store')
     handler.end_headers()
     handler.wfile.write(data)
 

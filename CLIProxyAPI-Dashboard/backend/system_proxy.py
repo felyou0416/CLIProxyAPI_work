@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 from typing import Any
 
 from backend.local_proxy import _port_is_listening, _probe_http_proxy, collect_candidate_ports, detect_local_http_proxy
+
+_PROXY_SYNC_LOCK = threading.RLock()
 
 PROXY_ENV_VARS = (
     'HTTP_PROXY',
@@ -141,6 +144,64 @@ def get_system_proxy_status() -> dict[str, Any]:
     }
 
 
+def _synchronize_dashboard_proxy(proxy_url: str) -> dict[str, Any]:
+    """Apply a selected local mixed port to every Dashboard-managed local override."""
+    with _PROXY_SYNC_LOCK:
+        from backend import auth, model_pool
+
+        settings = auth.synchronize_local_proxy_settings(proxy_url)
+        if not settings.get('ok'):
+            return {'ok': False, 'message': settings.get('error') or 'Failed to synchronize model proxy settings.'}
+        pools = model_pool.remap_local_pool_proxy_urls(proxy_url)
+        if not pools.get('ok'):
+            return {'ok': False, 'message': pools.get('error') or 'Failed to synchronize model pool settings.'}
+        runtime = auth.rebuild_runtime_config_from_state()
+        if not runtime.get('rebuilt') and runtime.get('reason') != 'no_auth_files':
+            return {
+                'ok': False,
+                'message': runtime.get('error') or 'Failed to rebuild CPA runtime configuration.',
+                'settings_updated': settings.get('settings_updated', 0),
+                'pool_nodes_updated': pools.get('changed_nodes', 0),
+                'cache_entries_cleared': settings.get('cache_entries_cleared', 0),
+                'runtime': runtime,
+            }
+        return {
+            'ok': True,
+            'settings_updated': settings.get('settings_updated', 0),
+            'pool_nodes_updated': pools.get('changed_nodes', 0),
+            'cache_entries_cleared': settings.get('cache_entries_cleared', 0),
+            'runtime': runtime,
+        }
+
+
+def _configure_selected_port(port: int) -> dict[str, Any]:
+    proxy_url = f'http://127.0.0.1:{port}'
+    set_system_proxy(True, f'127.0.0.1:{port}')
+    set_env_vars(proxy_url)
+    sync = _synchronize_dashboard_proxy(proxy_url)
+    if not sync.get('ok'):
+        return {
+            'ok': False,
+            'message': sync.get('message') or '系统代理已设置，但 Dashboard 同步失败。',
+            'proxy_enabled': True,
+            'port': port,
+            'proxy_url': proxy_url,
+            'synchronization': sync,
+        }
+    return {
+        'ok': True,
+        'message': (
+            f'已切换到 127.0.0.1:{port}，并同步 {sync["settings_updated"]} 项代理规则、'
+            f'{sync["pool_nodes_updated"]} 个轮询池节点。'
+        ),
+        'proxy_enabled': True,
+        'port': port,
+        'proxy_url': proxy_url,
+        'synchronization': sync,
+        'runtime_rebuilt': bool(sync['runtime'].get('rebuilt')),
+    }
+
+
 def configure_system_proxy() -> dict[str, Any]:
     available_ports = list_available_ports()
     if not available_ports:
@@ -155,16 +216,7 @@ def configure_system_proxy() -> dict[str, Any]:
             'message': '所有可用端口测试失败，无法自动配置代理。',
             'available_ports': available_ports,
         }
-    proxy_url = f'http://127.0.0.1:{best_port}'
-    set_system_proxy(True, f'127.0.0.1:{best_port}')
-    set_env_vars(proxy_url)
-    return {
-        'ok': True,
-        'message': f'已自动检测并配置代理到可用端口 {best_port}！',
-        'proxy_enabled': True,
-        'port': best_port,
-        'proxy_url': proxy_url,
-    }
+    return _configure_selected_port(best_port)
 
 
 def toggle_system_proxy() -> dict[str, Any]:
@@ -192,16 +244,7 @@ def toggle_system_proxy() -> dict[str, Any]:
             'message': '没有可用的代理端口，无法启动代理。',
             'available_ports': available_ports,
         }
-    proxy_url = f'http://127.0.0.1:{best_port}'
-    set_system_proxy(True, f'127.0.0.1:{best_port}')
-    set_env_vars(proxy_url)
-    return {
-        'ok': True,
-        'message': f'代理已启动，使用端口 {best_port}。',
-        'proxy_enabled': True,
-        'port': best_port,
-        'proxy_url': proxy_url,
-    }
+    return _configure_selected_port(best_port)
 
 
 def restore_system_proxy_default() -> dict[str, Any]:
@@ -233,24 +276,10 @@ def set_system_proxy_port(port: int, require_listening: bool = True) -> dict[str
             'listening': False,
         }
 
-    proxy_url = f'http://127.0.0.1:{port_i}'
-    set_system_proxy(True, f'127.0.0.1:{port_i}')
-    set_env_vars(proxy_url)
-
-    works = False
-    if listening:
-        try:
-            works = bool(_probe_http_proxy(port_i).get('works'))
-        except Exception:
-            works = False
-
-    note = '' if works or not listening else '（端口已设置，但连通探测未通过）'
-    return {
-        'ok': True,
-        'message': f'已将系统代理切换到 127.0.0.1:{port_i}{note}',
-        'proxy_enabled': True,
-        'port': port_i,
-        'proxy_url': proxy_url,
-        'listening': listening,
-        'works': works,
-    }
+    result = _configure_selected_port(port_i)
+    result['listening'] = listening
+    try:
+        result['works'] = bool(_probe_http_proxy(port_i).get('works')) if listening else False
+    except Exception:
+        result['works'] = False
+    return result

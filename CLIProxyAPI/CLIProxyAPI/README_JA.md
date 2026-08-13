@@ -2,7 +2,9 @@
 
 [English](README.md) | [中文](README_CN.md) | 日本語
 
-CLI向けのOpenAI/Gemini/Claude/Codex/Grok互換APIインターフェースを提供するプロキシサーバーです。
+デスクトップで CLIProxyAPI を利用したい場合は、[EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) デスクトップクライアントをおすすめします。グラフィカルな設定画面、自動更新、システムトレイ連携、CLIProxyAPI サービスのワンクリック起動/停止などの機能を提供します。
+
+CLIProxyAPI は、CLI向けのOpenAI/Gemini/Claude/Codex/Grok互換APIインターフェースを提供するプロキシサーバーです。
 
 ローカル環境や複数のCLIアカウントを通じて、OpenAI（Responses含む）、Gemini（Interactions含む）、またはClaude互換のクライアントやSDKから、以下のプロバイダーにアクセスできます。
 
@@ -14,7 +16,7 @@ CLI向けのOpenAI/Gemini/Claude/Codex/Grok互換APIインターフェースを�
     </tr>
     <tr>
         <td align="center"><a href="https://www.kimi.com/code/?aff=cliproxyapi"><img src="./assets/logo/kimi.svg" alt="Kimi" width="28" height="28" /></a></td>
-        <td>Kimiシリーズモデル（Kimi K3、Kimi K2.7 Codeなど）。<a href="https://platform.kimi.ai/docs/guide/kimi-k3-quickstart">Kimi K3</a>は、Moonshot AIで最も高性能なモデルであり、世界初のオープンな3兆パラメータ級モデルです。2.8兆のパラメータ、ネイティブな視覚機能、100万トークンのコンテキストウィンドウを備え、長期間にわたるコーディング、知識作業、推論向けに構築されています。CLIProxyAPIはOAuthまたは互換APIインターフェース経由でKimiをサポートします。<a href="https://www.kimi.com/code/?aff=cliproxyapi">Kimi Codeサブスクリプション</a>を試すか、<a href="https://platform.kimi.ai/?aff=cliproxyapi">Kimi Open Platform</a>でAPIキーを取得してください。CLIProxyAPIとオープンソースコミュニティを支援してくださるKimiに感謝します！</td>
+        <td>Kimiシリーズモデル（Kimi K3、Kimi K2.7 Codeなど）。<a href="https://platform.kimi.ai/docs/guide/kimi-k3-quickstart">Kimi K3</a>は、Moonshot AIで最も高性能なモデルであり、世界初のオープンな3兆パラメータ級モデルです。2.8兆のパラメータ、ネイティブな視覚機能、100万トークンのコンテキストウィンドウを備え、長期間にわたるコーディング、知識作業、推論向けに構築されています。CLIProxyAPIはOAuthまたは互換APIインターフェース経由でKimiをサポートします。<a href="https://www.kimi.com/code/?aff=cliproxyapi">Kimi Codeサブスクリプション</a>を試すか、<a href="https://platform.kimi.ai?track_id=track-8a28e4b291d84f62af2fccc3e7a21cb3&aff=cliproxyapi">Kimi Open Platform</a>でAPIキーを取得してください。CLIProxyAPIとオープンソースコミュニティを支援してくださるKimiに感謝します！</td>
     </tr>
     <tr>
         <td align="center"><a href="https://platform.openai.com/docs/guide/gpt-5.6"><img src="./assets/logo/openai.svg" alt="OpenAI" width="28" height="28" /></a></td>
@@ -96,6 +98,14 @@ PackyCodeは当ソフトウェアのユーザーに特別割引を提供して�
 <tr>
 <td width="180"><a href="https://www.fastaitoken.com/"><img src="./assets/fastaitoken.png" alt="FastAIToken" width="150"></a></td>
 <td><a href="https://www.fastaitoken.com/">FastAIToken</a> のスポンサーシップに感謝します！FastAIToken は開発者向けの AI API 集約プラットフォームで、速度と安定性を重視しています。OpenAI、Claude、Gemini などの主要 AI モデルに対応し、チャージ比率は 1:1（1元 = 1ドル分の API クレジット）のため、開発者はより低コストで便利に世界トップクラスの AI モデルを利用できます。<a href="https://t.me/+stwq0MLi0PtkZTZl">Telegram サポートグループ</a><br/>プラットフォームでは用途に応じて複数のチャネルを選択できます：超低価格の 0.02× OpenAI プロモーション枠（期間限定）、0.25× からの OpenAI チャネル、95% 固定キャッシュの 0.7× Claude、1.2× Claude Max チャネル。また、各チャネルの稼働率、遅延、運用状況をリアルタイム表示する公開ステータスページも提供しており、透明で信頼性の高いサービスを実現しています。さらに FastAIToken は 24時間365日の真人テクニカルサポート（ボットではありません）を提供し、開発者のニーズに迅速に対応します。エンタープライズ顧客向けには、安定性を保証する SLA 対応の専用チャネルプールを提供し、契約対応、請求書発行、専任保守にも対応しています。</td>
+</tr>
+<tr>
+<td width="180"><a href="https://api.lmuai.com/register?promo=CLIPROXYAPI-%E4%BC%98%E6%83%A0%E7%A0%81"><img src="./assets/lmuai.png" alt="LMU" width="150"></a></td>
+<td><a href="https://api.lmuai.com/">LMU（灵眸 AI）</a>による本プロジェクトへのご支援に感謝します！LMUは、Claude Code、Codex、その他のコーディングエージェント向けのAnthropicおよびOpenAI互換リレーサービスで、中国国内モデル（DeepSeek、GLM、Qwenなど）と主要な海外プロバイダーの両方に対応しています。<code>ANTHROPIC_BASE_URL</code>をLMUエンドポイントに設定するだけで、コードを変更せずに標準の<code>/v1/messages</code> API経由で接続できます。実際のClaude CodeセッションではPrompt Cacheのヒット率が90%を超えており、長時間のセッションにかかるコストを削減できます。未使用のチャージ残高は申請により返金可能です。エンタープライズプランでは、グループ化されたチーム管理のAPIキーを利用でき、IP・クォータ制限、レートウィンドウ、有効期限を設定できるほか、トラフィック監視と請求書発行にも対応しています。<a href="https://api.lmuai.com/register?promo=CLIPROXYAPI-%E4%BC%98%E6%83%A0%E7%A0%81">LMU CLIProxyAPI専用リンク</a>から登録すると、無料テストクレジットを受け取れます。</td>
+</tr>
+<tr>
+<td width="180"><a href="https://infistar.ai/register?aff=FQKC6J6R&amp;ref_source=link"><img src="./assets/infistar.png" alt="Infistar.ai" width="150"></a></td>
+<td>モデルの水増し、性能低下、あるいは不透明な価格設定が心配ですか？世界をリードするモデル集約サービス Infistar.ai では、提供するすべてのモデルを実際の呼び出しによって検証しています。供給元は公式 API と公式アカウントプールで、10,000 を超える供給経路を負荷分散し、低遅延とピーク時の安定性を確保します。ChatGPT、Claude、Gemini、Grok、GLM、DeepSeek、Kimi、Qwen、MiniMax など国内外の主要モデルを網羅し、テキスト、動画、画像、埋め込み、リランキングなどのフルモーダル機能に対応しています。価格と利用量は透明かつ明確で確認しやすく、モデルは公式価格の 10% から利用できます。CLIProxyAPI ユーザーは専用入口から登録してお試しいただけます。招待リンク：<a href="https://infistar.ai/register?aff=FQKC6J6R&amp;ref_source=link">https://infistar.ai/register?aff=FQKC6J6R&amp;ref_source=link</a></td>
 </tr>
 </tbody>
 </table>
@@ -281,6 +291,10 @@ OmniRouteはマルチプロバイダーLLM向けのAIゲートウェイです：
 ### [Codex Switch](https://github.com/9ycrooked/CodexSwitch)
 
 Tauri 2 + Vue 3で構築された、複数のOpenAI Codexデスクトップアカウントを管理するためのツールです。保存済みのChatGPT/Codex認証プロファイルを切り替え、5時間および週次クォータ使用量をリアルタイムで確認し、tokenの状態を検証し、現在のアカウント詳細を表示し、手動コピーなしでauth.jsonファイルをインポートまたは保存できます。
+
+### [Alex](https://github.com/madhavajay/alex)
+
+CLIProxyAPIに着想を得た、オプションUI付きのローカルRust LLMプロキシ。コーディングエージェントを複数プロバイダーへルーティングし、ローカルトレース、スクリプト可能なミドルウェア、複数サブスクリプションの統合、フェイルオーバー、インスタントメッセンジャー経由の再認証に対応します。
 
 > [!NOTE]
 > CLIProxyAPIの移植版またはそれに触発されたプロジェクトを開発した場合は、PRを送ってこのリストに追加してください。

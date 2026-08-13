@@ -66,9 +66,14 @@ function renderIndicator(indicator) {
 }
 
 function renderHeading(group) {
+  const icon = String(group.icon || '').trim();
+  // Single-letter placeholders add visual noise; service state already has a dot.
+  const iconHtml = /^[A-Za-z]$/.test(icon)
+    ? ''
+    : `<span class="control-group-icon">${escapeHtml(icon)}</span>`;
   return `
     <div class="control-group-heading">
-      <span class="control-group-icon">${escapeHtml(group.icon || '')}</span>
+      ${iconHtml}
       ${renderTitle(group.title)}
       ${renderIndicator(group.indicator)}
     </div>
@@ -86,6 +91,7 @@ function buttonDataAttrs(btn) {
     attr('data-cs-mode', btn.mode),
     attr('data-cs-port', btn.port),
     attr('data-cs-label', btn.label),
+    attr('data-cs-local-service', btn.localService),
   ];
   if (btn.wait) {
     // wait 结构较复杂，序列化后挂属性；分发时 JSON.parse
@@ -216,6 +222,12 @@ async function dispatchControlStationClick(button) {
     const errorState = button.dataset.csErrorState || undefined;
     const waitOpts = buildWaitOptions(parseWaitAttr(button.dataset.csWait));
     return handleActionWithIndicator(type, button, label, apiUrl, errorState, waitOpts);
+  }
+
+  if (action === 'local-service') {
+    const serviceId = button.dataset.csLocalService;
+    if (!serviceId || !op) return;
+    return runLocalWorkspaceAction(button, serviceId, op);
   }
 
   if (action === 'dashboard') {

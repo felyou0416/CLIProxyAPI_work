@@ -298,6 +298,17 @@ function notifyProxy(message, isError = false) {
   else alert(message);
 }
 
+function formatProxySynchronizationMessage(resp, fallback) {
+  const sync = resp?.synchronization;
+  if (!sync?.ok) return fallback;
+  const details = [];
+  if (sync.settings_updated) details.push(`${sync.settings_updated} 项规则`);
+  if (sync.pool_nodes_updated) details.push(`${sync.pool_nodes_updated} 个池节点`);
+  if (sync.cache_entries_cleared) details.push(`清除 ${sync.cache_entries_cleared} 个缓存`);
+  if (resp.runtime_rebuilt) details.push('CPA 配置已重建');
+  return details.length ? `${fallback}（${details.join('，')}）` : fallback;
+}
+
 // 系统代理动作表：控制台 sys-proxy 分发与旧 proxySetPort 等 shim 共用
 const SYSTEM_PROXY_ACTIONS = {
   'set-port': {
@@ -308,7 +319,7 @@ const SYSTEM_PROXY_ACTIONS = {
       proxyStatus.enabled = true;
       proxyStatus.port = resp.port || port;
       updateProxyStatusDisplay();
-      return resp.message || `已切换到 ${port}`;
+      return formatProxySynchronizationMessage(resp, resp.message || `已切换到 ${port}`);
     },
     fail: '切换失败',
   },
@@ -316,7 +327,7 @@ const SYSTEM_PROXY_ACTIONS = {
     label: '检测',
     path: '/api/system-proxy/configure',
     body: () => ({}),
-    onOk: (resp) => resp.message || '配置成功',
+    onOk: (resp) => formatProxySynchronizationMessage(resp, resp.message || '配置成功'),
     fail: '配置失败',
   },
   toggle: {
@@ -327,7 +338,7 @@ const SYSTEM_PROXY_ACTIONS = {
       proxyStatus.enabled = !!resp.proxy_enabled;
       proxyStatus.port = resp.port || null;
       updateProxyStatusDisplay();
-      return resp.message || '操作成功';
+      return formatProxySynchronizationMessage(resp, resp.message || '操作成功');
     },
     fail: '操作失败',
   },

@@ -258,17 +258,22 @@ func (s *HomeDispatchSelection) ReplaceAuth(auth *Auth) {
 	updated := auth.Clone()
 	s.authMu.Lock()
 	defer s.authMu.Unlock()
-	if s.Auth != nil {
-		if updated.Attributes == nil {
-			updated.Attributes = make(map[string]string)
-		}
-		for _, key := range []string{homeUpstreamModelAttributeKey, homeForceMappingAttributeKey, homeOriginalAliasAttributeKey} {
-			if value := strings.TrimSpace(s.Auth.Attributes[key]); value != "" {
-				updated.Attributes[key] = value
-			}
+	preserveHomeRoutingAttributes(updated, s.Auth)
+	s.Auth = updated
+}
+
+func preserveHomeRoutingAttributes(updated, previous *Auth) {
+	if updated == nil || previous == nil {
+		return
+	}
+	if updated.Attributes == nil {
+		updated.Attributes = make(map[string]string)
+	}
+	for _, key := range []string{homeUpstreamModelAttributeKey, homeForceMappingAttributeKey, homeOriginalAliasAttributeKey} {
+		if value := strings.TrimSpace(previous.Attributes[key]); value != "" {
+			updated.Attributes[key] = value
 		}
 	}
-	s.Auth = updated
 }
 
 // CloneAuth returns a standalone auth copy without the selection handle.

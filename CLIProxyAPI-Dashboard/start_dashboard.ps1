@@ -63,6 +63,24 @@ function Get-ListeningPids {
     return @($pids)
 }
 
+function Get-DashboardListenerPids {
+    param([int[]]$Pids)
+
+    $dashboardPids = New-Object 'System.Collections.Generic.List[int]'
+    foreach ($listenerPid in @($Pids)) {
+        try {
+            $process = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerPid" -ErrorAction Stop
+            $commandLine = [string]$process.CommandLine
+            if ($process.Name -match '^python(?:\.exe)?$' -and $commandLine -match '(?i)CLIProxyAPI-Dashboard[\\/]app\.py') {
+                $dashboardPids.Add([int]$listenerPid)
+            }
+        } catch {
+            # A listener may exit while it is being inspected.
+        }
+    }
+    return @($dashboardPids)
+}
+
 function Test-DashboardPortProxy {
     param([string]$Port)
     $pattern = "^\s*0\.0\.0\.0\s+$([regex]::Escape($Port))\s+127\.0\.0\.1\s+$([regex]::Escape($Port))\s*$"
@@ -187,13 +205,26 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $stdoutLog = Join-Path $logDir 'dashboard.stdout.log'
 $stderrLog = Join-Path $logDir 'dashboard.stderr.log'
 
-# If something is already healthy on the port, reuse it (no network needed).
-if (Test-LocalHttpReady -Url $healthUrl) {
+# Reuse exactly one healthy Dashboard process. Multiple Python listeners on the
+# same port can hold different in-memory auth caches and make API results vary.
+$existingPids = Get-ListeningPids -Port ([int]$dashboardPort)
+$dashboardListenerPids = Get-DashboardListenerPids -Pids $existingPids
+$isHealthy = Test-LocalHttpReady -Url $healthUrl
+if ($isHealthy -and $dashboardListenerPids.Count -eq 1 -and $existingPids.Count -eq 1) {
     Write-Host "Dashboard is already running at $dashboardUrl" -ForegroundColor Green
     if ($OpenBrowser) {
         Start-Process $dashboardUrl | Out-Null
     }
     exit 0
+}
+
+if ($existingPids.Count -gt 0 -and $dashboardListenerPids.Count -ne $existingPids.Count) {
+    Write-Error "Port $dashboardPort is owned by a process other than this Dashboard. Refusing to terminate it."
+    exit 1
+}
+
+if ($dashboardListenerPids.Count -gt 1) {
+    Write-Host "Found $($dashboardListenerPids.Count) Dashboard listeners on port $dashboardPort; restarting one canonical instance ..." -ForegroundColor Yellow
 }
 
 $restoreDashboardPortProxy = $false
@@ -209,17 +240,16 @@ netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=$dashbo
     }
 }
 
-Write-Host "Stopping any existing listener on port $dashboardPort ..." -ForegroundColor Yellow
-$existingPids = Get-ListeningPids -Port ([int]$dashboardPort)
-foreach ($existingPid in $existingPids) {
+Write-Host "Stopping existing Dashboard listener on port $dashboardPort ..." -ForegroundColor Yellow
+foreach ($existingPid in $dashboardListenerPids) {
     try {
         Stop-Process -Id $existingPid -Force -ErrorAction Stop
-        Write-Host "Stopped old process PID $existingPid" -ForegroundColor DarkYellow
+        Write-Host "Stopped old Dashboard process PID $existingPid" -ForegroundColor DarkYellow
     } catch {
         Write-Warning "Failed to stop PID ${existingPid}: $($_.Exception.Message)"
     }
 }
-if ($existingPids.Count -gt 0) {
+if ($dashboardListenerPids.Count -gt 0) {
     Start-Sleep -Milliseconds 400
 }
 

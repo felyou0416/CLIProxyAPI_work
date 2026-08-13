@@ -5,8 +5,8 @@ import shutil
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.model_pool import save_model_pools, load_model_pools, get_model_pool_manual_entries
-from backend.auth import build_openai_compatibility_block, get_configured_provider_models, _extract_payload_models, _extract_manual_api_config
+from backend.model_pool import save_model_pools, load_model_pools, get_model_pool_manual_entries, remap_local_pool_proxy_urls
+from backend.auth import build_openai_compatibility_block, get_configured_provider_models, _extract_payload_models, _extract_manual_api_config, rewrite_openai_compatibility
 
 class TestModelPoolStorage(unittest.TestCase):
     def setUp(self):
@@ -82,6 +82,62 @@ class TestModelPoolStorage(unittest.TestCase):
         node_file_path = self.model_pools_dir / "gpt-4o-custom" / "node_1.json"
         extracted = _extract_payload_models(payload_without_model, path=node_file_path)
         self.assertIn("gpt-4o-custom", extracted)
+
+    def test_archived_pool_routes_are_omitted(self):
+        entries = [{
+            'provider': 'manual-provider',
+            'base_url': 'https://manual.example/v1',
+            'api_key': 'manual-key',
+            'models': ['manual-model'],
+        }]
+        pool_entries = [{
+            'provider': 'pool-provider',
+            'base_url': 'https://pool.example/v1',
+            'api_key': 'pool-key',
+            'models': ['pool-model'],
+        }]
+        with patch('backend.auth.load_state', return_value={'model_pool_archived': True}), \
+             patch('backend.model_pool.get_model_pool_manual_entries', return_value=pool_entries) as get_pool_entries:
+            rendered = rewrite_openai_compatibility('', entries)
+
+        self.assertIn('manual-provider', rendered)
+        self.assertNotIn('pool-provider', rendered)
+        get_pool_entries.assert_not_called()
+
+    def test_unarchived_pool_routes_are_included(self):
+        pool_entries = [{
+            'provider': 'pool-provider',
+            'base_url': 'https://pool.example/v1',
+            'api_key': 'pool-key',
+            'models': ['pool-model'],
+        }]
+        with patch('backend.auth.load_state', return_value={'model_pool_archived': False}), \
+             patch('backend.model_pool.get_model_pool_manual_entries', return_value=pool_entries):
+            rendered = rewrite_openai_compatibility('', [])
+
+        self.assertIn('pool-provider', rendered)
+
+    def test_remap_local_pool_proxy_urls_preserves_direct_and_external(self):
+        sample_pools = [{
+            'id': 'pool-test-1',
+            'provider': 'pool-provider-custom',
+            'call_id': 'custom-pool',
+            'nodes': [
+                {'id': 'local', 'base_url': 'https://local.example/v1', 'api_key': 'one', 'upstream_id': 'a', 'proxy_url': 'http://127.0.0.1:7890'},
+                {'id': 'direct', 'base_url': 'https://direct.example/v1', 'api_key': 'two', 'upstream_id': 'b', 'proxy_url': 'direct'},
+                {'id': 'external', 'base_url': 'https://external.example/v1', 'api_key': 'three', 'upstream_id': 'c', 'proxy_url': 'http://proxy.example:8080'},
+            ],
+        }]
+        with patch('backend.model_pool.load_model_pools', return_value=sample_pools), \
+             patch('backend.model_pool.save_model_pools', return_value=True) as save:
+            result = remap_local_pool_proxy_urls('http://127.0.0.1:10090')
+
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['changed_nodes'], 1)
+        nodes = save.call_args.args[0][0]['nodes']
+        self.assertEqual(nodes[0]['proxy_url'], 'http://127.0.0.1:10090')
+        self.assertEqual(nodes[1]['proxy_url'], 'direct')
+        self.assertEqual(nodes[2]['proxy_url'], 'http://proxy.example:8080')
 
     def test_get_model_pool_manual_entries_building(self):
         sample_pools = [

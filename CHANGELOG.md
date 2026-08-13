@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-08-13
+### Added
+- Added locally ignored Dashboard action configuration with validated, allowlisted start/restart/stop controls for private local services.
+- Added Dashboard auth-card field-level queued autosave, independent OAuth health indicators, and runtime filtering for disabled auth entries.
+- Added request-metrics migration preservation, historical model attribution, and refreshed client, request, and service-control UI.
+- Added documentation linting and Dashboard local-workspace regression coverage.
+
+### Changed
+- Synced the embedded CPA core to upstream `v7.2.128`.
+- Archived the Dashboard model-pool runtime UI and endpoints while retaining compatible configuration and credentials.
+
+### Fixed
+- Preserved cumulative token history during request-metrics schema migration.
+- Prevented disabled authentication entries from being emitted into generated runtime configuration.
+- Restored concise, grouped local service controls in the account control station.
+
 ## [1.3.0] - 2026-08-12
 ### Added
 - Standardized request monitor (`#requests`) pagination with 50 items/page, top-aligned navigation controls, and direct page jumping.

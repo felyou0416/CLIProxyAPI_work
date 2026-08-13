@@ -24,19 +24,26 @@
       </div>
 
       <div id="model-pool-detail-form" style="display: none; flex-direction: column; gap: 14px;">
-        <!-- Top: Pool and preset aliases -->
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--panel-2); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);">
-          <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
-            <span style="font-weight: 700; font-size: 13px; color: var(--text-muted); white-space: nowrap;">调用 Model ID:</span>
-            <input id="pool-input-call-id" type="text" placeholder="例如：gpt-4o" style="height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 13px; flex: 1; max-width: 300px;" oninput="syncPoolCallId(this.value)" />
+          <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-weight: 700; font-size: 13px; color: var(--text-muted); white-space: nowrap;">对外模型名称:</span>
+              <input id="pool-input-call-id" type="text" placeholder="例如：gpt-4o" style="height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 13px; flex: 1; max-width: 300px;" oninput="syncPoolCallId(this.value)" />
+            </div>
+            <span style="font-size: 11px; color: var(--text-muted);">客户端请求此名称；修改不会自动改动节点的实际上游模型名。</span>
           </div>
-          <button type="button" class="secondary" style="color: var(--danger, #ef4444); border-color: var(--danger, #ef4444); font-size: 11px; padding: 4px 8px;" onclick="deleteActiveModelPool()">删除此模型</button>
+          <button type="button" class="secondary" style="color: var(--danger, #ef4444); border-color: var(--danger, #ef4444); font-size: 11px; padding: 4px 8px;" onclick="deleteActiveModelPool()">删除</button>
         </div>
 
-        <div id="model-pool-presets-container" style="display: flex; flex-direction: column; gap: 8px; background: var(--panel-2); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);"></div>
+        <details style="background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;">
+          <summary style="cursor: pointer; font-size: 12px; font-weight: 700; color: var(--text-muted);">高级：调用别名与路由预设</summary>
+          <div style="font-size: 11px; color: var(--text-muted); margin: 8px 0;">用于注册额外调用名或为不同别名配置独立节点引用；通常无需修改。</div>
+          <div id="model-pool-presets-container" style="display: flex; flex-direction: column; gap: 8px;"></div>
+          <button type="button" class="secondary" style="margin-top: 8px; padding: 2px 8px; font-size: 12px;" onclick="addModelPoolPreset()">+ 添加调用别名/预设</button>
+        </details>
 
         <!-- Nodes List -->
-        <div style="display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 13px; margin-top: 4px; color: var(--text-muted);"><span>上游节点配置 (面板管理真实 URL / API Key / Model)</span><button type="button" class="secondary" style="padding: 2px 8px; font-size: 12px;" onclick="addModelPoolPreset()">+ 添加模型预设</button></div>
+        <div style="display: flex; flex-direction: column; gap: 3px; font-weight: 700; font-size: 13px; margin-top: 4px; color: var(--text-muted);"><span>上游节点</span><span style="font-size: 11px; font-weight: 400;">每个节点的实际模型名将直接发送给对应供应商。</span></div>
         <div id="model-pool-nodes-container" style="display: flex; flex-direction: column; gap: 10px;"></div>
 
         <!-- Add Node Button -->

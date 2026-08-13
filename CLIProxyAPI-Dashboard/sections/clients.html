@@ -1,66 +1,64 @@
 <section id="section-clients" class="panel panel-scroll section-view" hidden>
+  <!-- Minimalist Header -->
   <div class="panel-head clients-hero">
-    <div>
-      <h2 class="section-title" data-i18n="section.clientsTitle">客户端 / API Key</h2>
+    <div class="clients-hero-left">
+      <h2 class="section-title" data-i18n="section.clientsTitle">客户端</h2>
+      <span class="clients-count-badge" id="request-clients-count">0</span>
     </div>
-    <div class="action-row toolbar-scroll">
-      <button class="secondary" type="button" onclick="loadClientsPanel(true)" data-i18n="btn.refresh">刷新</button>
-      <span class="auth-chip" id="request-clients-meta">-</span>
+    <div class="clients-hero-right">
+      <span class="clients-freshness" id="request-clients-meta">-</span>
+      <button class="clients-refresh-btn" type="button" onclick="loadClientsPanel(true)" title="刷新数据">
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2.5 8a5.5 5.5 0 0 1 9.35-3.9M13.5 8a5.5 5.5 0 0 1-9.35 3.9"/>
+          <path d="M12 1.5v3h-3M4 14.5v-3h3"/>
+        </svg>
+        <span>刷新</span>
+      </button>
     </div>
   </div>
 
-  <div class="clients-summary-grid" id="clients-summary-grid"></div>
-
   <div class="clients-workbench">
+    <!-- Main Table Card -->
     <div class="clients-main-card">
       <div class="clients-toolbar">
-        <label class="clients-search-box">
-          <span>搜索</span>
-          <input id="clients-search" type="search" placeholder="Key / 模型 / 路径" oninput="renderClientsPanel()">
-        </label>
-        <label>
-          <span>状态</span>
+        <div class="clients-search-wrap">
+          <svg class="search-icon" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6.5" cy="6.5" r="4.5"/><path d="m10 10 4 4"/></svg>
+          <input id="clients-search" type="search" placeholder="搜索客户端 / 模型 / 路径..." oninput="renderClientsPanel()" autocomplete="off">
+        </div>
+        <div class="clients-filters">
           <select id="client-status-filter" onchange="renderClientsPanel()">
-            <option value="">全部</option>
-            <option value="warning">需关注</option>
-            <option value="notice">有 4xx</option>
+            <option value="">全部状态</option>
             <option value="healthy">健康</option>
+            <option value="notice">有 4xx</option>
+            <option value="warning">需关注</option>
           </select>
-        </label>
-        <label>
-          <span>类型</span>
           <select id="client-type-filter" onchange="renderClientsPanel()">
-            <option value="">全部</option>
+            <option value="">全部类型</option>
             <option value="apikey">API Key</option>
             <option value="ip">IP 直连</option>
           </select>
-        </label>
-        <label>
-          <span>排序</span>
           <select id="client-sort-select" onchange="renderClientsPanel()">
             <option value="total_requests:desc">请求数 ↓</option>
             <option value="last_seen:desc">最近访问 ↓</option>
             <option value="success_rate:asc">成功率 ↑</option>
             <option value="avg_latency_ms:desc">平均延迟 ↓</option>
-            <option value="total_tokens:desc">Token ↓</option>
+            <option value="total_tokens:desc">Token 消耗 ↓</option>
           </select>
-        </label>
+        </div>
       </div>
 
       <div class="metric-table-wrap clients-table-wrap">
         <table class="metric-table clients-table">
           <thead>
             <tr>
-              <th>客户端</th>
+              <th>客户端标识</th>
               <th>状态</th>
-              <th>请求</th>
-              <th>错误</th>
-              <th>成功率</th>
-              <th>平均延迟</th>
-              <th>总 Token</th>
-              <th>常用路径</th>
-              <th>常用模型</th>
-              <th>最近访问</th>
+              <th style="text-align: right;">请求数</th>
+              <th style="text-align: right;">成功率</th>
+              <th style="text-align: right;">延迟</th>
+              <th style="text-align: right;">Token</th>
+              <th>主要模型</th>
+              <th>最近活跃</th>
             </tr>
           </thead>
           <tbody id="request-clients-body"></tbody>
@@ -68,8 +66,9 @@
       </div>
     </div>
 
+    <!-- Minimal Detail Aside -->
     <aside class="clients-detail-card" id="client-detail">
-      <div class="clients-detail-empty">选择一行查看客户端详情</div>
+      <div class="clients-detail-empty">选择左侧客户端查看明细</div>
     </aside>
   </div>
 </section>

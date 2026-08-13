@@ -1,10 +1,42 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from backend.request_metrics.summary import (
     merge_cumulative_model_test_stats,
     resolve_model_stats_provider,
 )
+
+
+class CumulativeMigrationTests(unittest.TestCase):
+    def test_v3_migration_preserves_historical_stats(self):
+        from backend.request_metrics import cumulative
+
+        original = {
+            'version': 3,
+            'updated_at': 100,
+            'last_event_ts': 90,
+            'totals': {'request_count': 12, 'prompt_tokens': 100, 'completion_tokens': 20, 'total_tokens': 120},
+            'by_model': {'old-model': {'request_count': 12, 'prompt_tokens': 100, 'completion_tokens': 20, 'total_tokens': 120}},
+            'by_client': {},
+            'by_provider': {},
+            'daily': {'2026-07-01': {'request_count': 12, 'prompt_tokens': 100, 'completion_tokens': 20, 'total_tokens': 120}},
+            'hourly': {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'cumulative_token_stats.json'
+            path.write_text(json.dumps(original), encoding='utf-8')
+            with patch.object(cumulative, '_CUMULATIVE_FILE', path), patch.object(
+                cumulative, '_save_stats', side_effect=lambda stats: path.write_text(json.dumps(stats), encoding='utf-8')
+            ):
+                migrated = cumulative._load_stats()
+
+        self.assertEqual(migrated['version'], 4)
+        self.assertEqual(migrated['totals'], original['totals'])
+        self.assertEqual(migrated['by_model'], original['by_model'])
+        self.assertEqual(migrated['daily'], original['daily'])
 
 
 class ModelStatsHistoricalTests(unittest.TestCase):

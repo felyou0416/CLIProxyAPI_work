@@ -113,7 +113,8 @@ class ProviderModelMappingTests(unittest.TestCase):
     def test_same_upstream_keeps_multiple_call_ids(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'provider_model_overrides.json'
-            with patch.object(auth, 'MODEL_MAPPING_OVERRIDES_FILE', path):
+            with patch.object(auth, 'MODEL_MAPPING_OVERRIDES_FILE', path), \
+                    patch.object(auth, 'collect_detected_providers', return_value=['codex']):
                 auth.set_provider_model_override('codex', 'gpt-test', 'local-a', 'codex', 'gpt-test')
                 auth.set_provider_model_override('codex', 'gpt-test', 'local-b', 'codex', 'gpt-test')
                 auth.set_provider_model_override('codex', 'gpt-test', 'local-a', 'codex', 'gpt-test')
@@ -212,6 +213,134 @@ class ProviderModelMappingTests(unittest.TestCase):
             self.assertEqual(mappings[0]['target_provider'], 'openai-compatibility')
             self.assertEqual(mappings[0]['upstream_id'], 'gpt-4o')
             self.assertEqual(mappings[0]['call_id'], 'local-a')
+
+
+class ManualProviderPresetTests(unittest.TestCase):
+    def test_presets_use_only_manual_auth_file_urls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / 'ung' / 'a.json'
+            duplicate = root / 'ung' / 'b.json'
+            second = root / 'ung' / 'nested' / 'c.json'
+            for path, url, models in (
+                (first, 'https://first.example/v1/', ['one', 'two']),
+                (duplicate, 'https://first.example/v1', ['two', 'three']),
+                (second, 'https://second.example/v1', ['four']),
+            ):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps({
+                    'content': {
+                        'type': 'api_key',
+                        'provider': 'ung',
+                        'base_url': url,
+                        'api_key': 'test-key',
+                        'models': models,
+                    },
+                }), encoding='utf-8')
+
+            with patch.object(auth, 'AUTH_SOURCE_DIRS', {'default': root}), \
+                    patch.object(auth, 'get_configured_provider_models', return_value=[]):
+                presets = auth.get_manual_provider_presets()
+
+        self.assertEqual(presets, [{
+            'provider': 'ung',
+            'base_url': 'https://first.example/v1',
+            'base_urls': ['https://first.example/v1', 'https://second.example/v1'],
+            'url_entries': [
+                {'base_url': 'https://first.example/v1', 'models': ['one', 'two', 'three']},
+                {'base_url': 'https://second.example/v1', 'models': ['four']},
+            ],
+            'models': ['one', 'two', 'three', 'four'],
+        }])
+
+
+class ManualProviderIdentityTests(unittest.TestCase):
+    def test_presets_include_auth_file_providers_without_manual_urls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'codex' / 'oauth.json'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({
+                'auth_mode': 'chatgpt',
+                'tokens': {'access_token': 'token'},
+            }), encoding='utf-8')
+            with patch.object(auth, 'AUTH_SOURCE_DIRS', {'default': root}), \
+                    patch.object(auth, 'get_configured_provider_models', return_value=[]), \
+                    patch.object(auth, '_cached_detected_providers', None):
+                presets = auth.get_manual_provider_presets()
+
+        self.assertEqual(presets[0]['provider'], 'codex')
+        self.assertEqual(presets[0]['base_urls'], [])
+        self.assertEqual(presets[0]['base_url'], '')
+
+
+class StaleProviderMetadataTests(unittest.TestCase):
+    def test_reconcile_cleans_overrides_without_changing_aggregate_members(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            auth_dir = root / 'auth'
+            live_auth = auth_dir / 'live' / 'entry.json'
+            live_auth.parent.mkdir(parents=True, exist_ok=True)
+            live_auth.write_text(json.dumps({
+                'content': {
+                    'type': 'api_key',
+                    'provider': 'live',
+                    'base_url': 'https://live.example/v1',
+                    'api_key': 'key',
+                    'models': ['live-model'],
+                },
+            }), encoding='utf-8')
+            overrides_path = root / 'provider_model_overrides.json'
+            overrides_path.write_text(json.dumps({
+                'live': {'live-model': {'call_id': 'live-model', 'deleted': False}},
+                'stale': {'stale-model': {'call_id': 'stale-model', 'deleted': False}},
+            }), encoding='utf-8')
+            aggregates_path = root / 'aggregate_model_aliases.json'
+            aggregate_payload = {
+                'mixed': {
+                    'active_version': '2',
+                    'version_1_members': [{'provider': 'live', 'upstream_id': 'live-model'}],
+                    'version_2_members': [{'provider': 'stale', 'upstream_id': 'old-stale-model'}],
+                    'members': [{'provider': 'stale', 'upstream_id': 'stale-model'}],
+                },
+            }
+            aggregates_path.write_text(json.dumps(aggregate_payload), encoding='utf-8')
+            backups_dir = root / 'backups'
+
+            with patch.object(auth, 'AUTH_SOURCE_DIRS', {'default': auth_dir}), \
+                    patch.object(auth, 'MODEL_MAPPING_OVERRIDES_FILE', overrides_path), \
+                    patch.object(auth, 'AGGREGATE_MODEL_ALIASES_FILE', aggregates_path), \
+                    patch.object(auth, 'BACKUPS_DIR', backups_dir), \
+                    patch.object(auth, '_cached_detected_providers', None), \
+                    patch.object(auth, '_cached_provider_model_aliases', None):
+                result = auth.reconcile_stale_provider_metadata()
+                provider_items = auth.get_configured_provider_models()
+                aggregate_items = auth.get_configured_aggregate_models()
+                repeated = auth.reconcile_stale_provider_metadata()
+
+            cleaned_overrides = json.loads(overrides_path.read_text(encoding='utf-8'))
+            unchanged_aggregates = json.loads(aggregates_path.read_text(encoding='utf-8'))
+            archives = list(backups_dir.glob('provider-metadata-reconcile-*.json'))
+            archived = json.loads(archives[0].read_text(encoding='utf-8'))
+
+            self.assertTrue(result['changed'])
+            self.assertEqual(repeated, {'changed': False, 'live_providers': ['live']})
+            self.assertEqual(set(cleaned_overrides), {'live'})
+            self.assertEqual(unchanged_aggregates, aggregate_payload)
+            self.assertEqual(len(archives), 1)
+            self.assertIn('stale', archived['removed_provider_overrides'])
+            self.assertEqual(archived['removed_aggregate_members'], {})
+            self.assertNotIn('stale', [item['lookup_provider'] for item in provider_items])
+            aggregate = next(item for item in aggregate_items if item['alias_id'] == 'mixed')
+            self.assertEqual(aggregate['active_version'], '2')
+            self.assertEqual(
+                [(item['provider'], item['upstream_id']) for item in aggregate['members']],
+                [('stale', 'stale-model')],
+            )
+            self.assertEqual(
+                [(item['provider'], item['upstream_id']) for item in aggregate['version_2_members']],
+                [('stale', 'old-stale-model')],
+            )
 
 
 if __name__ == '__main__':

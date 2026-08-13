@@ -41,6 +41,7 @@ func (*homeUnauthorizedRefreshDispatcher) AbortAmbiguousDispatch() {}
 type homeUnauthorizedRefreshExecutor struct {
 	streamMode      string
 	refreshErr      error
+	keepStale       bool
 	retainSelection bool
 	executeCalls    atomic.Int32
 	countCalls      atomic.Int32
@@ -94,6 +95,9 @@ func (e *homeUnauthorizedRefreshExecutor) Refresh(_ context.Context, auth *Auth)
 		return nil, e.refreshErr
 	}
 	updated := auth.Clone()
+	if e.keepStale {
+		return updated, nil
+	}
 	if updated.Metadata == nil {
 		updated.Metadata = make(map[string]any)
 	}
@@ -191,6 +195,50 @@ func TestHomeUnauthorizedRefreshUpdatesRetainedSelection(t *testing.T) {
 	}
 }
 
+func TestRefreshHomeSelectionReusesConcurrentNewerToken(t *testing.T) {
+	executor := &homeUnauthorizedRefreshExecutor{}
+	selection := &HomeDispatchSelection{
+		Auth:     &Auth{ID: "home-refresh-auth", Provider: homeUnauthorizedRefreshProvider, Attributes: map[string]string{AttributeAuthKind: AuthKindOAuth}, Metadata: map[string]any{"access_token": "fresh-access-token"}},
+		Executor: executor,
+		Provider: homeUnauthorizedRefreshProvider,
+	}
+	failed := &Auth{ID: "home-refresh-auth", Provider: homeUnauthorizedRefreshProvider, Attributes: map[string]string{AttributeAuthKind: AuthKindOAuth}, Metadata: map[string]any{"access_token": "stale-access-token"}}
+	manager := NewManager(nil, nil, nil)
+
+	updated, reused, errRefresh := manager.RefreshHomeSelectionAfterUnauthorized(context.Background(), selection, failed)
+	if errRefresh != nil || !reused || authAccessToken(updated) != "fresh-access-token" {
+		t.Fatalf("RefreshHomeSelectionAfterUnauthorized() = %#v, %v, %v", updated, reused, errRefresh)
+	}
+	if got := executor.refreshCalls.Load(); got != 0 {
+		t.Fatalf("refresh calls = %d, want 0 when selection already has a newer token", got)
+	}
+}
+
+func TestHomeUnauthorizedRefreshIsAttemptedAtMostOnce(t *testing.T) {
+	dispatcher := &homeUnauthorizedRefreshDispatcher{}
+	executor := &homeUnauthorizedRefreshExecutor{keepStale: true}
+	manager := newHomeUnauthorizedRefreshManager(dispatcher, executor)
+
+	_, errExecute := manager.Execute(context.Background(), []string{homeUnauthorizedRefreshProvider}, cliproxyexecutor.Request{Model: "model-a"}, cliproxyexecutor.Options{})
+	if statusCodeFromError(errExecute) != http.StatusUnauthorized {
+		t.Fatalf("Execute() error = %v, want original 401", errExecute)
+	}
+	if got := executor.refreshCalls.Load(); got != 1 {
+		t.Fatalf("refresh calls = %d, want exactly 1", got)
+	}
+	if got := executor.executeCalls.Load(); got != 2 {
+		t.Fatalf("execute calls = %d, want initial attempt and one retry", got)
+	}
+}
+
+func TestHomeNoCandidateAfterRefreshFailurePreservesRefreshError(t *testing.T) {
+	refreshErr := &Error{Code: "refresh_temporarily_unavailable", HTTPStatus: http.StatusServiceUnavailable, Message: "refresh unavailable"}
+	noCandidate := &Error{Code: "auth_not_found", HTTPStatus: http.StatusServiceUnavailable, Message: "no auth available"}
+	if !shouldReturnLastErrorOnPickFailure(true, refreshErr, noCandidate) {
+		t.Fatal("Home no-candidate error would overwrite the original refresh error")
+	}
+}
+
 func TestHomeUnauthorizedTransientRefreshFailureIsReturned(t *testing.T) {
 	dispatcher := &homeUnauthorizedRefreshDispatcher{}
 	executor := &homeUnauthorizedRefreshExecutor{
@@ -207,6 +255,23 @@ func TestHomeUnauthorizedTransientRefreshFailureIsReturned(t *testing.T) {
 	}
 	if got := executor.refreshCalls.Load(); got != 1 {
 		t.Fatalf("refresh calls = %d, want 1", got)
+	}
+}
+
+func TestHomeUnauthorizedStreamRefreshesAtMostOnceAcrossRedispatch(t *testing.T) {
+	dispatcher := &homeUnauthorizedRefreshDispatcher{}
+	executor := &homeUnauthorizedRefreshExecutor{keepStale: true}
+	manager := newHomeUnauthorizedRefreshManager(dispatcher, executor)
+
+	_, errStream := manager.ExecuteStream(context.Background(), []string{homeUnauthorizedRefreshProvider}, cliproxyexecutor.Request{Model: "model-a"}, cliproxyexecutor.Options{Stream: true})
+	if statusCodeFromError(errStream) != http.StatusUnauthorized {
+		t.Fatalf("ExecuteStream() error = %v, want original 401", errStream)
+	}
+	if got := executor.refreshCalls.Load(); got != 1 {
+		t.Fatalf("refresh calls = %d, want exactly 1", got)
+	}
+	if got := executor.streamCalls.Load(); got != 2 {
+		t.Fatalf("stream calls = %d, want initial attempt and one retry", got)
 	}
 }
 

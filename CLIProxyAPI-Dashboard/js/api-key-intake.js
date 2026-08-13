@@ -40,6 +40,57 @@ function currentApiKeyPreset() {
   return apiKeyIntakePresets.find((item) => String(item.provider || '').toLowerCase() === provider.toLowerCase()) || null;
 }
 
+function apiKeyPresetUrlEntries(preset) {
+  const entries = [];
+  const seen = new Set();
+  const rawEntries = Array.isArray(preset?.url_entries) ? preset.url_entries : [];
+  rawEntries.forEach((entry) => {
+    const url = String(entry?.base_url || '').trim().replace(/\/+$/, '');
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    entries.push({
+      base_url: url,
+      models: Array.isArray(entry?.models) ? entry.models.filter(Boolean) : [],
+    });
+  });
+  if (!entries.length) {
+    const values = Array.isArray(preset?.base_urls) ? preset.base_urls : [preset?.base_url];
+    values.forEach((value) => {
+      const url = String(value || '').trim().replace(/\/+$/, '');
+      if (url && !seen.has(url)) {
+        seen.add(url);
+        entries.push({ base_url: url, models: [] });
+      }
+    });
+  }
+  return entries;
+}
+
+function apiKeyPresetUrls(preset) {
+  return apiKeyPresetUrlEntries(preset).map((entry) => entry.base_url);
+}
+
+function apiKeyModelsForUrl(preset, baseUrl) {
+  const normalized = String(baseUrl || '').trim().replace(/\/+$/, '');
+  const entry = apiKeyPresetUrlEntries(preset).find((item) => item.base_url === normalized);
+  return entry?.models?.length ? entry.models : (Array.isArray(preset?.models) ? preset.models : []);
+}
+
+function renderApiKeyBaseUrlOptions(preset) {
+  const datalist = document.getElementById('api-key-base-url-options');
+  if (!datalist) return [];
+  const entries = apiKeyPresetUrlEntries(preset);
+  datalist.innerHTML = entries.map((entry) => `<option value="${apiKeyIntakeEscape(entry.base_url)}"></option>`).join('');
+  return entries.map((entry) => entry.base_url);
+}
+
+function fillApiKeyModelsForUrl(preset, baseUrl) {
+  const input = document.getElementById('api-key-models');
+  if (!input || !preset) return;
+  input.value = apiKeyModelsForUrl(preset, baseUrl).join('\n');
+  updateApiKeyModelCount();
+}
+
 function setApiKeyIntakeMode(mode) {
   apiKeyIntakeMode = mode === 'custom' ? 'custom' : 'existing';
   const existingBtn = document.getElementById('api-key-mode-existing');
@@ -72,18 +123,20 @@ function selectApiKeyPreset(provider) {
   const note = document.getElementById('api-key-provider-note');
   const providerChanged = apiKeyIntakeSelectedProvider && apiKeyIntakeSelectedProvider.toLowerCase() !== selectedProvider.toLowerCase();
   apiKeyIntakeSelectedProvider = selectedProvider;
+  const urls = renderApiKeyBaseUrlOptions(preset);
   if (preset && baseInput) {
-    baseInput.value = preset.base_url || '';
+    baseInput.value = urls[0] || '';
+    fillApiKeyModelsForUrl(preset, baseInput.value);
   }
   if (providerChanged) {
     if (secretInput) secretInput.value = '';
     if (remarkInput) remarkInput.value = '';
   }
   if (note) {
-    const modelCount = Array.isArray(preset?.models) ? preset.models.length : 0;
+    const modelCount = preset && baseInput ? apiKeyModelsForUrl(preset, baseInput.value).length : 0;
     note.textContent = preset
-      ? `${preset.provider} · 默认 Base URL: ${preset.base_url || '-'} · 已有 ${modelCount} 个模型`
-      : '选择已有 provider 后会自动填入默认 Base URL。';
+      ? `${preset.provider} · 已从认证文件发现 ${urls.length} 个 Base URL，已填入：${urls[0] || '-'} · 当前 URL 有 ${modelCount} 个模型`
+      : '选择已有 Provider 后会从认证文件填入可选 Base URL。';
   }
 }
 
@@ -92,26 +145,41 @@ function onApiKeyCustomProviderInput(value) {
   const preset = apiKeyIntakePresets.find((item) => String(item.provider || '').toLowerCase() === providerName.toLowerCase());
   const baseInput = document.getElementById('api-key-base-url');
   const note = document.getElementById('api-key-provider-note');
-  if (preset && preset.base_url && baseInput) {
-    baseInput.value = preset.base_url;
+  const urls = renderApiKeyBaseUrlOptions(preset);
+  if (preset && urls.length && baseInput) {
+    baseInput.value = urls[0];
+    fillApiKeyModelsForUrl(preset, baseInput.value);
     if (note) {
-      const modelCount = Array.isArray(preset.models) ? preset.models.length : 0;
-      note.textContent = `匹配到已有 Provider (${preset.provider}) · 自动填入 Base URL: ${preset.base_url} · 已有 ${modelCount} 个模型`;
+      const modelCount = apiKeyModelsForUrl(preset, baseInput.value).length;
+      note.textContent = `匹配到认证文件中的 Provider (${preset.provider}) · 已发现 ${urls.length} 个 Base URL，已填入：${urls[0]} · 当前 URL 有 ${modelCount} 个模型`;
     }
   } else if (note) {
     note.textContent = providerName
       ? '自定义模式：按你填写的 Provider 和 Base URL 保存。'
-      : '自定义模式：可选择或输入已有 Provider 自动填入默认 Base URL，或自行填写新 Base URL。';
+      : '自定义模式：可选择或输入认证文件中已有的 Provider，也可自行填写新 Base URL。';
+  }
+}
+
+function onApiKeyBaseUrlInput(value) {
+  const preset = apiKeyIntakeMode === 'custom'
+    ? apiKeyIntakePresets.find((item) => String(item.provider || '').toLowerCase() === String(document.getElementById('api-key-provider-custom')?.value || '').trim().toLowerCase())
+    : currentApiKeyPreset();
+  if (!preset) return;
+  const normalized = String(value || '').trim().replace(/\/+$/, '');
+  const entries = apiKeyPresetUrlEntries(preset);
+  const entry = entries.find((item) => item.base_url === normalized);
+  if (entry) {
+    fillApiKeyModelsForUrl(preset, normalized);
+    const note = document.getElementById('api-key-provider-note');
+    if (note) note.textContent = `${preset.provider} · 已选择 ${normalized} · 当前 URL 有 ${entry.models.length} 个模型`;
   }
 }
 
 function fillApiKeyPresetModels() {
   const preset = currentApiKeyPreset();
-  const input = document.getElementById('api-key-models');
-  if (!preset || !input) return;
-  const models = Array.isArray(preset.models) ? preset.models : [];
-  input.value = models.join('\n');
-  updateApiKeyModelCount();
+  const baseInput = document.getElementById('api-key-base-url');
+  if (!preset || !baseInput) return;
+  fillApiKeyModelsForUrl(preset, baseInput.value);
 }
 
 function toggleApiKeyIntakeSecret() {

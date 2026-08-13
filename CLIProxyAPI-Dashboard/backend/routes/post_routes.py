@@ -3,7 +3,7 @@ from backend.model_thinking import save_model_thinking_configs
 from backend.api_keys import create_api_key, update_api_key, delete_api_key, reset_api_key_usage, reveal_api_key
 from backend.state import load_state, save_state, normalize_route_strategy
 from backend.processes import start_device_login, stop_device_login, start_proxy, stop_proxy, restart_proxy, start_project, start_oauth_manager, stop_oauth_manager, restart_oauth_manager, start_openclaw_gateway, stop_openclaw_gateway, restart_openclaw_gateway, start_create_grok, stop_create_grok, restart_create_grok, start_chat77, stop_chat77, restart_chat77, start_media_proxy, stop_media_proxy, restart_media_proxy, start_grok2api, stop_grok2api, restart_grok2api, start_grok2api_backend, stop_grok2api_backend, restart_grok2api_backend, start_grok2api_frontend, stop_grok2api_frontend, restart_grok2api_frontend, current_status, ensure_firewall_access, ensure_custom_firewall_ports, remove_custom_firewall_ports, ensure_port_bindings, remove_port_bindings, set_ip_helper_service, stop_dashboard_panel, restart_dashboard_panel
-from backend.tools import run_tool, stop_tool, test_provider_models, test_image_models, test_auth_entry, queue_provider_model_tests, clear_provider_model_test_state, stop_provider_model_tests, run_storage_cleanup, _proxy_request, reveal_generated_media
+from backend.tools import run_tool, stop_tool, test_provider_models, test_image_models, test_auth_entry, clear_auth_test_cache, queue_provider_model_tests, clear_provider_model_test_state, stop_provider_model_tests, run_storage_cleanup, _proxy_request, reveal_generated_media
 from backend.terminals import open_terminal, open_desktop_terminal, close_terminal, list_terminals, write_terminal, resize_terminal
 from backend.routes.helpers import send_json
 from backend.system_proxy import configure_system_proxy, toggle_system_proxy, restore_system_proxy_default, set_system_proxy_port
@@ -28,6 +28,19 @@ def _bounded_int(data, key, default, minimum, maximum):
 
 
 def handle_post(handler, parsed, data):
+    if parsed.path == '/api/local-workspace/action':
+        if not isinstance(data, dict):
+            send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
+            return True
+        try:
+            from backend.local_workspace import run_local_service_action
+            result = run_local_service_action(data.get('service_id'), data.get('operation'))
+            send_json(handler, result)
+        except ValueError as exc:
+            send_json(handler, {'ok': False, 'message': str(exc)}, status=400)
+        except Exception as exc:
+            send_json(handler, {'ok': False, 'message': f'Local service action failed: {exc}'}, status=500)
+        return True
     if parsed.path == '/api/reveal-path':
         try:
             payload = data if isinstance(data, dict) else {}
@@ -625,11 +638,17 @@ def handle_post(handler, parsed, data):
             send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
             return True
         auth_ref = data.get('auth_ref')
+        force = bool(data.get('force', False))
         if not auth_ref:
             send_json(handler, {'ok': False, 'message': 'auth_ref is required.'}, status=400)
             return True
-        result = test_auth_entry(str(auth_ref))
+        result = test_auth_entry(str(auth_ref), force=force)
         send_json(handler, result, status=200 if result.get('ok') else 400)
+        return True
+    if parsed.path == '/api/clear-auth-test-cache':
+        auth_ref = data.get('auth_ref') if isinstance(data, dict) else None
+        clear_auth_test_cache(auth_ref)
+        send_json(handler, {'ok': True, 'message': 'Auth test cache cleared.'})
         return True
 
     if parsed.path == '/api/start-proxy':
@@ -1080,6 +1099,10 @@ def handle_post(handler, parsed, data):
         except Exception as e:
             send_json(handler, {'ok': False, 'message': f'Failed to save advanced config: {e}'}, status=500)
         return True
+    if parsed.path in ('/api/model-pools', '/api/model-pools/delete', '/api/model-pools/test-node'):
+        if load_state().get('model_pool_archived', True):
+            send_json(handler, {'ok': False, 'code': 'model_pool_archived', 'message': '模型轮询池功能已归档。'}, status=410)
+            return True
     if parsed.path == '/api/model-pools':
         if not isinstance(data, dict):
             send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
@@ -1154,77 +1177,71 @@ def handle_post(handler, parsed, data):
             return True
         base_url = str(data.get('base_url') or '').strip()
         api_key = str(data.get('api_key') or '').strip()
-        proxy_url = str(data.get('proxy_url') or '').strip()
-        if not base_url or not api_key:
-            send_json(handler, {'ok': False, 'message': 'base_url 与 api_key 不能为空'}, status=400)
+        model_id = str(data.get('model_id') or '').strip()
+        provider = str(data.get('provider') or '').strip()
+        explicit_proxy_url = str(data.get('proxy_url') or '').strip()
+        if not base_url or not api_key or not model_id:
+            send_json(handler, {'ok': False, 'message': 'base_url、api_key 与上游模型 ID 不能为空'}, status=400)
             return True
 
         start_ts = time.time()
         try:
-            import urllib.request
-            import urllib.error
             import ssl
+            import urllib.error
+            import urllib.request
+            from backend.auth import _effective_model_proxy_url
 
             clean_url = base_url.rstrip('/')
             if clean_url.endswith('/chat/completions'):
                 clean_url = clean_url[:-len('/chat/completions')].rstrip('/')
-            if clean_url.endswith('/completions'):
-                clean_url = clean_url[:-len('/completions')].rstrip('/')
-
-            urls_to_try = [clean_url]
-            if not clean_url.endswith('/models'):
-                if clean_url.endswith('/v1'):
-                    urls_to_try.insert(0, clean_url + '/models')
-                else:
-                    urls_to_try.insert(0, clean_url + '/v1/models')
-                    urls_to_try.insert(1, clean_url + '/models')
+            test_url = clean_url + '/chat/completions'
+            effective_proxy_url = explicit_proxy_url or _effective_model_proxy_url(provider, clean_url)
 
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
-
             handlers = [urllib.request.HTTPSHandler(context=ctx)]
-            if proxy_url:
-                handlers.append(urllib.request.ProxyHandler({'http': proxy_url, 'https': proxy_url}))
+            if effective_proxy_url.lower() in ('direct', 'none'):
+                handlers.append(urllib.request.ProxyHandler({}))
+            elif effective_proxy_url:
+                handlers.append(urllib.request.ProxyHandler({'http': effective_proxy_url, 'https': effective_proxy_url}))
             opener = urllib.request.build_opener(*handlers)
-
-            last_error = None
-            for test_url in urls_to_try:
-                try:
-                    req = urllib.request.Request(test_url, headers={
-                        'Authorization': f'Bearer {api_key}',
-                        'User-Agent': 'CLIProxyAPI-Dashboard/1.0',
-                        'Accept': 'application/json'
-                    })
-                    with opener.open(req, timeout=6) as resp:
-                        status_code = resp.getcode()
-                        latency_ms = int((time.time() - start_ts) * 1000)
-                        send_json(handler, {
-                            'ok': True,
-                            'status_code': status_code,
-                            'latency_ms': latency_ms,
-                            'message': f'连通正常 ({status_code}) - {latency_ms}ms'
-                        })
-                        return True
-                except urllib.error.HTTPError as http_err:
+            payload = json.dumps({
+                'model': model_id,
+                'messages': [{'role': 'user', 'content': 'ping'}],
+                'max_tokens': 1,
+                'stream': False,
+            }).encode('utf-8')
+            req = urllib.request.Request(test_url, data=payload, method='POST', headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'User-Agent': 'cli-proxy-openai-compat',
+            })
+            try:
+                with opener.open(req, timeout=15) as resp:
+                    status_code = resp.getcode()
                     latency_ms = int((time.time() - start_ts) * 1000)
-                    code = http_err.code
-                    if code in (200, 201, 204):
-                        send_json(handler, {'ok': True, 'status_code': code, 'latency_ms': latency_ms, 'message': f'连通正常 ({code}) - {latency_ms}ms'})
-                        return True
-                    elif code in (401, 403):
-                        send_json(handler, {'ok': False, 'status_code': code, 'latency_ms': latency_ms, 'message': f'已连通，但 Key 无效 (HTTP {code})'})
-                        return True
-                    elif code in (400, 404, 405, 429):
-                        send_json(handler, {'ok': True, 'status_code': code, 'latency_ms': latency_ms, 'message': f'网络连通正常 (HTTP {code}) - {latency_ms}ms'})
-                        return True
-                    else:
-                        last_error = f'HTTP {code}'
-                except Exception as err:
-                    last_error = str(err)
-
-            latency_ms = int((time.time() - start_ts) * 1000)
-            send_json(handler, {'ok': False, 'message': f'无法连通: {last_error or "连接超时"}'})
+                    send_json(handler, {
+                        'ok': 200 <= status_code < 300,
+                        'status_code': status_code,
+                        'latency_ms': latency_ms,
+                        'endpoint': test_url,
+                        'message': f'模型调用成功 ({status_code}) - {latency_ms}ms',
+                    })
+            except urllib.error.HTTPError as http_err:
+                latency_ms = int((time.time() - start_ts) * 1000)
+                category = {
+                    400: '请求或模型不兼容', 401: 'API Key 无效', 403: '没有模型调用权限',
+                    404: '上游未提供 chat/completions', 405: '上游不支持 POST 调用', 429: '上游限流',
+                }.get(http_err.code, '上游调用失败')
+                send_json(handler, {
+                    'ok': False, 'status_code': http_err.code, 'latency_ms': latency_ms,
+                    'endpoint': test_url, 'message': f'{category} (HTTP {http_err.code})',
+                })
+            except Exception as err:
+                latency_ms = int((time.time() - start_ts) * 1000)
+                send_json(handler, {'ok': False, 'latency_ms': latency_ms, 'endpoint': test_url, 'message': f'模型调用失败: {err}'})
         except Exception as err:
             send_json(handler, {'ok': False, 'message': f'测试连接失败: {err}'})
         return True
@@ -1398,6 +1415,64 @@ def handle_post(handler, parsed, data):
                 send_json(handler, {'ok': False, 'message': f'Unknown action: {action}'}, status=400)
         except Exception as e:
             send_json(handler, {'ok': False, 'message': f'Failed: {e}'}, status=500)
+        return True
+    if parsed.path == '/api/auth-file/update':
+        if not isinstance(data, dict):
+            send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
+            return True
+        auth_ref = str(data.get('id') or data.get('auth_ref') or '').strip()
+        if not auth_ref:
+            send_json(handler, {'ok': False, 'message': 'auth_ref is required.'}, status=400)
+            return True
+        try:
+            from backend.auth import resolve_auth_reference
+            import json as _json3
+            resolved = resolve_auth_reference(auth_ref=auth_ref)
+            if not resolved:
+                send_json(handler, {'ok': False, 'message': f'Auth file not found: {auth_ref}'}, status=404)
+                return True
+            source_id, source_path = resolved
+            if not source_path.exists():
+                send_json(handler, {'ok': False, 'message': f'Auth file path missing: {source_path}'}, status=404)
+                return True
+
+            from backend.auth import sanitize_auth_payload, apply_surgical_changes, _read_auth_payload, auth_file_update_lock
+
+            with auth_file_update_lock(source_path):
+                updated_payload = None
+                if 'changes' in data and isinstance(data['changes'], dict):
+                    existing_payload = _read_auth_payload(source_path) or {}
+                    updated_payload = apply_surgical_changes(existing_payload, data['changes'])
+                elif 'raw_json' in data and str(data['raw_json']).strip():
+                    try:
+                        updated_payload = _json3.loads(data['raw_json'])
+                    except Exception as e:
+                        send_json(handler, {'ok': False, 'message': f'JSON syntax error: {e}'}, status=400)
+                        return True
+                elif 'payload' in data and isinstance(data['payload'], dict):
+                    updated_payload = data['payload']
+                else:
+                    send_json(handler, {'ok': False, 'message': 'Missing changes, payload or raw_json.'}, status=400)
+                    return True
+
+                clean_payload = sanitize_auth_payload(updated_payload)
+
+                source_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = source_path.with_suffix(source_path.suffix + '.tmp')
+                tmp.write_text(_json3.dumps(clean_payload, ensure_ascii=False, indent=2), encoding='utf-8')
+                tmp.replace(source_path)
+
+            state = load_state()
+            rebuild = rebuild_runtime_config_from_state(state)
+            send_json(handler, {
+                'ok': True,
+                'message': f'Auth file "{source_path.name}" updated successfully.',
+                'id': auth_ref,
+                'path': str(source_path),
+                'runtime_rebuilt': rebuild.get('rebuilt', False),
+            })
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': f'Failed to update auth file: {e}'}, status=500)
         return True
     if parsed.path == '/api/data/import':
         try:

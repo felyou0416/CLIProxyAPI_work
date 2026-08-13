@@ -119,12 +119,16 @@ function renderModelPoolPresets(pool) {
   const container = document.getElementById('model-pool-presets-container');
   if (!container) return;
   const presets = Array.isArray(pool.presets) ? pool.presets : [];
-  container.innerHTML = `<div style="font-size: 12px; font-weight: 700; color: var(--text-muted);">模型预设 / 调用代号</div>` + presets.map((preset, index) => `
+  container.innerHTML = presets.length ? presets.map((preset, index) => `
     <div class="model-pool-preset-row" data-preset-index="${index}" style="display:flex;align-items:center;gap:8px;">
-      <input class="preset-input-id" value="${escapeHtml(preset.preset_id || '')}" placeholder="preset_id" style="flex:1;height:28px;padding:0 8px;">
-      <input class="preset-input-call-id" value="${escapeHtml(preset.call_id || preset.preset_id || '')}" placeholder="调用代号" style="flex:1;height:28px;padding:0 8px;">
-      <button type="button" class="secondary" style="padding:2px 7px;color:var(--danger,#ef4444);" onclick="removeModelPoolPreset(${index})">删除</button>
-    </div>`).join('');
+      <label style="display:flex;flex-direction:column;gap:3px;flex:1;font-size:11px;color:var(--text-muted);">预设 ID（内部路由标识）
+        <input class="preset-input-id" value="${escapeHtml(preset.preset_id || '')}" placeholder="preset_id" style="height:28px;padding:0 8px;">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:3px;flex:1;font-size:11px;color:var(--text-muted);">额外调用别名
+        <input class="preset-input-call-id" value="${escapeHtml(preset.call_id || preset.preset_id || '')}" placeholder="额外调用别名" style="height:28px;padding:0 8px;">
+      </label>
+      <button type="button" class="secondary" style="align-self:flex-end;padding:2px 7px;color:var(--danger,#ef4444);" onclick="removeModelPoolPreset(${index})">删除</button>
+    </div>`).join('') : `<span style="font-size:11px;color:var(--text-muted);">未配置额外别名，当前仅使用对外模型名称。</span>`;
   container.querySelectorAll('.model-pool-preset-row input').forEach(input => input.addEventListener('input', () => {
     syncModelPoolPresetsFromDOM(pool);
     triggerAutoSave();
@@ -232,7 +236,7 @@ function renderModelPoolNodes(nodes) {
         <div style="display: grid; grid-template-columns: 2fr 2fr 1.5fr; gap: 8px;">
           <input class="node-input-url" type="text" value="${escapeHtml(node.base_url || '')}" placeholder="Base URL (例如 https://api.xxx.com/v1)" style="height: 30px; padding: 0 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 12px;" oninput="updateNodeFieldValue(${index}, 'base_url', this.value); triggerAutoSave();" />
           <input class="node-input-key" type="password" value="${escapeHtml(node.api_key || '')}" placeholder="API Key (sk-...)" style="height: 30px; padding: 0 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 12px;" oninput="updateNodeFieldValue(${index}, 'api_key', this.value); triggerAutoSave();" />
-          <input class="node-input-upstream" type="text" value="${escapeHtml(upstreamModelId)}" placeholder="Model ID (上游模型名)" style="height: 30px; padding: 0 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 12px;" oninput="updateNodeFieldValue(${index}, 'upstream_id', this.value); triggerAutoSave();" />
+          <input class="node-input-upstream" type="text" value="${escapeHtml(upstreamModelId)}" placeholder="实际模型名（发送给上游）" style="height: 30px; padding: 0 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 12px;" oninput="updateNodeFieldValue(${index}, 'upstream_id', this.value); triggerAutoSave();" />
         </div>
       </div>
     `;
@@ -408,6 +412,7 @@ async function testNodeInActivePool(index) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        provider: pool ? pool.provider : '',
         base_url: node.base_url,
         api_key: node.api_key,
         proxy_url: node.proxy_url || '',

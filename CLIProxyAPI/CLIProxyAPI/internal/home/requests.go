@@ -9,6 +9,7 @@ type authDispatchRequest struct {
 	ConcurrencyProtocol int               `json:"concurrency_protocol,omitempty"`
 	SessionID           string            `json:"session_id,omitempty"`
 	Headers             map[string]string `json:"headers,omitempty"`
+	CredentialPolicy    string            `json:"credential_policy,omitempty"`
 }
 
 type modelsRequest struct {
@@ -20,7 +21,6 @@ type modelsRequest struct {
 type refreshRequest struct {
 	Type                      string `json:"type"`
 	AuthIndex                 string `json:"auth_index"`
-	LastRefreshedAt           string `json:"last_refreshed_at,omitempty"`
 	ObservedAccessTokenSHA256 string `json:"access_token_sha256,omitempty"`
 }
 

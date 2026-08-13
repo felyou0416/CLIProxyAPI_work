@@ -123,7 +123,7 @@ cd E:\U_App\CLIProxyAPI_work\CLIProxyAPI
 - [CHANGELOG.md](CHANGELOG.md) — 版本历史（Keep a Changelog + SemVer）
 - [SECURITY.md](SECURITY.md) — 凭据存储现状、风险与漏洞报告方式
 
-> 本文档集对应内核版本 `UPSTREAM_VERSION`（当前 `v7.2.128`）与工作区版本 `VERSION`（当前 `1.3.0`）编写。每次 `update-core.ps1` 升级内核后，请对照 [docs/CONTRIBUTING.md#版本发布流程](docs/CONTRIBUTING.md#版本发布流程) 检查文档是否需要同步更新。
+> 本文档集对应内核版本 `UPSTREAM_VERSION`（当前 `v7.2.128`）与工作区版本 `VERSION`（当前 `1.4.0`）编写。每次 `update-core.ps1` 升级内核后，请对照 [docs/CONTRIBUTING.md#版本发布流程](docs/CONTRIBUTING.md#版本发布流程) 检查文档是否需要同步更新。
 
 ## 安全
 

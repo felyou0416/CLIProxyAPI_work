@@ -46,7 +46,8 @@
         </div>
       </div>
       <label class="form-label">Base URL</label>
-      <input id="api-key-base-url" class="form-input" type="text" placeholder="https://api.example.com/v1" />
+      <input id="api-key-base-url" class="form-input" type="text" placeholder="https://api.example.com/v1" list="api-key-base-url-options" oninput="onApiKeyBaseUrlInput(this.value)" onchange="onApiKeyBaseUrlInput(this.value)" />
+      <datalist id="api-key-base-url-options"></datalist>
       <label class="form-label">API Key</label>
       <div class="input-row">
         <input id="api-key-secret" class="form-input" type="password" placeholder="sk-..." autocomplete="off" />

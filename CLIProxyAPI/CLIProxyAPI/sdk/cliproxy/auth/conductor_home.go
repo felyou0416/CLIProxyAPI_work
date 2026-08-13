@@ -144,7 +144,19 @@ func shouldReturnLastErrorOnPickFailure(homeMode bool, lastErr error, errPick er
 	if !homeMode {
 		return true
 	}
-	return isHomeRequestRetryExceededError(errPick)
+	if isHomeRequestRetryExceededError(errPick) {
+		return true
+	}
+	var authErr *Error
+	if !errors.As(errPick, &authErr) || authErr == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(authErr.Code)) {
+	case "auth_not_found", "auth_unavailable":
+		return true
+	default:
+		return false
+	}
 }
 
 func homeAuthAlreadyTried(tried map[string]struct{}, authID string) bool {
@@ -178,6 +190,10 @@ type homeAuthDispatcher interface {
 	HeartbeatOK() bool
 	RPopAuth(ctx context.Context, requestedModel string, sessionID string, headers http.Header, count int) ([]byte, error)
 	AbortAmbiguousDispatch()
+}
+
+type homeCredentialPolicyDispatcher interface {
+	RPopAuthWithPolicy(ctx context.Context, requestedModel string, sessionID string, headers http.Header, count int, credentialPolicy string) ([]byte, error)
 }
 
 var currentHomeDispatcher = func() homeAuthDispatcher {
@@ -754,7 +770,17 @@ func (m *Manager) pickHomeDispatchSelection(ctx context.Context, model string, o
 
 	sessionID := m.homeDispatchSessionID(opts)
 	dispatchHeaders := homeDispatchHeaders(ctx, opts.Headers)
-	raw, errRPop := client.RPopAuth(ctx, requestedModel, sessionID, dispatchHeaders, homeAuthCountFromMetadata(opts.Metadata))
+	credentialPolicy := credentialPolicyFromContext(ctx)
+	var raw []byte
+	var errRPop error
+	if credentialPolicy == "" {
+		raw, errRPop = client.RPopAuth(ctx, requestedModel, sessionID, dispatchHeaders, homeAuthCountFromMetadata(opts.Metadata))
+	} else if policyClient, okPolicy := client.(homeCredentialPolicyDispatcher); okPolicy {
+		raw, errRPop = policyClient.RPopAuthWithPolicy(ctx, requestedModel, sessionID, dispatchHeaders, homeAuthCountFromMetadata(opts.Metadata), credentialPolicy)
+	} else {
+		pending.End()
+		return nil, &Error{Code: "home_unavailable", Message: "home dispatcher does not support credential policies", HTTPStatus: http.StatusServiceUnavailable}
+	}
 	if errRPop != nil {
 		if home.IsAmbiguousDispatchError(errRPop) {
 			client.AbortAmbiguousDispatch()
@@ -1139,7 +1165,7 @@ func (m *Manager) tryAntigravityCreditsExecuteStream(ctx context.Context, req cl
 		if len(models) == 0 {
 			continue
 		}
-		result, errStream := m.executeStreamWithModelPool(creditsCtx, c.executor, c.auth, c.provider, req, creditsOpts, routeModel, "", models, pooled, aliasResult, routing, true, false)
+		result, errStream := m.executeStreamWithModelPool(creditsCtx, c.executor, c.auth, c.provider, req, creditsOpts, routeModel, "", models, pooled, aliasResult, routing, true, false, nil)
 		if errStream != nil {
 			continue
 		}

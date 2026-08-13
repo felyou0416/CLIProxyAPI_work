@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from backend.routes.helpers import send_file
+from backend.routes.helpers import send_file, send_json
 
 
 class _FakeHandler:
@@ -23,6 +23,11 @@ class _FakeHandler:
 
 
 class SendFileTests(unittest.TestCase):
+    def test_send_json_disables_response_caching(self):
+        handler = _FakeHandler()
+        send_json(handler, {'ok': True})
+        self.assertEqual(handler.headers['Cache-Control'], 'no-store')
+
     def test_send_file_serves_existing_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

@@ -285,6 +285,45 @@ def record_api_key_usage(key_value: str, tokens: int = 0) -> None:
         _save_usage(usage)
 
 
+def record_api_key_usage_batch(entries: list[tuple[str, int]]) -> None:
+    """
+    批量记录多条 API Key 用量，只做一次磁盘读写。
+
+    用于批量重新解析历史日志文件的场景（如 parse_precise_request_events /
+    parse_error_logs 循环处理上百个文件时）：如果每个文件都单独调用
+    record_api_key_usage()，就是每条记录各触发一次「读整个 usage.json →
+    改一条 → 写回整个文件」，文件一多会显著拖慢刷新耗时。这里改为攒够一批后
+    只读写一次。
+
+    entries: [(key_value, tokens), ...]
+    """
+    if not entries:
+        return
+
+    with _KEYS_LOCK:
+        keys = _load_keys()
+        key_by_value = {k.get('key'): str(k.get('id') or '').strip() for k in keys if k.get('key')}
+
+    with _USAGE_LOCK:
+        usage = _load_usage()
+        changed = False
+        for key_value, tokens in entries:
+            key_value = str(key_value or '').strip()
+            if not key_value:
+                continue
+            key_id = key_by_value.get(key_value)
+            if not key_id:
+                continue
+            key_usage = usage.get(key_id) or {}
+            key_usage['used_tokens'] = int(key_usage.get('used_tokens') or 0) + max(0, int(tokens or 0))
+            key_usage['used_requests'] = int(key_usage.get('used_requests') or 0) + 1
+            key_usage['last_used_at'] = int(time.time())
+            usage[key_id] = key_usage
+            changed = True
+        if changed:
+            _save_usage(usage)
+
+
 def get_all_active_key_values() -> list[str]:
     """Get all active (enabled, non-expired) virtual API key values for config injection."""
     now = int(time.time())

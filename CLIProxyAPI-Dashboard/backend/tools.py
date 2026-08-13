@@ -1,3 +1,4 @@
+import ssl
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -16,7 +17,7 @@ import mimetypes
 import re
 from urllib.parse import urlparse
 from pathlib import Path
-from backend.paths import ROOT, PROJECT_ROOT, CLI_EXE, BASE_CONFIG, TOOL_LOGS_DIR, PROVIDER_MODEL_TEST_STATE_FILE, TEMP_DIR, GENERATED_IMAGES_DIR, GENERATED_VIDEOS_DIR
+from backend.paths import ROOT, PROJECT_ROOT, CLI_EXE, BASE_CONFIG, TOOL_LOGS_DIR, PROVIDER_MODEL_TEST_STATE_FILE, TEMP_DIR, GENERATED_IMAGES_DIR, GENERATED_VIDEOS_DIR, RUNTIME_DIR
 from backend.processes import process_lock, tool_processes, tool_states, process_alive, kill_process, read_tail, _set_tool_state, _tool_log_path
 from backend.processes import find_proxy_listener_pid, media_proxy_port, start_media_proxy, wait_for_media_proxy_ready
 from backend.processes import probe_socket_stack
@@ -27,6 +28,7 @@ from backend.auth import (
     _read_auth_payload,
     _extract_manual_api_config,
     _group_manual_entry_models,
+    _extract_payload_models,
     collect_provider_model_aliases,
     detect_provider,
     resolve_provider_mapping,
@@ -1108,7 +1110,7 @@ def _build_temp_auth_runtime(auth_ref: str, temp_root: Path, bind_port: int, acc
     config_text = rewrite_host(config_text, '127.0.0.1')
     config_text = _rewrite_port(config_text, bind_port)
     config_text = rewrite_auth_dir(config_text, active_auth_dir)
-    
+
     # Merge admin access key with all active virtual API keys
     all_api_keys = [access_api_key]
     try:
@@ -1182,116 +1184,323 @@ def _build_temp_auth_runtime(auth_ref: str, temp_root: Path, bind_port: int, acc
     return config_text, candidate_models, item
 
 
-def test_auth_entry(auth_ref: str):
+_AUTH_TEST_CACHE_FILE = RUNTIME_DIR / 'auth_test_cache.json'
+_auth_test_cache_lock = threading.Lock()
+_auth_test_cache_mem = None
+
+
+def load_auth_test_cache() -> dict:
+    global _auth_test_cache_mem
+    with _auth_test_cache_lock:
+        if _auth_test_cache_mem is not None:
+            return dict(_auth_test_cache_mem)
+        if _AUTH_TEST_CACHE_FILE.exists():
+            try:
+                data = json.loads(_AUTH_TEST_CACHE_FILE.read_text(encoding='utf-8'))
+                if isinstance(data, dict):
+                    _auth_test_cache_mem = data
+                    return dict(_auth_test_cache_mem)
+            except Exception:
+                pass
+        _auth_test_cache_mem = {}
+        return dict(_auth_test_cache_mem)
+
+
+def save_auth_test_cache(cache_data: dict):
+    global _auth_test_cache_mem
+    with _auth_test_cache_lock:
+        _auth_test_cache_mem = dict(cache_data or {})
+        try:
+            _AUTH_TEST_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _AUTH_TEST_CACHE_FILE.with_suffix('.tmp')
+            tmp.write_text(json.dumps(_auth_test_cache_mem, indent=2, ensure_ascii=False), encoding='utf-8')
+            tmp.replace(_AUTH_TEST_CACHE_FILE)
+        except Exception:
+            pass
+
+
+def get_auth_test_cached_result(auth_ref: str, max_age_seconds: int = 86400 * 7) -> dict | None:
+    cache = load_auth_test_cache()
+    entry = cache.get(auth_ref)
+    if not entry or not isinstance(entry, dict):
+        return None
+    tested_at = entry.get('tested_at', 0)
+    if max_age_seconds > 0 and (time.time() - tested_at > max_age_seconds):
+        return None
+    return dict(entry)
+
+
+def update_auth_test_cache(auth_ref: str, result: dict):
+    if not auth_ref or not isinstance(result, dict):
+        return
+    cache = load_auth_test_cache()
+    entry = dict(result)
+    entry['auth_ref'] = auth_ref
+    entry['tested_at'] = entry.get('tested_at') or int(time.time())
+    cache[auth_ref] = entry
+    save_auth_test_cache(cache)
+
+
+def clear_auth_test_cache(auth_ref: str = None):
+    if auth_ref:
+        cache = load_auth_test_cache()
+        cache.pop(auth_ref, None)
+        save_auth_test_cache(cache)
+    else:
+        save_auth_test_cache({})
+
+
+def _direct_test_api_key_auth(auth_ref: str, auth_name: str, base_url: str, api_key: str, payload: dict, item: dict):
+    models = _extract_payload_models(payload)
+    test_models = models if models else ['gpt-5.6-luna', 'gpt-4o', 'default']
+
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json',
+        'User-Agent': 'curl/7.68.0'
+    }
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    url_candidates = []
+    if '/v1' in base_url:
+        url_candidates.append((base_url, '/chat/completions'))
+    else:
+        url_candidates.append((f"{base_url}/v1", '/v1/chat/completions'))
+        url_candidates.append((base_url, '/chat/completions'))
+
+    started_at = time.monotonic()
+    last_err = None
+
+    for m in test_models:
+        payload_data = json.dumps({
+            'model': m,
+            'messages': [{'role': 'user', 'content': 'hi'}],
+            'max_tokens': 5
+        }).encode('utf-8')
+
+        for base_candidate, path_label in url_candidates:
+            full_url = f"{base_candidate}/chat/completions"
+            req = urllib.request.Request(full_url, data=payload_data, headers=headers)
+            try:
+                with urllib.request.urlopen(req, timeout=6, context=ctx) as resp:
+                    elapsed_ms = int((time.monotonic() - started_at) * 1000)
+                    return {
+                        'ok': True,
+                        'auth_ref': auth_ref,
+                        'auth_name': auth_name,
+                        'available': True,
+                        'working_model': m,
+                        'working_path': path_label,
+                        'status_code': resp.status,
+                        'message': '正常响应 (OK)',
+                        'elapsed_ms': elapsed_ms,
+                        'retry_after_seconds': 0,
+                        'failure_kind': 'available',
+                        'tested_at': int(time.time()),
+                    }
+            except urllib.error.HTTPError as e:
+                elapsed_ms = int((time.monotonic() - started_at) * 1000)
+                err_body = e.read().decode('utf-8', errors='ignore')
+                friendly_msg = f"HTTP {e.code}"
+                try:
+                    err_json = json.loads(err_body)
+                    if isinstance(err_json, dict):
+                        err_detail = err_json.get('message') or err_json.get('error', {}).get('message') or err_json.get('msg')
+                        if err_detail:
+                            friendly_msg += f": {err_detail}"
+                except Exception:
+                    if err_body:
+                        friendly_msg += f": {err_body[:120]}"
+                last_err = {
+                    'ok': True,
+                    'auth_ref': auth_ref,
+                    'auth_name': auth_name,
+                    'available': False,
+                    'working_model': m,
+                    'working_path': path_label,
+                    'status_code': e.code,
+                    'message': friendly_msg,
+                    'elapsed_ms': elapsed_ms,
+                    'retry_after_seconds': _infer_retry_after_seconds({'status_code': e.code, 'body': err_body}),
+                    'failure_kind': _classify_failure({'status_code': e.code, 'body': err_body}),
+                    'tested_at': int(time.time()),
+                }
+                if e.code in (401, 403):
+                    return last_err
+            except Exception as e:
+                elapsed_ms = int((time.monotonic() - started_at) * 1000)
+                err_str = str(e)
+                if 'timed out' in err_str.lower():
+                    friendly_msg = '连接超时 (Timed out)'
+                else:
+                    friendly_msg = f"连接异常: {err_str[:80]}"
+                last_err = {
+                    'ok': True,
+                    'auth_ref': auth_ref,
+                    'auth_name': auth_name,
+                    'available': False,
+                    'working_model': m,
+                    'working_path': path_label,
+                    'status_code': 0,
+                    'message': friendly_msg,
+                    'elapsed_ms': elapsed_ms,
+                    'retry_after_seconds': 60,
+                    'failure_kind': 'timeout' if 'timed out' in err_str.lower() else 'client',
+                    'tested_at': int(time.time()),
+                }
+    return last_err or {
+        'ok': True,
+        'auth_ref': auth_ref,
+        'auth_name': auth_name,
+        'available': False,
+        'message': '检测未通过',
+        'tested_at': int(time.time()),
+    }
+
+
+def test_auth_entry(auth_ref: str, force: bool = False):
     auth_ref = str(auth_ref or '').strip()
     if not auth_ref:
         return {'ok': False, 'message': 'auth_ref is required.'}
-    socket_issue = probe_socket_stack()
-    if socket_issue:
-        return {
-            'ok': False,
-            'auth_ref': auth_ref,
-            'available': False,
-            'message': socket_issue,
-            'retry_after_seconds': 0,
-            'failure_kind': 'infrastructure',
-            'tested_at': int(time.time()),
-        }
 
-    temp_api_key = 'cliproxyapi-auth-test'
-    temp_port = _find_free_port()
-    temp_base_url = f'http://127.0.0.1:{temp_port}'
+    if not force:
+        cached = get_auth_test_cached_result(auth_ref)
+        if cached:
+            cached_res = dict(cached)
+            cached_res['cached'] = True
+            return cached_res
 
-    with tempfile.TemporaryDirectory(prefix='auth-test-', dir=str(TEMP_DIR)) as temp_dir:
-        temp_root = Path(temp_dir)
-        stdout_path = temp_root / 'proxy.stdout.log'
-        stderr_path = temp_root / 'proxy.stderr.log'
-        config_path = temp_root / 'cliproxyapi-test-config.yaml'
-        proc = None
-        try:
-            config_text, candidate_models, item = _build_temp_auth_runtime(auth_ref, temp_root, temp_port, temp_api_key)
-            if not candidate_models:
-                return {'ok': False, 'message': 'No candidate models found for this auth entry.'}
-            config_path.write_text(config_text, encoding='utf-8')
+    result = None
+    # Fast path for API key auths with base_url
+    try:
+        resolved = resolve_auth_reference(auth_ref=auth_ref)
+        if resolved:
+            source_id, source = resolved
+            payload = _read_auth_payload(source)
+            content = payload.get('content') if isinstance(payload.get('content'), dict) else {}
+            base_url = str(content.get('base_url') or payload.get('base_url') or payload.get('base-url') or '').strip().rstrip('/')
+            api_key = str(content.get('api_key') or payload.get('api_key') or '').strip()
+            if base_url and (api_key or str(content.get('type') or '').lower() == 'api_key'):
+                item = build_auth_item(source_id, source)
+                result = _direct_test_api_key_auth(auth_ref, source.name, base_url, api_key, payload, item)
+    except Exception:
+        pass
 
-            with open(stdout_path, 'w', encoding='utf-8', errors='ignore') as fout, open(stderr_path, 'w', encoding='utf-8', errors='ignore') as ferr:
-                creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
-                proc = subprocess.Popen(
-                    [str(CLI_EXE), '-config', str(config_path)],
-                    cwd=str(PROJECT_ROOT),
-                    stdout=fout,
-                    stderr=ferr,
-                    stdin=subprocess.DEVNULL,
-                    creationflags=creationflags,
-                )
-
-            ready, ready_error = _probe_proxy_ready(temp_base_url, temp_api_key)
-            if not ready:
-                return {
-                    'ok': False,
-                    'auth_ref': auth_ref,
-                    'auth_name': item.get('name'),
-                    'available': False,
-                    'message': ready_error or 'Temporary proxy did not become ready.',
-                    'retry_after_seconds': 120,
-                    'tested_at': int(time.time()),
-                    'stderr': read_tail(stderr_path, 1200),
-                }
-
-            attempts = []
-            success = None
-            for model_id in candidate_models:
-                for check in _candidate_checks_for_model(model_id):
-                    result = _request_with_api_key(temp_base_url, check['path'], check['payload'], temp_api_key)
-                    attempt = {
-                        'model': model_id,
-                        'path': check['path'],
-                        'status_code': result.get('status_code'),
-                        'ok': bool(result.get('ok')),
-                        'elapsed_ms': result.get('elapsed_ms'),
-                    }
-                    body = result.get('body')
-                    if body:
-                        attempt['body'] = body[:260]
-                    if result.get('error'):
-                        attempt['error'] = result.get('error')
-                    attempt['retry_after_seconds'] = _infer_retry_after_seconds(result)
-                    attempts.append(attempt)
-                    if result.get('ok') and int(result.get('status_code') or 0) == 200:
-                        success = attempt
-                        break
-                if success:
-                    break
-
-            latest = success or (attempts[-1] if attempts else {})
-            return {
-                'ok': True,
-                'auth_ref': auth_ref,
-                'auth_name': item.get('name'),
-                'available': bool(success),
-                'working_model': success.get('model') if success else None,
-                'working_path': success.get('path') if success else None,
-                'status_code': latest.get('status_code'),
-                'message': latest.get('body') or latest.get('error') or '',
-                'elapsed_ms': latest.get('elapsed_ms'),
-                'retry_after_seconds': latest.get('retry_after_seconds'),
-                'failure_kind': _classify_failure(latest),
-                'tested_at': int(time.time()),
-                'attempts': attempts,
-            }
-        except Exception as e:
-            return {
+    if result is None:
+        socket_issue = probe_socket_stack()
+        if socket_issue:
+            result = {
                 'ok': False,
                 'auth_ref': auth_ref,
                 'available': False,
-                'message': str(e),
-                'retry_after_seconds': 120,
-                'failure_kind': 'server',
+                'message': socket_issue,
+                'retry_after_seconds': 0,
+                'failure_kind': 'infrastructure',
                 'tested_at': int(time.time()),
             }
-        finally:
-            if proc and process_alive(proc):
-                kill_process(proc)
+
+    if result is None:
+        temp_api_key = 'cliproxyapi-auth-test'
+        temp_port = _find_free_port()
+        temp_base_url = f'http://127.0.0.1:{temp_port}'
+
+        with tempfile.TemporaryDirectory(prefix='auth-test-', dir=str(TEMP_DIR)) as temp_dir:
+            temp_root = Path(temp_dir)
+            stdout_path = temp_root / 'proxy.stdout.log'
+            stderr_path = temp_root / 'proxy.stderr.log'
+            config_path = temp_root / 'cliproxyapi-test-config.yaml'
+            proc = None
+            try:
+                config_text, candidate_models, item = _build_temp_auth_runtime(auth_ref, temp_root, temp_port, temp_api_key)
+                if not candidate_models:
+                    return {'ok': False, 'message': 'No candidate models found for this auth entry.'}
+                config_path.write_text(config_text, encoding='utf-8')
+
+                with open(stdout_path, 'w', encoding='utf-8', errors='ignore') as fout, open(stderr_path, 'w', encoding='utf-8', errors='ignore') as ferr:
+                    creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+                    proc = subprocess.Popen(
+                        [str(CLI_EXE), '-config', str(config_path)],
+                        cwd=str(PROJECT_ROOT),
+                        stdout=fout,
+                        stderr=ferr,
+                        stdin=subprocess.DEVNULL,
+                        creationflags=creationflags,
+                    )
+
+                ready, ready_error = _probe_proxy_ready(temp_base_url, temp_api_key)
+                if not ready:
+                    result = {
+                        'ok': False,
+                        'auth_ref': auth_ref,
+                        'auth_name': item.get('name'),
+                        'available': False,
+                        'message': ready_error or 'Temporary proxy did not become ready.',
+                        'retry_after_seconds': 120,
+                        'tested_at': int(time.time()),
+                        'stderr': read_tail(stderr_path, 1200),
+                    }
+                else:
+                    attempts = []
+                    success = None
+                    for model_id in candidate_models:
+                        for check in _candidate_checks_for_model(model_id):
+                            res = _request_with_api_key(temp_base_url, check['path'], check['payload'], temp_api_key)
+                            attempt = {
+                                'model': model_id,
+                                'path': check['path'],
+                                'status_code': res.get('status_code'),
+                                'ok': bool(res.get('ok')),
+                                'elapsed_ms': res.get('elapsed_ms'),
+                            }
+                            body = res.get('body')
+                            if body:
+                                attempt['body'] = body[:260]
+                            if res.get('error'):
+                                attempt['error'] = res.get('error')
+                            attempt['retry_after_seconds'] = _infer_retry_after_seconds(res)
+                            attempts.append(attempt)
+                            if res.get('ok') and int(res.get('status_code') or 0) == 200:
+                                success = attempt
+                                break
+                        if success:
+                            break
+
+                    latest = success or (attempts[-1] if attempts else {})
+                    result = {
+                        'ok': True,
+                        'auth_ref': auth_ref,
+                        'auth_name': item.get('name'),
+                        'available': bool(success),
+                        'working_model': success.get('model') if success else None,
+                        'working_path': success.get('path') if success else None,
+                        'status_code': latest.get('status_code'),
+                        'message': latest.get('body') or latest.get('error') or '',
+                        'elapsed_ms': latest.get('elapsed_ms'),
+                        'retry_after_seconds': latest.get('retry_after_seconds'),
+                        'failure_kind': _classify_failure(latest),
+                        'tested_at': int(time.time()),
+                        'attempts': attempts,
+                    }
+            except Exception as e:
+                result = {
+                    'ok': False,
+                    'auth_ref': auth_ref,
+                    'available': False,
+                    'message': str(e),
+                    'retry_after_seconds': 120,
+                    'failure_kind': 'server',
+                    'tested_at': int(time.time()),
+                }
+            finally:
+                if proc and process_alive(proc):
+                    kill_process(proc)
+
+    if result and result.get('ok'):
+        update_auth_test_cache(auth_ref, result)
+    return result
 
 
 def _infer_retry_after_seconds(result: dict):

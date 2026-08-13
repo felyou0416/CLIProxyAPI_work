@@ -1,0 +1,28 @@
+{
+  "title": "本地工作台",
+  "description": "此文件可提交为模板；请把实际配置复制到 .local/dashboard-actions.json。",
+  "links": [
+    {
+      "id": "local-monitor",
+      "label": "本地监控",
+      "description": "仅示例：替换为自己的本地链接。",
+      "icon": "M",
+      "url": "http://127.0.0.1:3000/"
+    }
+  ],
+  "services": [
+    {
+      "id": "my-local-service",
+      "label": "我的本地服务",
+      "description": "仅示例：命令只能使用参数数组，不能使用 shell 字符串。",
+      "icon": "S",
+      "url": "http://127.0.0.1:3000/",
+      "cwd": "C:/path/to/project",
+      "commands": {
+        "start": ["powershell", "-NoProfile", "-File", "start.ps1"],
+        "restart": ["powershell", "-NoProfile", "-File", "restart.ps1"],
+        "stop": ["powershell", "-NoProfile", "-File", "stop.ps1"]
+      }
+    }
+  ]
+}

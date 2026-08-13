@@ -86,7 +86,16 @@ func (e *KimiExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 	from := opts.SourceFormat
 	if from.String() == "claude" {
 		auth.Attributes["base_url"] = kimiauth.KimiAPIBaseURL
-		return e.ClaudeExecutor.Execute(ctx, auth, req, opts)
+		preparedReq, replayScope := prepareKimiThinkingReplayRequest(ctx, req, opts)
+		claudeResp, errExecute := e.ClaudeExecutor.Execute(ctx, auth, preparedReq, opts)
+		if errExecute != nil {
+			if replayScope.replayApplied && shouldClearKimiThinkingReplayAfterError(errExecute) {
+				clearKimiThinkingReplayContent(ctx, replayScope)
+			}
+			return claudeResp, errExecute
+		}
+		cacheKimiThinkingReplayResponse(ctx, replayScope, claudeResp.Payload)
+		return claudeResp, nil
 	}
 	responseFormat := cliproxyexecutor.ResponseFormatOrSource(opts)
 
@@ -113,7 +122,7 @@ func (e *KimiExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 		return resp, fmt.Errorf("kimi executor: failed to set model in payload: %w", err)
 	}
 
-	body, err = thinking.ApplyThinking(body, req.Model, from.String(), "kimi", e.Identifier())
+	body, err = helps.ApplyThinkingWithSourcePayload(body, req.Payload, originalPayloadSource, req.Model, from.String(), "kimi", e.Identifier())
 	if err != nil {
 		return resp, err
 	}
@@ -196,7 +205,15 @@ func (e *KimiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 	from := opts.SourceFormat
 	if from.String() == "claude" {
 		auth.Attributes["base_url"] = kimiauth.KimiAPIBaseURL
-		return e.ClaudeExecutor.ExecuteStream(ctx, auth, req, opts)
+		preparedReq, replayScope := prepareKimiThinkingReplayRequest(ctx, req, opts)
+		claudeResult, errExecute := e.ClaudeExecutor.ExecuteStream(ctx, auth, preparedReq, opts)
+		if errExecute != nil {
+			if replayScope.replayApplied && shouldClearKimiThinkingReplayAfterError(errExecute) {
+				clearKimiThinkingReplayContent(ctx, replayScope)
+			}
+			return nil, errExecute
+		}
+		return wrapKimiThinkingReplayStream(ctx, claudeResult, replayScope), nil
 	}
 	responseFormat := cliproxyexecutor.ResponseFormatOrSource(opts)
 
@@ -222,7 +239,7 @@ func (e *KimiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 		return nil, fmt.Errorf("kimi executor: failed to set model in payload: %w", err)
 	}
 
-	body, err = thinking.ApplyThinking(body, req.Model, from.String(), "kimi", e.Identifier())
+	body, err = helps.ApplyThinkingWithSourcePayload(body, req.Payload, originalPayloadSource, req.Model, from.String(), "kimi", e.Identifier())
 	if err != nil {
 		return nil, err
 	}
@@ -790,14 +807,24 @@ func stripKimiPrefix(model string) string {
 // It strips the CLIProxyAPI "kimi-" prefix and any Claude Code "[1m]" context
 // suffix while preserving a trailing thinking suffix (e.g. "(1024)"), so that
 // the upstream API receives IDs such as "k3(1024)" instead of "kimi-k3[1m](1024)".
+// K2.7 Code aliases are remapped to the official Kimi Code model IDs before
+// generic prefix stripping, so already-canonical IDs stay idempotent.
 func normalizeKimiUpstreamModel(model string) string {
 	model = strings.TrimSpace(model)
 	parsed := thinking.ParseSuffix(model)
-	base := parsed.ModelName
-	if strings.HasSuffix(strings.ToLower(base), "[1m]") {
+	base := strings.ToLower(strings.TrimSpace(parsed.ModelName))
+	if strings.HasSuffix(base, "[1m]") {
 		base = base[:len(base)-len("[1m]")]
 	}
-	normalized := strings.ToLower(stripKimiPrefix(strings.TrimSpace(base)))
+	var normalized string
+	switch base {
+	case "kimi-k2.7-code", "k2.7-code", "kimi-for-coding", "for-coding":
+		normalized = "kimi-for-coding"
+	case "kimi-k2.7-code-highspeed", "k2.7-code-highspeed", "kimi-for-coding-highspeed", "for-coding-highspeed":
+		normalized = "kimi-for-coding-highspeed"
+	default:
+		normalized = stripKimiPrefix(base)
+	}
 	if parsed.HasSuffix {
 		return normalized + "(" + parsed.RawSuffix + ")"
 	}

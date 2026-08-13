@@ -1,4 +1,7 @@
 import sys
+import json
+import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -91,6 +94,49 @@ class LoopbackModelProxyTests(unittest.TestCase):
                     block = auth.build_openai_compatibility_block(entries)
         self.assertIn('name: "agnes"', block)
         self.assertIn('proxy-url: "direct"', block)
+
+    def test_synchronize_local_proxy_settings_remaps_and_clears_cache(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            settings_file = Path(tmp_dir) / 'model_proxy_settings.json'
+            cache_file = Path(tmp_dir) / 'egress_cache.json'
+            settings_file.write_text(json.dumps({
+                'mixed_port': 7890,
+                'presets': [
+                    {'id': 'local', 'proxy_url': 'http://127.0.0.1:7890'},
+                    {'id': 'direct', 'proxy_url': 'direct'},
+                    {'id': 'external', 'proxy_url': 'http://proxy.example:8080'},
+                ],
+                'rules': {
+                    'agnes': {'proxy_url': 'http://localhost:7890'},
+                    'remote': {'proxy_url': 'http://proxy.example:8080'},
+                },
+            }), encoding='utf-8')
+            disk_cache = {
+                'agnes|local': {'ts': time.time(), 'value': 'http://127.0.0.1:7890'},
+                'remote|external': {'ts': time.time(), 'value': 'http://proxy.example:8080'},
+            }
+            cache_file.write_text(json.dumps(disk_cache), encoding='utf-8')
+            with patch.object(auth, 'MODEL_PROXY_SETTINGS_FILE', settings_file), \
+                 patch.object(auth, '_EGRESS_CACHE_FILE', cache_file), \
+                 patch.object(auth, '_detect_active_local_proxy', return_value={'ok': False}), \
+                 patch.object(auth, '_EGRESS_DISK_CACHE_LOADED', False), \
+                 patch.object(auth, '_EGRESS_DISK_ITEMS', {}), \
+                 patch.object(auth, '_EGRESS_CHOICE_CACHE', {'ts': 0.0, 'items': {'memory': {'ts': 1, 'value': 'http://127.0.0.1:7890'}}}):
+                result = auth.synchronize_local_proxy_settings('http://127.0.0.1:10090')
+
+            self.assertTrue(result['ok'])
+            self.assertEqual(result['settings_updated'], 2)
+            saved = json.loads(settings_file.read_text(encoding='utf-8'))
+            self.assertEqual(saved['mixed_port'], 10090)
+            self.assertEqual(saved['presets'][0]['proxy_url'], 'http://127.0.0.1:10090')
+            self.assertEqual(saved['presets'][1]['proxy_url'], 'direct')
+            self.assertEqual(saved['presets'][2]['proxy_url'], 'http://proxy.example:8080')
+            self.assertEqual(saved['rules']['agnes']['proxy_url'], 'http://127.0.0.1:10090')
+            with patch.object(auth, '_detect_active_local_proxy', return_value={'ok': False}):
+                self.assertEqual(auth.get_model_proxy_settings()['mixed_port'], 10090)
+            remaining_cache = json.loads(cache_file.read_text(encoding='utf-8'))
+            self.assertEqual(set(remaining_cache), {'remote|external'})
+            self.assertEqual(remaining_cache['remote|external']['value'], 'http://proxy.example:8080')
 
 
 if __name__ == '__main__':

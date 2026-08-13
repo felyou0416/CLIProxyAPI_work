@@ -500,31 +500,180 @@
 .auth-details-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 6px;
+  gap: 8px 14px;
   margin-bottom: 14px;
   font-size: 12px;
   color: var(--text-soft);
 }
 .auth-detail-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 0;
+  overflow: visible;
+  white-space: normal;
+}
+.auth-detail-line strong {
+  flex-shrink: 0;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 2px 0;
+}
+.auth-detail-line.is-full-width {
+  grid-column: 1 / -1;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.5;
+}
+.auth-model-tag-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+  margin-bottom: 2px;
+  vertical-align: middle;
+}
+.auth-model-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-2));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.auth-filter-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.auth-toggle-expand-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 2px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.auth-toggle-expand-all-btn:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+.auth-toggle-expand-all-btn:active {
+  transform: scale(0.96);
+}
+.auth-toggle-expand-icon {
+  font-size: 12px;
+  line-height: 1;
 }
 .auth-strip-actions {
-  display: flex;
-  gap: 8px;
+  display: inline-flex;
+  gap: 6px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-shrink: 0;
+  margin: 0 4px;
 }
 .auth-strip-actions button {
-  padding: 5px 12px;
-  font-size: 12px;
-  border-radius: 8px;
+  min-height: 24px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.12s ease, opacity 0.15s ease, background-color 0.15s ease;
+}
+.auth-strip-actions button:hover {
+  transform: translateY(-1px);
+}
+.auth-strip-actions button:active {
+  transform: scale(0.96);
 }
 .auth-order-actions-inline {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+}
+
+/* Inline Editing Styles for Auth Cards */
+.auth-inline-input {
+  display: inline-block;
+  flex: 1;
+  min-width: 120px;
+  max-width: 100%;
+  padding: 3px 8px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px dashed color-mix(in srgb, var(--text-soft) 40%, transparent);
+  background: color-mix(in srgb, var(--panel-2) 90%, transparent);
+  color: var(--text);
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+.auth-inline-input:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--panel-2) 98%, var(--accent));
+}
+.auth-inline-input:focus {
+  border: 1px solid var(--accent);
+  background: var(--panel);
+  outline: none;
+  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.auth-inline-select {
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px dashed color-mix(in srgb, var(--text-soft) 40%, transparent);
+  background: color-mix(in srgb, var(--panel-2) 90%, transparent);
+  color: var(--text);
+  cursor: pointer;
+  vertical-align: middle;
+}
+.auth-inline-select:hover {
+  border-color: var(--accent);
+}
+.auth-inline-select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.auth-save-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 6px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.auth-save-status[data-auth-save-state="saving"],
+.auth-save-status[data-auth-save-state="pending"] {
+  color: var(--text-soft);
+  border-color: var(--border);
+  background: var(--panel-2);
+}
+.auth-save-status[data-auth-save-state="error"] {
+  color: #dc2626;
+  border-color: color-mix(in srgb, #dc2626 35%, var(--border));
+  background: color-mix(in srgb, #dc2626 10%, var(--panel));
 }

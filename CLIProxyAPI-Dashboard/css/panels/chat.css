@@ -345,7 +345,6 @@
   flex-direction: column;
   gap: 18px;
   padding: 22px clamp(16px, 4vw, 48px) 18px;
-  scroll-behavior: smooth;
 }
 .chat-welcome {
   margin: auto;

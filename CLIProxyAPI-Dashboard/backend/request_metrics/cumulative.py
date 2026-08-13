@@ -161,24 +161,17 @@ def _load_stats() -> dict:
                 version = stats.get('version')
                 if version == 4:
                     return stats
-                # v3 → v4：全量重建以填充 actual_model_distribution 子统计
+                # Schema migrations must preserve durable totals. Rebuilding from
+                # a bounded event window would silently replace historical data.
                 if version == 3:
                     stats['version'] = 4
-                    try:
-                        events = _merge_all_events(limit=5000)
-                        _rebuild_stats_internal(stats, events)
-                    except Exception:
-                        pass
+                    stats.setdefault('hourly', {})
                     _save_stats(stats)
                     return stats
-                # 从 v2 升级到 v3，执行自动全量重建以补齐小时统计
                 if version == 2:
                     stats['version'] = 3
-                    try:
-                        events = _merge_all_events(limit=5000)
-                        _rebuild_stats_internal(stats, events)
-                    except Exception:
-                        stats['hourly'] = {}
+                    stats.setdefault('hourly', {})
+                    stats['version'] = 4
                     _save_stats(stats)
                     return stats
     except Exception:

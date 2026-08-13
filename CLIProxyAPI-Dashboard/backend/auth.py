@@ -8,6 +8,7 @@ import base64
 import ipaddress
 import tempfile
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -16,6 +17,18 @@ from backend.state import load_state, normalize_route_strategy, get_proxy_bind_h
 
 
 _runtime_rebuild_lock = threading.Lock()
+_auth_file_locks_guard = threading.Lock()
+_auth_file_locks = {}
+
+
+@contextmanager
+def auth_file_update_lock(path):
+    """Serialize read-modify-replace updates for one auth file."""
+    lock_key = str(Path(path).resolve()).casefold()
+    with _auth_file_locks_guard:
+        lock = _auth_file_locks.setdefault(lock_key, threading.Lock())
+    with lock:
+        yield
 
 
 PROVIDER_MODEL_ALIASES = {
@@ -351,6 +364,10 @@ def _iter_auth_json_files(source_dir: Path):
 
 def _iter_pool_auth_json_files():
     yield from _iter_auth_json_files(POOL_AUTH_DIR)
+
+
+def _is_auth_payload_disabled(payload):
+    return isinstance(payload, dict) and bool(payload.get('disabled', False))
 
 
 def _manual_auth_save_dir(provider: str | None = None):
@@ -1790,6 +1807,12 @@ def get_model_proxy_settings():
                 'enabled': bool(item.get('enabled', True)),
             })
     merged = dict(defaults)
+    try:
+        saved_mixed_port = int(payload.get('mixed_port') or 0)
+    except Exception:
+        saved_mixed_port = 0
+    if saved_mixed_port > 0:
+        merged['mixed_port'] = saved_mixed_port
     if normalized_presets:
         merged['presets'] = normalized_presets
     merged['rules'] = _normalize_model_proxy_rules(payload.get('rules'))
@@ -1802,6 +1825,61 @@ def _save_model_proxy_settings(settings: dict):
         json.dumps(settings, ensure_ascii=False, indent=2),
         encoding='utf-8',
     )
+
+
+def synchronize_local_proxy_settings(proxy_url: str) -> dict:
+    """Persist a selected local egress and discard stale local egress cache winners."""
+    try:
+        from backend.local_proxy import is_local_proxy_url, remap_local_proxy_url
+    except Exception as exc:
+        return {'ok': False, 'settings_updated': 0, 'cache_entries_cleared': 0, 'error': str(exc)}
+
+    target = str(proxy_url or '').strip()
+    if not is_local_proxy_url(target):
+        return {'ok': False, 'settings_updated': 0, 'cache_entries_cleared': 0, 'error': 'Selected proxy must be a local URL.'}
+
+    settings = get_model_proxy_settings()
+    changed = 0
+    for item in settings.get('presets') or []:
+        if not isinstance(item, dict):
+            continue
+        current = str(item.get('proxy_url') or '').strip()
+        updated = remap_local_proxy_url(current, target)
+        if updated != current:
+            item['proxy_url'] = updated
+            changed += 1
+    for item in (settings.get('rules') or {}).values():
+        if not isinstance(item, dict):
+            continue
+        current = str(item.get('proxy_url') or '').strip()
+        updated = remap_local_proxy_url(current, target)
+        if updated != current:
+            item['proxy_url'] = updated
+            changed += 1
+    try:
+        settings['mixed_port'] = int(urlparse(target).port or 0)
+    except Exception:
+        pass
+    settings['detected_proxy_url'] = target
+    settings['detected_source'] = 'system-proxy-selection'
+    if changed or not MODEL_PROXY_SETTINGS_FILE.exists():
+        _save_model_proxy_settings(settings)
+
+    global _EGRESS_DISK_CACHE_LOADED, _EGRESS_DISK_ITEMS
+    _egress_cache_load_disk()
+    cleared = 0
+    for cache in (_EGRESS_CHOICE_CACHE.get('items'), _EGRESS_DISK_ITEMS):
+        if not isinstance(cache, dict):
+            continue
+        for key, entry in list(cache.items()):
+            value = str(entry.get('value') or '') if isinstance(entry, dict) else ''
+            if is_local_proxy_url(value):
+                cache.pop(key, None)
+                cleared += 1
+    _EGRESS_DISK_ITEMS = dict(_EGRESS_DISK_ITEMS)
+    _EGRESS_DISK_CACHE_LOADED = True
+    _egress_cache_save_disk()
+    return {'ok': True, 'settings_updated': changed, 'cache_entries_cleared': cleared}
 
 
 def save_model_proxy_rules(rules: list[dict] | None):
@@ -2171,7 +2249,7 @@ def delete_provider_model_override(provider: str, upstream_id: str, call_id: str
 
     overrides = _load_model_mapping_overrides()
     provider_map = overrides.setdefault(provider_value, {})
-    
+
     if call_value:
         current_entries = iter_model_mapping_entries(overrides, provider_value, upstream_value)
         next_entries = [
@@ -2188,7 +2266,7 @@ def delete_provider_model_override(provider: str, upstream_id: str, call_id: str
         provider_map[upstream_value] = {'mappings': [
             _model_mapping_entry('', provider_value, upstream_value, True)
         ]}
-        
+
     _save_model_mapping_overrides(overrides)
     return {
         'provider': provider_value,
@@ -2381,6 +2459,7 @@ def _save_aggregate_model_aliases(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding='utf-8',
     )
+    invalidate_aggregate_models_cache()
 
 
 def resolve_aggregate_members(raw_members: list[dict]):
@@ -2748,6 +2827,7 @@ def add_custom_aggregate_alias_members(alias_id: str, members: list[dict] | None
         json.dumps(raw_payload, ensure_ascii=False, indent=2),
         encoding='utf-8',
     )
+    invalidate_aggregate_models_cache()
 
     return {
         'alias_id': alias_value,
@@ -2814,6 +2894,7 @@ def set_custom_aggregate_alias_members(alias_id: str, members: list[dict] | None
         json.dumps(raw_payload, ensure_ascii=False, indent=2),
         encoding='utf-8',
     )
+    invalidate_aggregate_models_cache()
 
     return {
         'alias_id': alias_value,
@@ -2861,6 +2942,7 @@ def set_custom_aggregate_alias_version(alias_id: str, version: str):
         json.dumps(raw_payload, ensure_ascii=False, indent=2),
         encoding='utf-8',
     )
+    invalidate_aggregate_models_cache()
 
     return {
         'alias_id': alias_value,
@@ -3143,7 +3225,112 @@ def _find_auth_quota(auth_item, quota_rows):
                 'quota_weekly_rem': row.get('weekly_rem'),
                 'quota_daily_rem': row.get('daily_rem'),
             }
-    return None
+def apply_surgical_changes(existing_data: dict, changes: dict) -> dict:
+    """Surgically update ONLY the specific fields provided in changes dict, leaving all other fields untouched."""
+    if not isinstance(existing_data, dict) or not isinstance(changes, dict):
+        return existing_data
+
+    data = dict(existing_data)
+    content = data.get('content') if isinstance(data.get('content'), dict) else None
+    meta = data.get('metadata') if isinstance(data.get('metadata'), dict) else None
+
+    # 1. Disabled
+    if 'disabled' in changes:
+        data['disabled'] = bool(changes['disabled'])
+        if content: content.pop('disabled', None)
+
+    # 2. Base URL
+    if 'base_url' in changes:
+        new_url = str(changes['base_url']).strip()
+        if content:
+            content['base_url'] = new_url
+            if 'BaseURL' in content: content['BaseURL'] = new_url
+            if 'url' in content: content['url'] = new_url
+        else:
+            data['base_url'] = new_url
+
+    # 3. API Key
+    if 'api_key' in changes:
+        new_key = str(changes['api_key']).strip()
+        if new_key and '...' not in new_key:
+            if content:
+                content['api_key'] = new_key
+                if 'key' in content: content['key'] = new_key
+            else:
+                data['api_key'] = new_key
+
+    # 4. Provider
+    if 'provider' in changes:
+        new_prov = str(changes['provider']).strip()
+        if content:
+            content['provider'] = new_prov
+        else:
+            data['provider'] = new_prov
+
+    # 5. Email (Remark)
+    if 'email' in changes:
+        new_email = str(changes['email']).strip()
+        if new_email:
+            if meta is not None:
+                meta['remark'] = new_email
+            else:
+                data['metadata'] = {'remark': new_email}
+
+    # 6. Models
+    if 'models' in changes:
+        new_models = changes['models']
+        if isinstance(new_models, str):
+            new_models = [s.strip() for s in new_models.split(',') if s.strip()]
+        if isinstance(new_models, list):
+            if content:
+                content['models'] = new_models
+                if new_models: content['model'] = new_models[0]
+            else:
+                data['models'] = new_models
+
+    return data
+
+
+def sanitize_auth_payload(payload: dict) -> dict:
+    """Enforce strict canonical schema for auth JSON files matching ung reference format."""
+    if not isinstance(payload, dict):
+        return payload
+    data = dict(payload)
+    content = data.get('content') if isinstance(data.get('content'), dict) else None
+
+    email_val = data.pop('email', None)
+
+    if content is not None:
+        new_content = {}
+        if 'email' in content:
+            email_val = content.pop('email', None) or email_val
+        if 'disabled' in content:
+            content.pop('disabled', None)
+
+        for k, v in content.items():
+            new_content[k] = v
+        data['content'] = new_content
+
+        for root_key in ('base_url', 'api_key', 'provider', 'models', 'model', 'type', 'url', 'BaseURL', 'key'):
+            data.pop(root_key, None)
+
+    meta = data.get('metadata') if isinstance(data.get('metadata'), dict) else None
+    if meta is not None:
+        new_meta = {}
+        if 'email' in meta:
+            email_val = meta.pop('email', None) or email_val
+        for k, v in meta.items():
+            new_meta[k] = v
+        if email_val and '@' in str(email_val) and not new_meta.get('remark'):
+            new_meta['remark'] = str(email_val).strip()
+        data['metadata'] = new_meta
+    elif email_val and '@' in str(email_val):
+        data['metadata'] = {'remark': str(email_val).strip()}
+
+    if 'disabled' in data:
+        data['disabled'] = bool(data['disabled'])
+
+    return data
 
 
 def build_auth_item(source_id: str, path: Path, quota_rows=None):
@@ -3155,9 +3342,50 @@ def build_auth_item(source_id: str, path: Path, quota_rows=None):
     manual_entry = _extract_manual_api_config(payload, path.name)
     source_dir = AUTH_SOURCE_DIRS.get(source_id, path.parent)
     relative_name = _relative_auth_name(source_dir, path)
+
+    content = payload.get('content') if isinstance(payload.get('content'), dict) else {}
+    metadata = payload.get('metadata') if isinstance(payload.get('metadata'), dict) else {}
+
+    # Extract baseUrl
+    base_url = str(
+        content.get('base_url') or content.get('BaseURL') or content.get('url') or
+        payload.get('base_url') or payload.get('base-url') or payload.get('BaseURL') or payload.get('url') or ''
+    ).strip()
+    if not base_url and manual_entry:
+        base_url = str(manual_entry.get('base_url') or '').strip()
+
+    # Extract models
+    models = _extract_payload_models(payload, path)
+    default_model = str(content.get('model') or payload.get('model') or '').strip()
+
+    # Extract remark
+    remark = str(metadata.get('remark') or payload.get('remark') or '').strip()
+    if not email and remark and ('@' in remark and '.' in remark):
+        email = remark
+
+    # Extract disabled state
+    disabled = bool(payload.get('disabled', False))
+
+    # Extract API key
+    api_key = str(
+        content.get('api_key') or content.get('key') or
+        payload.get('api_key') or payload.get('key') or ''
+    ).strip()
+    if not api_key and manual_entry:
+        api_key = str(manual_entry.get('api_key') or '').strip()
+    masked_key = ''
+    if api_key:
+        if len(api_key) > 12:
+            masked_key = f"{api_key[:6]}...{api_key[-4:]}"
+        else:
+            masked_key = api_key
+
     key_fingerprint = None
-    if manual_entry and manual_entry.get('api_key'):
+    if api_key:
+        key_fingerprint = hashlib.sha256(api_key.encode('utf-8')).hexdigest()[-6:]
+    elif manual_entry and manual_entry.get('api_key'):
         key_fingerprint = hashlib.sha256(str(manual_entry.get('api_key')).encode('utf-8')).hexdigest()[-6:]
+
     item = {
         'id': build_auth_ref(source_id, relative_name),
         'name': path.name,
@@ -3167,12 +3395,18 @@ def build_auth_item(source_id: str, path: Path, quota_rows=None):
         'path': str(path),
         'size': stat.st_size,
         'mtime': stat.st_mtime,
-        'email': email,
-        'accountId': account_id,
+        'email': email or '',
+        'accountId': account_id or '',
         'provider': provider,
         'authKind': auth_kind,
         'manual': bool(manual_entry),
         'keyFingerprint': key_fingerprint,
+        'baseUrl': base_url,
+        'models': models,
+        'defaultModel': default_model,
+        'remark': remark,
+        'disabled': disabled,
+        'apiKeyMasked': masked_key,
     }
     quota = _find_auth_quota(item, quota_rows or [])
     if quota:
@@ -3250,6 +3484,8 @@ def collect_provider_model_aliases(auth_refs: list[str] | None = None):
 
     for source_id, path in resolved_paths:
         payload = _read_auth_payload(path)
+        if not isinstance(payload, dict) or _is_auth_payload_disabled(payload):
+            continue
         provider = detect_provider(payload, path.name)
         if not provider:
             continue
@@ -3318,6 +3554,8 @@ def collect_detected_providers(auth_refs: list[str] | None = None):
 
     for _source_id, path in resolved_paths:
         payload = _read_auth_payload(path)
+        if not isinstance(payload, dict) or _is_auth_payload_disabled(payload):
+            continue
         provider = detect_provider(payload, path.name)
         if provider and provider not in providers:
             providers.append(provider)
@@ -3820,7 +4058,8 @@ def build_openai_compatibility_block(entries):
         grouped_models = _group_manual_entry_models(entry, overrides=overrides)
         for provider, models in grouped_models.items():
             headers = entry.get('headers') or {}
-            model_proxy_url = _effective_model_proxy_url(provider, str(entry.get('base_url') or ''))
+            explicit_proxy_url = str(entry.get('proxy_url') or '').strip()
+            model_proxy_url = explicit_proxy_url or _effective_model_proxy_url(provider, str(entry.get('base_url') or ''))
             for model in models:
                 model_name = str(model.get('name') or '').strip()
                 alias_name = str(model.get('alias') or '').strip()
@@ -3911,12 +4150,14 @@ def build_openai_compatibility_block(entries):
 
 def rewrite_openai_compatibility(config_text: str, entries):
     cleaned = _strip_top_level_block(config_text, 'openai-compatibility')
-    try:
-        from backend.model_pool import get_model_pool_manual_entries
-        pool_entries = get_model_pool_manual_entries()
-    except Exception:
-        pool_entries = []
-    combined_entries = list(entries or []) + list(pool_entries or [])
+    pool_entries = []
+    if not load_state().get('model_pool_archived', True):
+        try:
+            from backend.model_pool import get_model_pool_manual_entries
+            pool_entries = get_model_pool_manual_entries()
+        except Exception:
+            pool_entries = []
+    combined_entries = list(entries or []) + list(pool_entries)
     block = build_openai_compatibility_block(combined_entries)
     if not block:
         return cleaned
@@ -3982,18 +4223,72 @@ def rewrite_claude_api_key(config_text: str, entries):
     return cleaned.rstrip() + '\n\n' + block
 
 
+def reconcile_stale_provider_metadata():
+    """Explicitly archive and remove stale Provider model overrides only.
+
+    Aggregate aliases are durable user routing configuration. A member remains
+    stored even when its Provider temporarily has no auth file.
+    """
+    global _cached_provider_model_aliases, _cached_provider_model_aliases_time
+    global _cached_detected_providers, _cached_detected_providers_time
+
+    live_providers = set(collect_detected_providers())
+    archived_overrides = {}
+    raw_overrides = {}
+    if MODEL_MAPPING_OVERRIDES_FILE.exists():
+        try:
+            raw_overrides = json.loads(MODEL_MAPPING_OVERRIDES_FILE.read_text(encoding='utf-8'))
+        except Exception:
+            raw_overrides = {}
+
+    if not isinstance(raw_overrides, dict):
+        return {'changed': False, 'live_providers': sorted(live_providers)}
+
+    cleaned_overrides = {}
+    for provider, entries in raw_overrides.items():
+        provider_key = str(provider or '').strip().lower()
+        if provider_key and provider_key not in live_providers:
+            archived_overrides[provider] = entries
+        else:
+            cleaned_overrides[provider] = entries
+
+    if not archived_overrides:
+        return {'changed': False, 'live_providers': sorted(live_providers)}
+
+    MODEL_MAPPING_OVERRIDES_FILE.write_text(
+        json.dumps(cleaned_overrides, ensure_ascii=False, indent=2),
+        encoding='utf-8',
+    )
+    BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+    archive_path = BACKUPS_DIR / f'provider-metadata-reconcile-{datetime.now().strftime("%Y%m%d-%H%M%S-%f")}.json'
+    archive_path.write_text(json.dumps({
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'reason': 'provider has no auth file in storage/auth',
+        'live_providers': sorted(live_providers),
+        'removed_provider_overrides': archived_overrides,
+        'removed_aggregate_members': {},
+    }, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    _cached_provider_model_aliases = None
+    _cached_provider_model_aliases_time = 0.0
+    _cached_detected_providers = None
+    _cached_detected_providers_time = 0.0
+    return {
+        'changed': True,
+        'live_providers': sorted(live_providers),
+        'archive_path': str(archive_path),
+        'removed_provider_count': len(archived_overrides),
+        'removed_aggregate_alias_count': 0,
+    }
+
+
 def get_configured_provider_models(include_override_only: bool = True):
     provider_aliases = collect_provider_model_aliases()
     detected_providers = collect_detected_providers()
     overrides = _load_model_mapping_overrides()
-    all_providers = []
-    for provider in detected_providers:
-        if provider not in all_providers:
-            all_providers.append(provider)
-    if include_override_only:
-        for provider in overrides.keys():
-            if provider not in all_providers:
-                all_providers.append(provider)
+    # A Provider exists only when an auth file identifies it. Historical model
+    # overrides cannot resurrect a provider after its auth files are removed.
+    all_providers = list(dict.fromkeys(detected_providers))
     items = []
     for provider in all_providers:
         rows = []
@@ -4107,7 +4402,63 @@ def annotate_provider_models_runtime(items: list[dict], runtime_model_ids: list[
     return _attach_provider_model_scores(annotated)
 
 
+_AGGREGATE_MODELS_CACHE_LOCK = threading.Lock()
+_AGGREGATE_MODELS_CACHE: dict = {'ts': 0.0, 'result': None}
+# 实测未缓存的原始扫描本身就要 9-13 秒（storage/auth 下文件数多、单文件磁盘
+# I/O 慢）。TTL 必须明显大于这个耗时，否则"缓存"形同虚设：如果 TTL 设得比
+# 单次执行时间还短，缓存写入时就已经过期了，下一次调用永远只能重新扫描，
+# 起不到任何效果。设为 30 秒，兼顾及时性与实际收益。
+#
+# 重要：TTL 只解决"后台线程重复扫描"的问题，不能单独解决"写后读"的正确性——
+# 用户在聚合模型管理页面保存/删除/修改别名后，前端几乎立即发起 GET 请求
+# 刷新列表，这个间隔可能远小于 TTL，仍然会读到写操作前的旧数据（表现为
+# "删除的别名又出现了"或"刚加的成员看不到"）。所以所有会修改
+# AGGREGATE_MODEL_ALIASES_FILE 的写函数，必须在写完之后调用
+# invalidate_aggregate_models_cache() 主动失效缓存，不能只靠 TTL 自然过期。
+_AGGREGATE_MODELS_CACHE_TTL_SECONDS = 30.0
+
+
+def invalidate_aggregate_models_cache() -> None:
+    """
+    主动失效 get_configured_aggregate_models() 的缓存。
+
+    必须在任何修改 AGGREGATE_MODEL_ALIASES_FILE（或影响其解析结果的
+    hidden/disabled alias、copy group 等状态）的写操作完成之后调用，
+    确保写操作后立刻发起的读请求能拿到最新数据，而不是等 TTL 自然过期。
+    """
+    with _AGGREGATE_MODELS_CACHE_LOCK:
+        _AGGREGATE_MODELS_CACHE['result'] = None
+        _AGGREGATE_MODELS_CACHE['ts'] = 0.0
+
+
 def get_configured_aggregate_models():
+    """
+    带短时效缓存（TTL 30秒）的包装，实际逻辑在 _get_configured_aggregate_models_uncached。
+
+    背景：这个函数会全量扫描 storage/auth 下所有账号文件（还会间接调用
+    get_configured_provider_models），是一个较重的操作，且完全没有缓存。
+    Dashboard 的后台观测缓存线程每 15 秒刷新一次，一次刷新里会通过
+    merge_request_events -> _provider_lookup 重复调用这个函数 2-3 次；
+    这类持续的重量级磁盘扫描会跟同进程里其他请求（比如“重启代理服务”按钮，
+    需要尽快返回）抢占 CPU 和磁盘 I/O，导致原本该很快的操作被拖慢。
+    这里加一层 TTL 缓存：不改变返回值的内容和格式，只是短时间内的重复
+    调用直接复用上一次的结果，不重新扫描；写操作路径会调用
+    invalidate_aggregate_models_cache() 主动失效，保证写后立即读到最新数据。
+    """
+    now = time.time()
+    with _AGGREGATE_MODELS_CACHE_LOCK:
+        if _AGGREGATE_MODELS_CACHE['result'] is not None and (now - _AGGREGATE_MODELS_CACHE['ts']) < _AGGREGATE_MODELS_CACHE_TTL_SECONDS:
+            # 返回列表浅拷贝：调用方都是只读遍历，但防止任何潜在的原地修改
+            # （比如某处不小心 .append() 了一下）污染缓存里复用的对象。
+            return list(_AGGREGATE_MODELS_CACHE['result'])
+    result = _get_configured_aggregate_models_uncached()
+    with _AGGREGATE_MODELS_CACHE_LOCK:
+        _AGGREGATE_MODELS_CACHE['result'] = result
+        _AGGREGATE_MODELS_CACHE['ts'] = now
+    return list(result)
+
+
+def _get_configured_aggregate_models_uncached():
     provider_items = get_configured_provider_models()
     alias_map = {}
     saved_aliases = _load_aggregate_model_aliases()
@@ -4501,26 +4852,65 @@ def get_aggregate_route_health(auth_refs: list[str] | None = None):
 
 
 def get_manual_provider_presets():
+    """Build manual-entry presets from the active auth-file library.
+
+    URLs are intentionally read from existing API-key files instead of the
+    static provider defaults: one provider may have several real endpoints.
+    """
     configured = {item['provider']: item for item in get_configured_provider_models()}
-    providers = sorted(set(list(PROVIDER_BASE_URLS.keys()) + list(configured.keys())))
+    urls_by_provider = {}
+    models_by_url = {}
+    models_by_provider = {}
+    for source_id, source_dir in iter_auth_source_dirs():
+        for path in _iter_auth_json_files(source_dir):
+            payload = _read_auth_payload(path)
+            if not isinstance(payload, dict) or _is_auth_payload_disabled(payload):
+                continue
+            manual_entry = _extract_manual_api_config(payload, path.name)
+            if not manual_entry:
+                continue
+            provider = str(manual_entry.get('provider') or '').strip().lower()
+            base_url = str(manual_entry.get('base_url') or '').strip().rstrip('/')
+            if not provider or not base_url:
+                continue
+            urls = urls_by_provider.setdefault(provider, [])
+            if base_url not in urls:
+                urls.append(base_url)
+            url_key = (provider, base_url)
+            url_models = models_by_url.setdefault(url_key, [])
+            models = models_by_provider.setdefault(provider, [])
+            for model in manual_entry.get('models') or []:
+                value = str(model or '').strip()
+                if value and value not in url_models:
+                    url_models.append(value)
+                if value and value not in models:
+                    models.append(value)
+
     items = []
-    for provider in providers:
+    for provider in collect_detected_providers():
         rows = configured.get(provider, {}).get('rows') or []
-        models = []
-        seen = set()
+        models = list(models_by_provider.get(provider) or [])
+        seen_models = set(models)
         for row in rows:
             value = str(row.get('upstream_id') or row.get('lookup_upstream_id') or '').strip()
-            if value and value not in seen:
-                seen.add(value)
+            if value and value not in seen_models:
+                seen_models.add(value)
                 models.append(value)
         for preset_name, _alias in PROVIDER_MODEL_ALIASES.get(provider, []):
             value = str(preset_name or '').strip()
-            if value and value not in seen:
-                seen.add(value)
+            if value and value not in seen_models:
+                seen_models.add(value)
                 models.append(value)
+        base_urls = urls_by_provider.get(provider, [])
+        url_entries = [{
+            'base_url': base_url,
+            'models': list(models_by_url.get((provider, base_url), [])),
+        } for base_url in base_urls]
         items.append({
             'provider': provider,
-            'base_url': PROVIDER_BASE_URLS.get(provider, ''),
+            'base_url': base_urls[0] if base_urls else '',
+            'base_urls': base_urls,
+            'url_entries': url_entries,
             'models': models,
         })
     return items
@@ -4926,7 +5316,7 @@ def build_runtime_config(
     active_auth_entries = []
     for active_path in _iter_pool_auth_json_files():
         payload = _read_auth_payload(active_path)
-        if not isinstance(payload, dict):
+        if not isinstance(payload, dict) or _is_auth_payload_disabled(payload):
             continue
         compat_entry = _extract_manual_api_config(payload, active_path.name)
         if compat_entry:
@@ -5000,7 +5390,7 @@ def build_runtime_config(
     detected_proxy = _detect_active_local_proxy(prefer_port=prefer_port)
     if detected_proxy.get('ok') and detected_proxy.get('proxy_url'):
         runtime_text = rewrite_proxy_url(runtime_text, detected_proxy['proxy_url'])
-    elif previous_proxy_url:
+    elif previous_proxy_url and not is_local_proxy_url(previous_proxy_url):
         runtime_text = rewrite_proxy_url(runtime_text, previous_proxy_url)
 
     # Merge admin access keys with all active virtual API keys
@@ -5072,7 +5462,12 @@ def build_runtime_config(
 def rebuild_runtime_config_from_state(state: dict | None = None):
     with _runtime_rebuild_lock:
         current_state = state or load_state()
-        has_active_auth_files = any(True for _ in _iter_pool_auth_json_files())
+        has_active_auth_files = False
+        for path in _iter_pool_auth_json_files():
+            payload = _read_auth_payload(path)
+            if isinstance(payload, dict) and not _is_auth_payload_disabled(payload):
+                has_active_auth_files = True
+                break
         if not has_active_auth_files:
             removed = 0
             if ACTIVE_AUTH_DIR.exists():
@@ -5140,7 +5535,8 @@ def start_auth_pool_sync_thread(interval_seconds: float = 2.0):
             if result.get('changed') and runtime.get('rebuilt'):
                 print(f'Auth pool hot-synced: {runtime.get("copied_auth_count", 0)} OAuth file(s).')
             elif result.get('changed') and runtime.get('reason') == 'validation_failed':
-                print(f'Auth pool hot-sync failed: {runtime.get("error", "validation failed")}')
+                error = str(runtime.get('error', 'validation failed'))
+                print(f'Auth pool hot-sync failed: {error.encode("ascii", "backslashreplace").decode("ascii")}')
             time.sleep(max(0.5, float(interval_seconds or 2.0)))
 
     thread = threading.Thread(target=_worker, name='dashboard-auth-pool-sync', daemon=True)

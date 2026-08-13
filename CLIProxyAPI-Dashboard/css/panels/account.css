@@ -31,6 +31,40 @@
   width: 100%;
 }
 
+.panel-account #local-workspace-root {
+  margin-bottom: 8px;
+}
+
+.local-workspace-label {
+  margin: 0 0 -4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.local-workspace-error {
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-radius: 6px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+@media (max-width: 1040px) {
+  .local-workspace-links,
+  .local-workspace-services {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .local-workspace-links,
+  .local-workspace-services {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 720px) {
   .panel-account .panel-sub {
     padding: 12px 12px 20px;

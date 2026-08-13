@@ -27,7 +27,7 @@ const aggregateMemberSaveDebounces = new Map();
 const aggregateMemberRollbackSnapshots = new Map();
 const AGGREGATE_MEMBER_SAVE_DEBOUNCE_MS = 200;
 const aggregateMemberMutationVersions = new Map();
-let aggregateSortMode = 'name';
+let aggregateSortMode = 'default';
 let editingAliasId = '';
 let viewedAggregateAliasVersion = '1';
 let viewedAggregateAliasId = '';
@@ -689,6 +689,13 @@ function renderAggregateAliasList() {
     syncViewedAggregateVersionForActiveAlias(true);
   } else {
     syncViewedAggregateVersionForActiveAlias();
+  }
+
+  const btnDefault = document.getElementById('btn-sort-default');
+  const btnName = document.getElementById('btn-sort-name');
+  if (btnDefault && btnName) {
+    btnDefault.classList.toggle('is-active', aggregateSortMode === 'default');
+    btnName.classList.toggle('is-active', aggregateSortMode === 'name');
   }
 
   const isSorted = aggregateSortMode !== 'default';

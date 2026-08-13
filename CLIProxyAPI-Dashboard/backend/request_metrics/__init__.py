@@ -3,6 +3,8 @@ from backend.request_metrics.parsing import (
     parse_precise_request_events,
     parse_proxy_requests,
     prune_request_logs,
+    get_precise_request_events_page,
+    estimate_archived_event_count,
 )
 from backend.request_metrics.merge import merge_request_events
 from backend.request_metrics.summary import (
@@ -31,6 +33,8 @@ __all__ = [
     'parse_precise_request_events',
     'parse_proxy_requests',
     'prune_request_logs',
+    'get_precise_request_events_page',
+    'estimate_archived_event_count',
     'merge_request_events',
     'summarize_auth_health',
     'summarize_clients',

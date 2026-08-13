@@ -1,0 +1,59 @@
+name: Docs Lint & Link Check
+
+on:
+  push:
+    paths:
+      - '**.md'
+      - 'docs/**'
+      - '.github/workflows/docs-lint.yml'
+  pull_request:
+    paths:
+      - '**.md'
+      - 'docs/**'
+
+jobs:
+  markdownlint:
+    name: Markdown Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run markdownlint-cli2
+        uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: |
+            *.md
+            docs/*.md
+            CLIProxyAPI-AccessGateway/README.md
+            CLIProxyAPI-Dashboard/README.md
+            CLIProxyAPI-LocalPlugin/README.md
+            CLIProxyAPI-MediaProxy/README.md
+            PortBindingTools/README.md
+          config: .markdownlint.json
+
+  linkcheck:
+    name: Internal Link Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check internal links with lychee
+        uses: lycheeverse/lychee-action@v2
+        with:
+          # 只检查本地文件内链，不检查外部 URL（避免 CI 因网络波动失败）
+          args: >
+            --no-progress
+            --exclude-all-private
+            --exclude 'https?://'
+            '*.md'
+            'docs/*.md'
+            'CLIProxyAPI-AccessGateway/README.md'
+            'CLIProxyAPI-Dashboard/README.md'
+            'CLIProxyAPI-LocalPlugin/README.md'
+            'CLIProxyAPI-MediaProxy/README.md'
+            'PortBindingTools/README.md'
+          fail: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

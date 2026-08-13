@@ -386,6 +386,12 @@ function requestEventRowHtml(item, opts = {}) {
 
   const routeSource = getRequestEventRouteSource(item);
   const routeConfidence = getRequestEventRouteConfidence(item);
+  const authFile = String(item.auth_file || '').trim();
+  const displayAccountTag = authFile
+    ? authFile
+    : (routeSource && routeSource !== '未确认来源' && routeSource !== 'Unknown source'
+      ? `${routeSource}${routeConfidence ? ' ' + routeConfidence : ''}`
+      : '');
   const requestedModel = getRequestEventModelLabel(item);
   const modelPlaceholder = getRequestModelPlaceholder(item);
   const routedModel = getRequestEventRoutedModelLabel(item);
@@ -475,7 +481,7 @@ function requestEventRowHtml(item, opts = {}) {
             <code class="req-model-orig">${escapeHtml(requestedModel || modelPlaceholder)}</code>
             ${hasActualRoute ? `<span style="color: var(--text-muted); font-size: 11px;">→</span><code class="req-model-target">${escapeHtml(routedModel)}</code>` : ''}
           </div>
-          ${routeSource && routeSource !== '未确认来源' && routeSource !== 'Unknown source' ? `<div><span class="request-chip route">${escapeHtml(routeSource)}${routeConfidence ? ` ${escapeHtml(routeConfidence)}` : ''}</span></div>` : ''}
+          ${displayAccountTag ? `<div><span class="request-chip route" title="${escapeHtml(authFile ? '账号文件: ' + authFile : displayAccountTag)}" style="max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(displayAccountTag)}</span></div>` : ''}
         </div>
       </td>
 
