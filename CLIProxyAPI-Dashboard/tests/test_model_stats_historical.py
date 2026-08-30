@@ -33,10 +33,65 @@ class CumulativeMigrationTests(unittest.TestCase):
             ):
                 migrated = cumulative._load_stats()
 
-        self.assertEqual(migrated['version'], 4)
+        self.assertEqual(migrated['version'], 5)
         self.assertEqual(migrated['totals'], original['totals'])
         self.assertEqual(migrated['by_model'], original['by_model'])
-        self.assertEqual(migrated['daily'], original['daily'])
+        self.assertEqual(migrated['daily']['2026-07-01']['total_tokens'], original['daily']['2026-07-01']['total_tokens'])
+
+    def test_daily_model_breakdown_accumulation(self):
+        from backend.request_metrics import cumulative
+
+        stats = cumulative._default_stats()
+        event_1 = {
+            'timestamp': 1788021000,
+            'requested_model': 'claude-opus-5',
+            'actual_model': 'gpt-5.6-terra',
+            'api_key_masked': 'sk-test1',
+            'inferred_provider': 'openai-ung',
+            'prompt_tokens': 100,
+            'completion_tokens': 50,
+            'total_tokens': 150,
+        }
+        event_2 = {
+            'timestamp': 1788021005,
+            'requested_model': 'claude-opus-5',
+            'actual_model': 'gpt-5.6-terra',
+            'api_key_masked': 'sk-test1',
+            'inferred_provider': 'openai-ung',
+            'prompt_tokens': 200,
+            'completion_tokens': 100,
+            'total_tokens': 300,
+        }
+        event_3 = {
+            'timestamp': 1788021010,
+            'requested_model': 'gemini-2.5-flash',
+            'api_key_masked': 'sk-test2',
+            'inferred_provider': 'google',
+            'prompt_tokens': 50,
+            'completion_tokens': 10,
+            'total_tokens': 60,
+        }
+
+        cumulative._add_event_to_stats(stats, event_1, event_1['timestamp'])
+        cumulative._add_event_to_stats(stats, event_2, event_2['timestamp'])
+        cumulative._add_event_to_stats(stats, event_3, event_3['timestamp'])
+
+        date_key = cumulative.datetime.fromtimestamp(event_1['timestamp']).strftime('%Y-%m-%d')
+        self.assertIn(date_key, stats['daily'])
+        day_entry = stats['daily'][date_key]
+        self.assertEqual(day_entry['request_count'], 3)
+        self.assertEqual(day_entry['total_tokens'], 510)
+
+        # Check by_model on that single day
+        self.assertIn('by_model', day_entry)
+        self.assertIn('claude-opus-5', day_entry['by_model'])
+        self.assertEqual(day_entry['by_model']['claude-opus-5']['request_count'], 2)
+        self.assertEqual(day_entry['by_model']['claude-opus-5']['total_tokens'], 450)
+        self.assertIn('actual_model_distribution', day_entry['by_model']['claude-opus-5'])
+        self.assertEqual(day_entry['by_model']['claude-opus-5']['actual_model_distribution']['gpt-5.6-terra']['total_tokens'], 450)
+
+        self.assertIn('gemini-2.5-flash', day_entry['by_model'])
+        self.assertEqual(day_entry['by_model']['gemini-2.5-flash']['total_tokens'], 60)
 
 
 class ModelStatsHistoricalTests(unittest.TestCase):

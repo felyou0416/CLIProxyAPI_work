@@ -59,11 +59,37 @@
     <div id="chart-global-tooltip" class="chart-global-tooltip"></div>
   </div>
 
+  <!-- 排行维度与单日筛选控制栏 -->
+  <div class="token-filter-bar">
+    <div class="token-filter-left">
+      <div class="token-filter-heading">
+        <span class="token-filter-title">用量排行明细</span>
+        <span class="token-filter-chip" id="token-filter-active-chip">全部累积</span>
+      </div>
+      <div class="token-filter-summary" id="token-filter-summary-text">展示历史全量调用与 Token 排名（点击上方图表柱子可下钻单日/单小时排行）</div>
+    </div>
+    <div class="token-filter-right">
+      <div class="token-quick-pills">
+        <button type="button" class="token-pill-btn active" id="token-pill-all" onclick="setTokenRankingDate('all')">全部累积</button>
+        <button type="button" class="token-pill-btn" id="token-pill-today" onclick="setTokenRankingDate('today')">今天</button>
+        <button type="button" class="token-pill-btn" id="token-pill-yesterday" onclick="setTokenRankingDate('yesterday')">昨天</button>
+      </div>
+      <div class="token-date-select-wrap">
+        <select id="token-ranking-date-select" class="token-date-select" onchange="setTokenRankingDate(this.value)" title="选择具体日期查看单日模型排行">
+          <option value="all">选择指定日期...</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
   <!-- Breakdown & Rankings Row -->
   <div class="token-breakdown-row">
     <!-- Model Ranking -->
     <div class="token-usage-card ranking-card">
-      <h3 class="chart-card-title">模型用量排行 (Top Models)</h3>
+      <div class="ranking-card-header">
+        <h3 class="chart-card-title">模型用量排行 (Top Models)</h3>
+        <span class="ranking-header-badge" id="model-ranking-badge">全量</span>
+      </div>
       <div class="ranking-list" id="model-ranking-list">
         <div class="metric-empty">暂无数据</div>
       </div>
@@ -71,7 +97,10 @@
 
     <!-- Client Ranking -->
     <div class="token-usage-card ranking-card">
-      <h3 class="chart-card-title">客户端用量排行 (Top Clients)</h3>
+      <div class="ranking-card-header">
+        <h3 class="chart-card-title">客户端用量排行 (Top Clients)</h3>
+        <span class="ranking-header-badge" id="client-ranking-badge">全量</span>
+      </div>
       <div class="ranking-list" id="client-ranking-list">
         <div class="metric-empty">暂无数据</div>
       </div>
@@ -79,7 +108,10 @@
 
     <!-- Provider Ranking -->
     <div class="token-usage-card ranking-card">
-      <h3 class="chart-card-title">提供方用量排行 (Top Providers)</h3>
+      <div class="ranking-card-header">
+        <h3 class="chart-card-title">提供方用量排行 (Top Providers)</h3>
+        <span class="ranking-header-badge" id="provider-ranking-badge">全量</span>
+      </div>
       <div class="ranking-list" id="provider-ranking-list">
         <div class="metric-empty">暂无数据</div>
       </div>

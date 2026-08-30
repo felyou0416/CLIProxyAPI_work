@@ -43,7 +43,7 @@ _DAILY_RETENTION_DAYS = 90
 
 def _default_stats() -> dict:
     return {
-        'version': 4,
+        'version': 5,
         'updated_at': 0,
         'last_event_ts': 0,
         'totals': {
@@ -58,6 +58,104 @@ def _default_stats() -> dict:
         'daily': {},
         'hourly': {},
     }
+
+
+def _entry_default() -> dict:
+    return {
+        'request_count': 0,
+        'prompt_tokens': 0,
+        'completion_tokens': 0,
+        'total_tokens': 0,
+    }
+
+
+def _safe_int(value, default=0) -> int:
+    """安全地将值转为 int，失败时返回 default。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _add_to_entry(entry: dict, event: dict) -> None:
+    entry['request_count'] = int(entry.get('request_count', 0)) + 1
+    entry['prompt_tokens'] = int(entry.get('prompt_tokens', 0)) + _safe_int(event.get('prompt_tokens'))
+    entry['completion_tokens'] = int(entry.get('completion_tokens', 0)) + _safe_int(event.get('completion_tokens'))
+    entry['total_tokens'] = int(entry.get('total_tokens', 0)) + _safe_int(event.get('total_tokens'))
+
+
+def _add_event_to_stats(stats: dict, event: dict, ts: int) -> None:
+    """将单个请求事件记录到 totals、by_model、by_client、by_provider、daily 及 hourly。"""
+    # ---- 总计 ----
+    _add_to_entry(stats['totals'], event)
+
+    # ---- 按模型 ----
+    model = str(event.get('requested_model') or '').strip() or 'unknown'
+    _add_to_entry(stats['by_model'].setdefault(model, _entry_default()), event)
+
+    # ---- 模型背后实际 upstream 分布 ----
+    actual = str(event.get('actual_model') or event.get('routed_model') or '').strip()
+    if actual and actual != model:
+        model_entry = stats['by_model'][model]
+        if 'actual_model_distribution' not in model_entry:
+            model_entry['actual_model_distribution'] = {}
+        sub = model_entry['actual_model_distribution'].setdefault(actual, _entry_default())
+        _add_to_entry(sub, event)
+
+    # ---- 按客户端 (API Key) ----
+    client = str(event.get('api_key_masked') or '').strip() or _get_default_api_key_masked()
+    _add_to_entry(stats['by_client'].setdefault(client, _entry_default()), event)
+
+    # ---- 按 Provider ----
+    provider = str(event.get('inferred_provider') or event.get('actual_provider') or '').strip() or 'unknown'
+    _add_to_entry(stats['by_provider'].setdefault(provider, _entry_default()), event)
+
+    # ---- 按日期 ----
+    try:
+        key_date = datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
+    except Exception:
+        key_date = datetime.now().strftime('%Y-%m-%d')
+    daily = stats['daily'].setdefault(key_date, _entry_default())
+    _add_to_entry(daily, event)
+
+    # 每日细分: by_model
+    daily_by_model = daily.setdefault('by_model', {})
+    _add_to_entry(daily_by_model.setdefault(model, _entry_default()), event)
+    if actual and actual != model:
+        d_model_entry = daily_by_model[model]
+        if 'actual_model_distribution' not in d_model_entry:
+            d_model_entry['actual_model_distribution'] = {}
+        d_sub = d_model_entry['actual_model_distribution'].setdefault(actual, _entry_default())
+        _add_to_entry(d_sub, event)
+
+    # 每日细分: by_client & by_provider
+    daily_by_client = daily.setdefault('by_client', {})
+    _add_to_entry(daily_by_client.setdefault(client, _entry_default()), event)
+    daily_by_provider = daily.setdefault('by_provider', {})
+    _add_to_entry(daily_by_provider.setdefault(provider, _entry_default()), event)
+
+    # ---- 按小时 ----
+    try:
+        key_hour = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:00')
+    except Exception:
+        key_hour = datetime.now().strftime('%Y-%m-%d %H:00')
+    hourly = stats.setdefault('hourly', {}).setdefault(key_hour, _entry_default())
+    _add_to_entry(hourly, event)
+
+    # 每小时细分: by_model
+    hourly_by_model = hourly.setdefault('by_model', {})
+    _add_to_entry(hourly_by_model.setdefault(model, _entry_default()), event)
+    if actual and actual != model:
+        h_model_entry = hourly_by_model[model]
+        if 'actual_model_distribution' not in h_model_entry:
+            h_model_entry['actual_model_distribution'] = {}
+        h_sub = h_model_entry['actual_model_distribution'].setdefault(actual, _entry_default())
+        _add_to_entry(h_sub, event)
+
+    hourly_by_client = hourly.setdefault('by_client', {})
+    _add_to_entry(hourly_by_client.setdefault(client, _entry_default()), event)
+    hourly_by_provider = hourly.setdefault('by_provider', {})
+    _add_to_entry(hourly_by_provider.setdefault(provider, _entry_default()), event)
 
 
 def _rebuild_stats_internal(stats: dict, events: list[dict]) -> dict:
@@ -79,52 +177,7 @@ def _rebuild_stats_internal(stats: dict, events: list[dict]) -> dict:
         ts = int(event.get('timestamp') or 0)
         if ts > max_ts:
             max_ts = ts
-
-        # ---- 总计 ----
-        _add_to_entry(stats['totals'], event)
-
-        # ---- 按模型 ----
-        model = str(event.get('requested_model') or '').strip()
-        if not model:
-            model = 'unknown'
-        _add_to_entry(stats['by_model'].setdefault(model, _entry_default()), event)
-
-        # ---- 模型背后实际 upstream 分布（仅当 actual_model 与 requested_model 不同时记录） ----
-        actual = str(event.get('actual_model') or event.get('routed_model') or '').strip()
-        if actual and actual != model:
-            model_entry = stats['by_model'][model]
-            if 'actual_model_distribution' not in model_entry:
-                model_entry['actual_model_distribution'] = {}
-            sub = model_entry['actual_model_distribution'].setdefault(actual, _entry_default())
-            _add_to_entry(sub, event)
-
-        # ---- 按客户端 (API Key) ----
-        client = str(event.get('api_key_masked') or '').strip()
-        if not client:
-            client = _get_default_api_key_masked()
-        _add_to_entry(stats['by_client'].setdefault(client, _entry_default()), event)
-
-        # ---- 按 Provider ----
-        provider = str(event.get('inferred_provider') or event.get('actual_provider') or '').strip()
-        if not provider:
-            provider = 'unknown'
-        _add_to_entry(stats['by_provider'].setdefault(provider, _entry_default()), event)
-
-        # ---- 按日期 ----
-        try:
-            key_date = datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
-        except Exception:
-            key_date = datetime.now().strftime('%Y-%m-%d')
-        daily = stats['daily'].setdefault(key_date, _entry_default())
-        _add_to_entry(daily, event)
-
-        # ---- 按小时 ----
-        try:
-            key_hour = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:00')
-        except Exception:
-            key_hour = datetime.now().strftime('%Y-%m-%d %H:00')
-        hourly = stats['hourly'].setdefault(key_hour, _entry_default())
-        _add_to_entry(hourly, event)
+        _add_event_to_stats(stats, event, ts)
 
     # ---- 清理超过保留期的每日数据 ----
     cutoff = datetime.now().strftime('%Y-%m-%d')
@@ -152,6 +205,73 @@ def _rebuild_stats_internal(stats: dict, events: list[dict]) -> dict:
     return stats
 
 
+def _backfill_daily_breakdowns(stats: dict) -> bool:
+    """从 request_archive 的 JSONL 归档中快速回填历史天数的 by_model / by_client / by_provider 细分数据。"""
+    from backend.paths import REQUEST_ARCHIVE_DIR
+    if not REQUEST_ARCHIVE_DIR.exists():
+        return False
+
+    modified = False
+    daily = stats.setdefault('daily', {})
+
+    for archive_file in sorted(REQUEST_ARCHIVE_DIR.glob('request-events-*.jsonl')):
+        try:
+            with open(archive_file, 'r', encoding='utf-8', errors='ignore') as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    event = json.loads(line)
+                    ts = int(event.get('timestamp') or 0)
+                    try:
+                        date_key = datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
+                    except Exception:
+                        continue
+
+                    # 回填单日 daily
+                    day_entry = daily.setdefault(date_key, _entry_default())
+
+                    daily_by_model = day_entry.setdefault('by_model', {})
+                    model = str(event.get('requested_model') or '').strip() or 'unknown'
+                    _add_to_entry(daily_by_model.setdefault(model, _entry_default()), event)
+
+                    actual = str(event.get('actual_model') or event.get('routed_model') or '').strip()
+                    if actual and actual != model:
+                        d_model_entry = daily_by_model[model]
+                        if 'actual_model_distribution' not in d_model_entry:
+                            d_model_entry['actual_model_distribution'] = {}
+                        d_sub = d_model_entry['actual_model_distribution'].setdefault(actual, _entry_default())
+                        _add_to_entry(d_sub, event)
+
+                    daily_by_client = day_entry.setdefault('by_client', {})
+                    client = str(event.get('api_key_masked') or '').strip() or _get_default_api_key_masked()
+                    _add_to_entry(daily_by_client.setdefault(client, _entry_default()), event)
+
+                    daily_by_provider = day_entry.setdefault('by_provider', {})
+                    provider = str(event.get('inferred_provider') or event.get('actual_provider') or '').strip() or 'unknown'
+                    _add_to_entry(daily_by_provider.setdefault(provider, _entry_default()), event)
+                    modified = True
+        except Exception:
+            continue
+
+    # 对所有天数，确保 top-level 计数与 by_model 的总和保持一致
+    for d, day_data in daily.items():
+        by_m = day_data.get('by_model', {})
+        if by_m:
+            sum_req = sum(v.get('request_count', 0) for v in by_m.values())
+            sum_tokens = sum(v.get('total_tokens', 0) for v in by_m.values())
+            sum_prompt = sum(v.get('prompt_tokens', 0) for v in by_m.values())
+            sum_comp = sum(v.get('completion_tokens', 0) for v in by_m.values())
+            if sum_req > day_data.get('request_count', 0):
+                day_data['request_count'] = sum_req
+            if sum_tokens > day_data.get('total_tokens', 0):
+                day_data['total_tokens'] = sum_tokens
+                day_data['prompt_tokens'] = sum_prompt
+                day_data['completion_tokens'] = sum_comp
+
+    return modified
+
+
 def _load_stats() -> dict:
     try:
         if _CUMULATIVE_FILE.exists():
@@ -159,21 +279,14 @@ def _load_stats() -> dict:
             stats = json.loads(content)
             if isinstance(stats, dict):
                 version = stats.get('version')
-                if version == 4:
+                if version == 5:
                     return stats
-                # Schema migrations must preserve durable totals. Rebuilding from
-                # a bounded event window would silently replace historical data.
-                if version == 3:
-                    stats['version'] = 4
-                    stats.setdefault('hourly', {})
-                    _save_stats(stats)
-                    return stats
-                if version == 2:
-                    stats['version'] = 3
-                    stats.setdefault('hourly', {})
-                    stats['version'] = 4
-                    _save_stats(stats)
-                    return stats
+                # Schema migrations must preserve durable totals.
+                stats['version'] = 5
+                stats.setdefault('hourly', {})
+                _backfill_daily_breakdowns(stats)
+                _save_stats(stats)
+                return stats
     except Exception:
         pass
     return _default_stats()
@@ -188,30 +301,6 @@ def _save_stats(stats: dict) -> None:
         os.replace(tmp, str(_CUMULATIVE_FILE))
     except Exception:
         pass
-
-
-def _safe_int(value, default=0) -> int:
-    """安全地将值转为 int，失败时返回 default。"""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _entry_default() -> dict:
-    return {
-        'request_count': 0,
-        'prompt_tokens': 0,
-        'completion_tokens': 0,
-        'total_tokens': 0,
-    }
-
-
-def _add_to_entry(entry: dict, event: dict) -> None:
-    entry['request_count'] = int(entry.get('request_count', 0)) + 1
-    entry['prompt_tokens'] = int(entry.get('prompt_tokens', 0)) + _safe_int(event.get('prompt_tokens'))
-    entry['completion_tokens'] = int(entry.get('completion_tokens', 0)) + _safe_int(event.get('completion_tokens'))
-    entry['total_tokens'] = int(entry.get('total_tokens', 0)) + _safe_int(event.get('total_tokens'))
 
 
 def update_cumulative_stats(events: list[dict]) -> dict | None:
@@ -232,52 +321,7 @@ def update_cumulative_stats(events: list[dict]) -> dict | None:
             new_count += 1
             if ts > max_ts:
                 max_ts = ts
-
-            # ---- 总计 ----
-            _add_to_entry(stats['totals'], event)
-
-            # ---- 按模型 ----
-            model = str(event.get('requested_model') or '').strip()
-            if not model:
-                model = 'unknown'
-            _add_to_entry(stats['by_model'].setdefault(model, _entry_default()), event)
-
-            # ---- 模型背后实际 upstream 分布 ----
-            actual = str(event.get('actual_model') or event.get('routed_model') or '').strip()
-            if actual and actual != model:
-                model_entry = stats['by_model'][model]
-                if 'actual_model_distribution' not in model_entry:
-                    model_entry['actual_model_distribution'] = {}
-                sub = model_entry['actual_model_distribution'].setdefault(actual, _entry_default())
-                _add_to_entry(sub, event)
-
-            # ---- 按客户端 (API Key) ----
-            client = str(event.get('api_key_masked') or '').strip()
-            if not client:
-                client = _get_default_api_key_masked()
-            _add_to_entry(stats['by_client'].setdefault(client, _entry_default()), event)
-
-            # ---- 按 Provider ----
-            provider = str(event.get('inferred_provider') or event.get('actual_provider') or '').strip()
-            if not provider:
-                provider = 'unknown'
-            _add_to_entry(stats['by_provider'].setdefault(provider, _entry_default()), event)
-
-            # ---- 按日期 ----
-            try:
-                key_date = datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
-            except Exception:
-                key_date = datetime.now().strftime('%Y-%m-%d')
-            daily = stats['daily'].setdefault(key_date, _entry_default())
-            _add_to_entry(daily, event)
-
-            # ---- 按小时 ----
-            try:
-                key_hour = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:00')
-            except Exception:
-                key_hour = datetime.now().strftime('%Y-%m-%d %H:00')
-            hourly = stats.setdefault('hourly', {}).setdefault(key_hour, _entry_default())
-            _add_to_entry(hourly, event)
+            _add_event_to_stats(stats, event, ts)
 
         if new_count == 0:
             return None
@@ -314,9 +358,79 @@ def get_cumulative_stats() -> dict:
     """返回当前累积统计快照，附带按 token 排序的模型/客户端/Provider 排行。"""
     with _CUMULATIVE_LOCK:
         stats = _load_stats()
-        by_model = {k: dict(v) for k, v in stats.get('by_model', {}).items()}
-        by_client = {k: dict(v) for k, v in stats.get('by_client', {}).items()}
-        by_provider = {k: dict(v) for k, v in stats.get('by_provider', {}).items()}
+
+        # 全局模型聚合：从 daily 汇总计算更准确的各模型总量与调用次数
+        all_models = {}
+        for day_entry in stats.get('daily', {}).values():
+            for m, m_data in day_entry.get('by_model', {}).items():
+                cur = all_models.setdefault(m, _entry_default())
+                cur['request_count'] += m_data.get('request_count', 0)
+                cur['prompt_tokens'] += m_data.get('prompt_tokens', 0)
+                cur['completion_tokens'] += m_data.get('completion_tokens', 0)
+                cur['total_tokens'] += m_data.get('total_tokens', 0)
+                if 'actual_model_distribution' in m_data:
+                    dist = cur.setdefault('actual_model_distribution', {})
+                    for act_m, act_data in m_data['actual_model_distribution'].items():
+                        act_cur = dist.setdefault(act_m, _entry_default())
+                        act_cur['request_count'] += act_data.get('request_count', 0)
+                        act_cur['prompt_tokens'] += act_data.get('prompt_tokens', 0)
+                        act_cur['completion_tokens'] += act_data.get('completion_tokens', 0)
+                        act_cur['total_tokens'] += act_data.get('total_tokens', 0)
+
+        for m, m_data in stats.get('by_model', {}).items():
+            cur = all_models.setdefault(m, _entry_default())
+            if m_data.get('total_tokens', 0) > cur.get('total_tokens', 0):
+                cur['total_tokens'] = m_data.get('total_tokens', 0)
+                cur['prompt_tokens'] = m_data.get('prompt_tokens', 0)
+                cur['completion_tokens'] = m_data.get('completion_tokens', 0)
+            if m_data.get('request_count', 0) > cur.get('request_count', 0):
+                cur['request_count'] = m_data.get('request_count', 0)
+
+        all_clients = {}
+        for day_entry in stats.get('daily', {}).values():
+            for c, c_data in day_entry.get('by_client', {}).items():
+                cur = all_clients.setdefault(c, _entry_default())
+                cur['request_count'] += c_data.get('request_count', 0)
+                cur['prompt_tokens'] += c_data.get('prompt_tokens', 0)
+                cur['completion_tokens'] += c_data.get('completion_tokens', 0)
+                cur['total_tokens'] += c_data.get('total_tokens', 0)
+        for c, c_data in stats.get('by_client', {}).items():
+            cur = all_clients.setdefault(c, _entry_default())
+            if c_data.get('total_tokens', 0) > cur.get('total_tokens', 0):
+                cur['total_tokens'] = c_data.get('total_tokens', 0)
+                cur['prompt_tokens'] = c_data.get('prompt_tokens', 0)
+                cur['completion_tokens'] = c_data.get('completion_tokens', 0)
+            if c_data.get('request_count', 0) > cur.get('request_count', 0):
+                cur['request_count'] = c_data.get('request_count', 0)
+
+        all_providers = {}
+        for day_entry in stats.get('daily', {}).values():
+            for p, p_data in day_entry.get('by_provider', {}).items():
+                cur = all_providers.setdefault(p, _entry_default())
+                cur['request_count'] += p_data.get('request_count', 0)
+                cur['prompt_tokens'] += p_data.get('prompt_tokens', 0)
+                cur['completion_tokens'] += p_data.get('completion_tokens', 0)
+                cur['total_tokens'] += p_data.get('total_tokens', 0)
+        for p, p_data in stats.get('by_provider', {}).items():
+            cur = all_providers.setdefault(p, _entry_default())
+            if p_data.get('total_tokens', 0) > cur.get('total_tokens', 0):
+                cur['total_tokens'] = p_data.get('total_tokens', 0)
+                cur['prompt_tokens'] = p_data.get('prompt_tokens', 0)
+                cur['completion_tokens'] = p_data.get('completion_tokens', 0)
+            if p_data.get('request_count', 0) > cur.get('request_count', 0):
+                cur['request_count'] = p_data.get('request_count', 0)
+
+        totals = dict(stats.get('totals', {}))
+        sum_req = sum(v.get('request_count', 0) for v in all_models.values())
+        sum_total = sum(v.get('total_tokens', 0) for v in all_models.values())
+        sum_prompt = sum(v.get('prompt_tokens', 0) for v in all_models.values())
+        sum_comp = sum(v.get('completion_tokens', 0) for v in all_models.values())
+        if sum_total > totals.get('total_tokens', 0):
+            totals['total_tokens'] = sum_total
+            totals['prompt_tokens'] = sum_prompt
+            totals['completion_tokens'] = sum_comp
+        if sum_req > totals.get('request_count', 0):
+            totals['request_count'] = sum_req
 
         def _rank(items: dict, name_key: str) -> list[dict]:
             return sorted(
@@ -325,18 +439,18 @@ def get_cumulative_stats() -> dict:
             )
 
         return {
-            'version': stats.get('version', 3),
+            'version': stats.get('version', 5),
             'updated_at': int(stats.get('updated_at', 0)),
             'last_event_ts': int(stats.get('last_event_ts', 0)),
-            'totals': dict(stats.get('totals', {})),
-            'by_model': by_model,
-            'by_client': by_client,
-            'by_provider': by_provider,
+            'totals': totals,
+            'by_model': all_models,
+            'by_client': all_clients,
+            'by_provider': all_providers,
             'daily': {k: dict(v) for k, v in stats.get('daily', {}).items()},
             'hourly': {k: dict(v) for k, v in stats.get('hourly', {}).items()},
-            'model_ranking': _rank(by_model, 'model'),
-            'client_ranking': _rank(by_client, 'client'),
-            'provider_ranking': _rank(by_provider, 'provider'),
+            'model_ranking': _rank(all_models, 'model'),
+            'client_ranking': _rank(all_clients, 'client'),
+            'provider_ranking': _rank(all_providers, 'provider'),
         }
 
 
