@@ -1,0 +1,26 @@
+enabled: false
+listen:
+  host: 127.0.0.1
+  port: 8319
+upstream:
+  base_url: http://127.0.0.1:8317
+  api_key: cliproxyapi
+  connect_timeout_seconds: 10
+  request_timeout_seconds: 600
+client_auth:
+  api_keys:
+    - adapter-client-key
+routes:
+  - alias: claude-fable-5
+    upstream_model: claude-fable-5
+    upstream_format: openai-chat-completions
+features:
+  streaming: true
+  tools: true
+  images: true
+  documents: false
+  count_tokens:
+    mode: local_estimate
+thinking:
+  unsupported: reject
+max_body_bytes: 4194304
