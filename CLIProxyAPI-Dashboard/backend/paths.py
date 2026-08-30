@@ -158,6 +158,7 @@ ACCESS_GATEWAY_STDERR = LOGS_DIR / 'access-gateway.stderr.log'
 RUNTIME_CONFIG = RUNTIME_DIR / 'cliproxyapi-active-config.yaml'
 REQUEST_LOG_DIR = LOGS_DIR / 'request_logs'
 REQUEST_ARCHIVE_DIR = LOGS_DIR / 'request_archive'
+LEGACY_REQUEST_LOG_DIR = LOGS_DIR / 'legacy-request-logs'
 TOOL_LOGS_DIR = LOGS_DIR / 'tool_logs'
 
 IGNORED_AUTH_SOURCE_DIRS = {'_archive', 'archive', 'backups', 'logs', 'sources'}

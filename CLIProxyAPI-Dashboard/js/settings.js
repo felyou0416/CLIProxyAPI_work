@@ -44,14 +44,14 @@ async function loadSettings() {
       const buildDateEl = document.getElementById('build-date');
       const cliVerEl = document.getElementById('cli-version');
       const dashVerEl = document.getElementById('dashboard-version');
-      const elecVerEl = document.getElementById('electron-version');
+      const desktopVerEl = document.getElementById('desktop-version');
       const lastUpdEl = document.getElementById('last-updated');
 
       if (curVerEl) curVerEl.textContent = `v${version.item.version}`;
       if (buildDateEl) buildDateEl.textContent = version.item.build_date || '';
       if (cliVerEl) cliVerEl.textContent = version.item.cli_version || '-';
       if (dashVerEl) dashVerEl.textContent = version.item.dashboard_version || '-';
-      if (elecVerEl) elecVerEl.textContent = version.item.electron_version || '-';
+      if (desktopVerEl) desktopVerEl.textContent = version.item.desktop_version || version.item.electron_version || '-';
       if (lastUpdEl) lastUpdEl.textContent = version.item.last_updated || '-';
     }
 

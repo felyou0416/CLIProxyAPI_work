@@ -10,7 +10,9 @@ Core behavioral guidelines. Full version: `skills/karpathy-guidelines/SKILL.md`
 
 **Project layout:**
 - `CLIProxyAPI/CLIProxyAPI/` — Go proxy server core (保持原生纯粹)
-- `CLIProxyAPI-Dashboard/` — Python + web dashboard (PyInstaller + Electron)
+- `CLIProxyAPI-Dashboard/` — Python Dashboard 控制面与 Web UI
+- `apps/tauri-gui/` — Tauri 桌面宿主与 Windows 安装包
+- `CLIProxyAPI/storage/` — 唯一运行数据目录（认证、配置、日志、运行态）
 - `update-core.ps1` — 核心内核升级脚本 (一键拉取上游 Tag 并同步构建)
-- `.github/workflows/build-electron.yml` — CI build & release pipeline
+- `.github/workflows/build-tauri.yml` — Tauri Windows CI build & release pipeline
 - `VERSION` / `UPSTREAM_VERSION` — 当前版本及上游内核版本 (例如 `v7.2.111`)

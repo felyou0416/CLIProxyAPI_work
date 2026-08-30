@@ -382,7 +382,7 @@ def _dashboard_relaunch_creationflags() -> int:
     # Windows children normally survive parent os._exit without DETACHED_PROCESS.
     flags |= int(getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) or 0)
     flags |= int(getattr(subprocess, 'CREATE_NO_WINDOW', 0) or 0)
-    # Break out of Job Objects (Electron/service hosts) that would kill children with parent.
+    # Break out of host Job Objects that would kill children with their parent.
     flags |= 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
     return flags
 

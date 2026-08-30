@@ -221,9 +221,14 @@ async function loadModelStatsPanel(force = false) {
       const refreshed = data.refreshed_at ? new Date(Number(data.refreshed_at) * 1000).toLocaleTimeString() : '-';
       const historicalCount = items.filter((item) => modelStatsIsHistorical(item)).length;
       const activeCount = items.length - historicalCount;
-      meta.textContent = `${activeCount} 当前 · ${historicalCount} 历史残留 · 累计 Token · 最近 ${data.limit || 500} 条可用性 · ${refreshed}`;
+      meta.textContent = isRequestMonitoringDisabled(data)
+        ? requestMonitoringDisabledText()
+        : `${activeCount} 当前 · ${historicalCount} 历史残留 · 累计 Token · 最近 ${data.limit || 500} 条可用性 · ${refreshed}`;
     }
     renderModelStatsPanel();
+    if (isRequestMonitoringDisabled(data) && wrap) {
+      wrap.innerHTML = `<div class="metric-empty">${modelStatsEscape(requestMonitoringDisabledText())}</div>`;
+    }
     modelStatsPanelLoaded = true;
   } catch (error) {
     if (wrap) wrap.innerHTML = `<div class="metric-empty">${modelStatsEscape(error.message || 'load failed')}</div>`;
@@ -266,11 +271,15 @@ async function loadModelsPanel(force = false) {
   try {
     const data = await api('/api/model-health?runtime=1');
     const items = Array.isArray(data.items) ? data.items : [];
-    if (meta) meta.textContent = `${items.length} 个模型`;
+    if (meta) meta.textContent = isRequestMonitoringDisabled(data)
+      ? requestMonitoringDisabledText()
+      : `${items.length} 个模型`;
     if (wrap) {
-      wrap.innerHTML = items.length
-        ? items.map(modelHealthCardHtml).join('')
-        : '<div class="metric-empty">暂无模型健康数据</div>';
+      wrap.innerHTML = isRequestMonitoringDisabled(data)
+        ? `<div class="metric-empty">${escapeHtml(requestMonitoringDisabledText())}</div>`
+        : (items.length
+          ? items.map(modelHealthCardHtml).join('')
+          : '<div class="metric-empty">暂无模型健康数据</div>');
     }
     modelsPanelLoaded = true;
   } catch (error) {

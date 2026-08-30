@@ -38,6 +38,16 @@ class ServerParsingTests(unittest.TestCase):
             _read_request_data(handler)
 
 
+class VersionInfoTests(unittest.TestCase):
+    def test_version_info_exposes_desktop_version(self):
+        from backend.settings import get_version_info
+
+        payload = get_version_info()
+
+        self.assertIn('desktop_version', payload['item'])
+        self.assertEqual(payload['item']['desktop_version'], payload['item']['dashboard_version'])
+
+
 class PublicPathsTests(unittest.TestCase):
     def test_is_public_path(self):
         from backend.server import _is_public_path

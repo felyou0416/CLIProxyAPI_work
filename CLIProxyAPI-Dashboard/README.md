@@ -63,7 +63,7 @@ copy .env.example .env
 
 ## 本地工作台
 
-首页可选显示仅属于当前机器的链接与项目启停按钮。实际配置放在 `.local/dashboard-actions.json`；该目录已被 Git 忽略，不会进入提交或打包模板。先复制 `dashboard-actions.example.json` 再替换其中的示例内容。
+首页可选显示仅属于当前机器的链接与项目启停按钮。这些内容属于用户数据，实际配置放在 `CLIProxyAPI/storage/config/local-workspace/dashboard-actions.json`，随工作区数据一起保存、备份和迁移。首次启动会自动把旧位置 `.local/dashboard-actions.json` 移动到新位置；也可以先复制 `dashboard-actions.example.json` 作为模板。
 
 `services[].commands` 只能是命令及参数组成的数组，例如 `["powershell", "-NoProfile", "-File", "start.ps1"]`。后端只接受已配置服务的 `start`、`restart`、`stop` 操作，使用 `shell=False` 执行；浏览器请求无法传入或覆写命令、参数或工作目录。
 
@@ -86,20 +86,19 @@ pip install -e .        # 安装 Python 依赖（主要是 pywinpty）
 
 > **注意**：每次面板执行"保存/应用"操作都会完整重写该文件，手动对文件的改动会被下次保存覆盖。如有字段需要长期固定，应通过面板 UI 或向面板后端逻辑添加支持，而不是直接改运行态配置文件。
 
-## 打包（Electron 桌面应用）
+## Windows 桌面打包（Tauri）
+
+Dashboard 是唯一的 Web UI 与控制面。Tauri 只提供 Windows 桌面窗口、托盘和 Dashboard sidecar 生命周期，不复制任何管理业务逻辑。
 
 ```powershell
-# 1. 用 PyInstaller 打包 Python 后端
-cd E:\U_App\CLIProxyAPI_work\CLIProxyAPI-Dashboard
-pyinstaller build.spec
-
-# 2. 用 Electron Builder 打包成 .exe 安装包
-cd E:\U_App\CLIProxyAPI_work\electron-app
+# 1. 构建 Core、Gateway、MediaProxy、LocalPlugin 与 Dashboard 资源
+# 2. 在 apps/tauri-gui 下安装依赖并构建 Tauri
+cd E:\U_App\CLIProxyAPI_work\apps\tauri-gui
 npm install
-npm run dist
+npm run build:windows
 ```
 
-CI（`.github/workflows/build-electron.yml`）会自动完成上述两步并上传 Release 产物。
+Tauri CI 位于 `.github/workflows/build-tauri.yml`，会生成 MSI 和 NSIS Windows 安装包。
 
 ## 与其他模块的关系
 

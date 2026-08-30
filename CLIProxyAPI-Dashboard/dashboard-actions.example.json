@@ -1,6 +1,6 @@
 {
   "title": "本地工作台",
-  "description": "此文件可提交为模板；请把实际配置复制到 .local/dashboard-actions.json。",
+  "description": "此文件是模板；请把实际配置复制到 CLIProxyAPI/storage/config/local-workspace/dashboard-actions.json。",
   "links": [
     {
       "id": "local-monitor",

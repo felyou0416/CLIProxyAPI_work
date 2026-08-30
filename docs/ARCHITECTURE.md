@@ -30,11 +30,13 @@ flowchart TB
         Gateway["AccessGateway<br/>模型白名单反向代理"]
         Plugin["LocalPlugin<br/>请求适配 DLL"]
         MediaProxy["MediaProxy<br/>图片/视频独立代理"]
-        Dashboard["Dashboard<br/>配置生成 + 进程管理"]
+        Dashboard["Dashboard<br/>Web UI + 配置生成 + 进程管理"]
+        Tauri["Tauri GUI<br/>Dashboard 桌面宿主"]
     end
     subgraph 内核["内核：零补丁"]
         Core["CLIProxyAPI/CLIProxyAPI<br/>Go 源码，镜像自上游"]
     end
+    Tauri -->|启动 sidecar + 加载 Web UI| Dashboard
     Dashboard -->|生成配置 + 拉起/关闭进程| Gateway
     Dashboard -->|生成配置 + 拉起/关闭进程| Core
     Dashboard -->|生成配置 + 拉起/关闭进程| MediaProxy
@@ -48,7 +50,8 @@ flowchart TB
 | **AccessGateway** | 读取运行态配置里的所有别名，作为白名单；反向代理到内核 8318；每秒轮询配置文件变化，热更新白名单 | 不做任何请求体改写，不感知具体厂商协议 |
 | **LocalPlugin** | 以 Go C-shared 插件形式运行在内核进程内，做内核不原生支持的请求适配（例如 Agnes 的 `chat_template_kwargs.enable_thinking`），暴露 `/v0/resource/plugins/cliproxy-local/status` 状态资源 | 不能替代内核的路由/鉴权逻辑，只做"补丁式"字段适配 |
 | **MediaProxy** | 独立进程，按 `config.example.json` 里 `model_rules` 声明的 `type`/`endpoint`/`request_format` 转发图片/视频生成请求，支持 `agnes-image`/`agnes-video`/`openai-image`/`openai-video`/`passthrough` 五种协议适配 | 不处理文本模型，不与内核共享进程 |
-| **Dashboard** | 生成 `cliproxiapi-active-config.yaml`、管理三个后端进程的启停与健康检查、暴露 Web UI 查看请求日志/凭据/防火墙规则 | 不直接转发业务请求，纯管理面 |
+| **Dashboard** | 生成 `cliproxiapi-active-config.yaml`、管理三个后端进程的启停与健康检查、暴露 Web UI，并以 `CLIProxyAPI/storage/` 为唯一数据目录 | 不直接转发业务请求，纯管理面 |
+| **Tauri GUI** | 启动/回收自己创建的 Dashboard sidecar、等待 HTTP ready、提供 WebView 窗口与托盘 | 不直接编排 Core/Gateway/MediaProxy，不读写 Dashboard 私有数据 |
 
 ## 请求生命周期
 
@@ -88,17 +91,23 @@ CLIProxyAPI_work/
 ├── CLIProxyAPI/                    # 内核运行目录
 │   ├── CLIProxyAPI/                # 官方源码镜像（零补丁）
 │   ├── config/                     # 内核自带的 config.example.yaml
-│   ├── storage/
+│   ├── storage/                     # 唯一用户数据目录（Git 忽略）
+│   │   ├── auth/                    # 认证凭据
+│   │   ├── config/                  # 手写配置与首页本地工作台按钮
+│   │   ├── logs/                    # Dashboard 与本机工具日志
+│   │   ├── shortcuts/               # 仅本机使用的目录快捷方式
 │   │   ├── config/base-config.yaml         # 手写基础配置
 │   │   └── runtime/cliproxyapi-active-config.yaml  # 面板生成的运行态配置
 │   └── scripts/                    # build-proxy / start-proxy / cleanup-storage / resolve-proxy
 ├── CLIProxyAPI-AccessGateway/      # 模型白名单网关（Go，独立 exe）
 ├── CLIProxyAPI-LocalPlugin/        # 请求适配插件（Go C-shared，独立 dll）
 ├── CLIProxyAPI-MediaProxy/         # 图片/视频代理（Go，独立 exe）
-├── CLIProxyAPI-Dashboard/          # Web 面板（Python 后端 + 前端 + Electron 外壳）
-├── electron-app/                   # Dashboard 的 Electron 打包配置
+├── CLIProxyAPI-Dashboard/          # 唯一控制面：Python 后端 + Web UI
+├── apps/tauri-gui/                 # Tauri Windows 桌面宿主
 ├── PortBindingTools/               # Windows portproxy/防火墙脚本
-├── docs/                           # 本文档目录
+├── docs/                           # 架构、配置与贡献文档
+│   └── archive/                    # 已替代的原型与历史工具，仅供参考
+├── start.ps1                       # GUI、Dashboard 统一入口
 ├── update-core.ps1                 # 内核升级脚本
 ├── UPSTREAM_VERSION / VERSION       # 上游内核版本 / 本工作区版本
 └── AGENTS.md / CHANGELOG.md / README.md

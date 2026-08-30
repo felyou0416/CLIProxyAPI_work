@@ -449,6 +449,8 @@ def summarize_models(events: list[dict], provider_models: list[dict], runtime_te
             if not call_id:
                 continue
             test_state = test_results.get(call_id) if isinstance(test_results, dict) else {}
+            if not isinstance(test_state, dict):
+                test_state = {}
             rows.append({
                 'provider': provider,
                 'call_id': call_id,
@@ -471,6 +473,8 @@ def summarize_models(events: list[dict], provider_models: list[dict], runtime_te
             if not call_id:
                 continue
             test_state = test_results.get(call_id) if isinstance(test_results, dict) else {}
+            if not isinstance(test_state, dict):
+                test_state = {}
             rows.append({
                 'provider': 'aggregate',
                 'call_id': call_id,
@@ -528,6 +532,8 @@ def summarize_model_test_stats(events: list[dict], provider_models: list[dict], 
         failure_count = total - success_count
         last_event = max(items, key=lambda item: _safe_int(item.get('timestamp')), default={})
         test_state = test_results.get(model_id) if isinstance(test_results, dict) else {}
+        if not isinstance(test_state, dict):
+            test_state = {}
         lookup_row = by_upstream.get(model_id)
         provider = str(by_call_id.get(model_id) or '').strip().lower()
         aggregate_item = aggregate_map.get(model_id) if provider == 'aggregate' else None

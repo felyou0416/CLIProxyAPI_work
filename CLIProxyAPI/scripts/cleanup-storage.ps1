@@ -48,7 +48,8 @@ function Add-Candidate {
 
 $candidates = [System.Collections.Generic.List[object]]::new()
 
-Add-Candidate $candidates (Join-Path $Storage 'runtime\tmp') 'temp' 'Runtime test/temp workspace; regenerated when needed.' 'safe'
+Get-ChildItem -LiteralPath (Join-Path $Storage 'runtime\tmp') -Directory -Filter 'auth-test-*' -ErrorAction SilentlyContinue |
+    ForEach-Object { Add-Candidate $candidates $_.FullName 'temp' 'Completed authentication test workspace; regenerated for each test.' 'safe' }
 if ($IncludeOldAuth) {
     Add-Candidate $candidates (Join-Path $Storage 'old') 'old-auth' 'Old antigravity auth copies; not referenced by current dashboard paths.' 'review'
     Add-Candidate $candidates (Join-Path $Storage 'auth\sources') 'old-auth' 'Legacy auth source staging directory; current sources.json no longer references it.' 'review'

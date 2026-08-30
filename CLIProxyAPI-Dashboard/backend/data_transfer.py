@@ -2,7 +2,7 @@
 
 Supports:
 - Dev monorepo (CLIProxyAPI/storage next to source)
-- Packaged / Electron user install (CLIPROXYAPI_STORAGE_DIR under userData)
+- Packaged desktop or portable install (CLIPROXYAPI_STORAGE_DIR)
 
 Export is path-agnostic where possible. On import, absolute paths inside YAML
 configs (auth-dir, etc.) are rewritten to the target machine's storage layout.
@@ -101,7 +101,7 @@ def detect_environment() -> dict:
     )
     dashboard_root_env = os.environ.get('RELAYX_DASHBOARD_ROOT', '').strip()
     frozen = bool(getattr(sys, 'frozen', False))
-    # Packaged Electron / installed binary: storage is injected via env or frozen.
+    # Packaged desktop or installed binary: storage is injected via env or frozen.
     if storage_env or dashboard_root_env or frozen:
         profile = 'user'
     else:

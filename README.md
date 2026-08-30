@@ -23,7 +23,7 @@
 1. 面向局域网/远端的**模型白名单网关**（只暴露映射后的别名，隐藏原始上游模型名）
 2. 一个 **Go C-shared 动态插件**，用来做内核不提供的请求适配（如 Agnes 的 `enable_thinking` 参数）
 3. 一个独立的**图片/视频代理**，把媒体模型路由从文本代理核心里剥离出来
-4. 一个 **Python + Electron 面板**，用于生成运行态配置、管理进程生命周期、查看请求日志
+4. 一个 **Python Dashboard 控制面 + Web UI**，用于生成运行态配置、管理进程生命周期、查看请求日志；Tauri GUI 作为它的桌面宿主
 
 这样做的原因写在 [AGENTS.md](AGENTS.md) 里，核心是"内核纯粹"原则：不侵入修改 `CLIProxyAPI/CLIProxyAPI/` 里的官方源码，升级上游版本时只需要跑一条脚本。
 
@@ -57,22 +57,25 @@ flowchart LR
 | `CLIProxyAPI-AccessGateway/` | 模型白名单反向代理，对外唯一入口 | Go | [CLIProxyAPI-AccessGateway/README.md](CLIProxyAPI-AccessGateway/README.md) |
 | `CLIProxyAPI-LocalPlugin/` | 内核外的请求适配插件（C-shared DLL） | Go + Zig(CGO) | [CLIProxyAPI-LocalPlugin/README.md](CLIProxyAPI-LocalPlugin/README.md) |
 | `CLIProxyAPI-MediaProxy/` | 独立的图片/视频生成代理 | Go | [CLIProxyAPI-MediaProxy/README.md](CLIProxyAPI-MediaProxy/README.md) |
-| `CLIProxyAPI-Dashboard/` | Web 管理面板（配置生成、进程管理、日志） | Python + Electron | [CLIProxyAPI-Dashboard/README.md](CLIProxyAPI-Dashboard/README.md) |
+| `CLIProxyAPI-Dashboard/` | 唯一 Web 管理面与控制 API（配置、进程、日志） | Python + 原生 Web UI | [CLIProxyAPI-Dashboard/README.md](CLIProxyAPI-Dashboard/README.md) |
+| `apps/tauri-gui/` | Dashboard 的 Tauri Windows 桌面宿主 | Rust + Tauri | [apps/tauri-gui/README.md](apps/tauri-gui/README.md) |
 | `PortBindingTools/` | Windows portproxy + 防火墙规则管理 | PowerShell | [PortBindingTools/README.md](PortBindingTools/README.md) |
-| `electron-app/` | Dashboard 的 Electron 打包外壳 | Electron Builder | — |
+| `start.ps1` | GUI 与 Web Dashboard 的统一入口 | PowerShell | 本文档 |
 | `update-core.ps1` | 一键同步官方内核到指定 Tag | PowerShell | [更新官方内核](#更新官方内核) |
 
 ## 快速开始
 
-推荐通过面板启动（自动拉起网关 + 内核，并生成运行态配置）：
+推荐从工作区根目录启动。GUI 和 Web Dashboard 使用同一个 `CLIProxyAPI/storage/` 数据目录：
 
 ```powershell
-cd E:\U_App\CLIProxyAPI_work\CLIProxyAPI-Dashboard
-copy .env.example .env    # 首次运行
-.\start.ps1
+.\start.ps1 -Mode GUI
 ```
 
-面板通过 `.env` 中的 `CLIPROXYAPI_ROOT` 指向同级的 `CLIProxyAPI` 目录（默认已配置好）。
+```powershell
+.\start.ps1 -Mode Dashboard -OpenBrowser
+```
+
+首次开发启动 Dashboard 时，复制 `CLIProxyAPI-Dashboard/.env.example` 为 `.env`。统一入口会为当前进程固定 `CLIPROXYAPI_ROOT` 与 `CLIPROXYAPI_STORAGE_DIR`，避免 GUI 误连其他工作区或写入系统缓存。
 
 仅需要裸代理、不使用面板时：
 
@@ -102,7 +105,7 @@ cd E:\U_App\CLIProxyAPI_work\CLIProxyAPI
 | 文件 | 用途 |
 | --- | --- |
 | `CLIProxyAPI/CLIProxyAPI/config.example.yaml` | 上游内核自带的字段说明模板，不会被程序读取 |
-| `CLIProxyAPI/storage/config/base-config.yaml` | 手写的基础配置，`start.ps1 codex`/`tui` 使用 |
+| `CLIProxyAPI/storage/config/base-config.yaml` | 手写的基础配置，`start.ps1 codex` 使用 |
 | `CLIProxyAPI/storage/runtime/cliproxyapi-active-config.yaml` | 面板生成的运行态配置，`start.ps1 dashboard` 和面板启动的进程使用，**不要手工长期维护**，改动会被面板覆盖 |
 
 ## 更新官方内核

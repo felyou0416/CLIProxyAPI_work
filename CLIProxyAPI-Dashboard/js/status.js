@@ -308,11 +308,17 @@ function updateProxyToolSummary(s) {
   }
 
   setText('status-proxy-main-chip', proxyStateText, 'Not running');
+  const chipEl = document.getElementById('status-proxy-main-chip');
+  if (chipEl) {
+    chipEl.style.color = s.proxy_running ? 'var(--ok)' : 'var(--text-muted)';
+  }
   setText('tools-summary-proxy', proxyStateText, 'Not running');
   const toolsSummaryAuth = selectedAccountText
     ? `${selectedAccountText}${selectedProviderText && selectedProviderText !== t('common.notSelected', 'Not selected') ? ` (${selectedProviderText})` : ''}`
     : t('common.notSelected', 'Not selected');
   setText('tools-summary-auth', toolsSummaryAuth, t('common.notSelected', 'Not selected'));
+  const authEl = document.getElementById('tools-summary-auth');
+  if (authEl) authEl.title = toolsSummaryAuth;
 }
 
 async function refreshStatus() {

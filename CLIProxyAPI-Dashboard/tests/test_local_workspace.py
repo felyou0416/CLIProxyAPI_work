@@ -78,3 +78,38 @@ class LocalWorkspaceTests(unittest.TestCase):
         payload['services'][0]['commands'] = {}
         with self.assertRaisesRegex(ValueError, 'at least one operation'):
             local_workspace._normalize_config(payload)
+
+    def test_legacy_config_moves_to_storage_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy_file = root / 'legacy' / 'dashboard-actions.json'
+            storage_file = root / 'storage' / 'dashboard-actions.json'
+            legacy_file.parent.mkdir()
+            legacy_file.write_text(json.dumps(self._config()), encoding='utf-8')
+            with patch.object(local_workspace, 'LEGACY_LOCAL_WORKSPACE_FILE', legacy_file), patch.object(
+                local_workspace, 'LOCAL_WORKSPACE_FILE', storage_file
+            ):
+                item = local_workspace.public_local_workspace()
+
+            self.assertTrue(item['configured'])
+            self.assertTrue(storage_file.is_file())
+            self.assertFalse(legacy_file.exists())
+
+    def test_existing_storage_config_is_never_overwritten_by_legacy_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy_file = root / 'legacy' / 'dashboard-actions.json'
+            storage_file = root / 'storage' / 'dashboard-actions.json'
+            legacy_file.parent.mkdir()
+            storage_file.parent.mkdir()
+            legacy_file.write_text(json.dumps(self._config()), encoding='utf-8')
+            storage_file.write_text(json.dumps({
+                'title': 'Storage config', 'links': [], 'services': []
+            }), encoding='utf-8')
+            with patch.object(local_workspace, 'LEGACY_LOCAL_WORKSPACE_FILE', legacy_file), patch.object(
+                local_workspace, 'LOCAL_WORKSPACE_FILE', storage_file
+            ):
+                item = local_workspace.public_local_workspace()
+
+            self.assertEqual(item['title'], 'Storage config')
+            self.assertTrue(legacy_file.is_file())

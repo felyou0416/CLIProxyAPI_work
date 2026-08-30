@@ -387,6 +387,7 @@ function getNavGroups() {
     // 低频页不进侧栏，统一归系统中心入口
     system: [
       'system',
+      'models',
       'network-access',
       'firewall-access',
       'model-proxy',
@@ -990,9 +991,6 @@ async function showSection(name, options = {}) {
   if (name === 'models' && typeof loadModelsPanel === 'function') {
     loadModelsPanel();
   }
-  if (name === 'overview' && typeof loadOverviewPanel === 'function') {
-    loadOverviewPanel();
-  }
   if (name === 'chat' && typeof loadChatPanel === 'function') {
     loadChatPanel();
   }
@@ -1157,6 +1155,16 @@ function setText(id, value, fallback = '') {
   const next = value || fallback;
   if (el.textContent === next) return;
   el.textContent = next;
+}
+
+function isRequestMonitoringDisabled(data) {
+  return !!data && (data.disabled === true || data.monitoring_enabled === false);
+}
+
+function requestMonitoringDisabledText() {
+  return getLanguage() === 'en'
+    ? 'Dashboard request monitoring is disabled'
+    : 'Dashboard 请求监控已关闭';
 }
 
 let _messageTimer = null;

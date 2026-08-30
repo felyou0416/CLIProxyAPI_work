@@ -16,6 +16,35 @@ const toolNames = {
 };
 
 const toolPollers = {};
+let toolsVersionLoaded = false;
+
+function setToolResultState(id, result, fallback = '') {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const ok = result && result.ok !== false;
+  el.classList.toggle('tool-result-ok', ok);
+  el.classList.toggle('tool-result-error', !ok);
+  const prefix = ok ? '完成' : '失败';
+  const message = result?.message || result?.error || fallback;
+  el.dataset.resultState = ok ? 'ok' : 'error';
+  el.dataset.resultLabel = message ? `${prefix} · ${message}` : prefix;
+}
+
+async function loadToolsVersion() {
+  if (toolsVersionLoaded) return;
+  toolsVersionLoaded = true;
+  try {
+    const response = await api('/api/version', 'GET');
+    const item = response?.item || {};
+    const version = item.cli_version || item.version || '未读取';
+    const el = document.getElementById('tools-core-version');
+    if (el) el.textContent = version;
+  } catch (error) {
+    const el = document.getElementById('tools-core-version');
+    if (el) el.textContent = '读取失败';
+    console.warn('Unable to load CPA version:', error);
+  }
+}
 
 function updateToolCommandHints(status) {
   if (!status) return;
@@ -29,8 +58,10 @@ function updateToolCommandHints(status) {
   if (hint) {
     const proxyRoot = status.proxy_root || '-';
     const dashRoot = status.dashboard_root || '-';
-    hint.textContent = `代理项目: ${proxyRoot}  |  面板项目: ${dashRoot}`;
+    hint.textContent = `${proxyRoot} · ${dashRoot}`;
+    hint.title = `代理项目: ${proxyRoot} | 面板项目: ${dashRoot}`;
   }
+  loadToolsVersion();
 }
 
 async function runTool(toolId, btn) {
@@ -120,7 +151,13 @@ async function queryModels() {
   try {
     const r = await api('/api/query-models', 'GET');
     el.textContent = JSON.stringify(r, null, 2);
-  } catch (e) { el.textContent = 'Error:' + e.message; }
+    setToolResultState('log-models', r, Array.isArray(r?.data) ? `${r.data.length} 个模型` : '模型目录已返回');
+    showMessage(r?.ok === false ? (r.message || '模型目录读取失败') : '模型目录已更新');
+  } catch (e) {
+    el.textContent = 'Error:' + e.message;
+    setToolResultState('log-models', {ok: false, error: e.message});
+    showMessage(e.message, true);
+  }
 }
 
 async function testProxy() {
@@ -130,7 +167,13 @@ async function testProxy() {
   try {
     const r = await api('/api/test-proxy', 'GET');
     el.textContent = JSON.stringify(r, null, 2);
-  } catch (e) { el.textContent = 'Error:' + e.message; }
+    setToolResultState('log-test', r, '代理测试已返回');
+    showMessage(r?.ok === false ? (r.message || '代理测试失败') : '代理测试完成');
+  } catch (e) {
+    el.textContent = 'Error:' + e.message;
+    setToolResultState('log-test', {ok: false, error: e.message});
+    showMessage(e.message, true);
+  }
 }
 
 function storageCleanupOptions(apply) {

@@ -2,7 +2,7 @@
 // Shared runtime controls
 // -----------------------------------------------------------------------------
 // Only services shipped with this repository belong here. Per-machine links and
-// unrelated local projects are configured in .local/dashboard-actions.json and
+// unrelated local projects are configured in storage/config/local-workspace/dashboard-actions.json and
 // rendered by js/local-workspace.js.
 // =============================================================================
 

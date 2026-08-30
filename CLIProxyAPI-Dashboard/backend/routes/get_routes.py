@@ -8,7 +8,12 @@ from backend.security import generate_security_report
 from backend.tools import get_tool_outputs, query_models, test_proxy, get_provider_model_test_state, materialize_generated_video, fetch_remote_media, validate_remote_media_url, list_generated_media, load_auth_test_cache
 from backend.model_thinking import load_model_thinking_configs, collect_thinking_candidates, collect_all_configured_models
 from backend.terminals import list_terminals, read_terminal
-from backend.request_metrics import parse_proxy_requests, parse_precise_request_events, parse_error_logs, merge_request_events, summarize_clients, summarize_models, summarize_model_test_stats, summarize_auth_health, ensure_observability_cache, refresh_observability_cache, get_cumulative_stats, merge_cumulative_model_test_stats, get_precise_request_events_page, estimate_archived_event_count
+from backend.request_metrics import parse_proxy_requests, parse_precise_request_events, parse_error_logs, merge_request_events, summarize_clients, summarize_models, summarize_model_test_stats, summarize_auth_health, ensure_observability_cache, refresh_observability_cache, get_observability_cache, get_request_events_cache, get_cumulative_stats, merge_cumulative_model_test_stats
+from backend.request_monitoring_config import (
+    load_request_monitoring_config,
+    normalize_request_monitoring_config,
+    request_monitoring_enabled,
+)
 from backend.routes.helpers import send_json, send_file, send_bytes
 from backend.system_proxy import get_system_proxy_status
 from backend.local_workspace import public_local_workspace
@@ -236,10 +241,13 @@ def handle_get(handler, parsed):
             rows = provider.get('rows') if isinstance(provider, dict) else []
             if isinstance(rows, list):
                 model_count += len(rows)
+        monitoring_config = normalize_request_monitoring_config(auth_state)
         send_json(handler, {
             'ok': True,
             'item': {
                 'status': status,
+                'monitoring_enabled': monitoring_config['request_monitoring_enabled'],
+                'monitoring_config': monitoring_config,
                 'account': {
                     'balance': 999998.99,
                     'currency': 'USD',
@@ -403,42 +411,30 @@ def handle_get(handler, parsed):
         include_models = str((params.get('include_models') or [''])[0] or '').strip().lower() in ('1', 'true', 'yes')
         has_filter = bool(ip_filter or model_filter or provider_filter or status_filter or success_filter in ('true', 'false'))
 
-        # 无筛选条件时走“按需分页”快速路径：翻页只解析当前这一页对应的精细日志
-        # 文件（外加数量很小的 proxy.stdout.log / error 日志全量），不会像下面的
-        # 全量路径那样把当前保留的所有历史日志文件都解析一遍。
-        # 一旦用户加了筛选条件（按模型/服务商/IP/状态筛选），必须先知道每条记录
-        # 解析后的字段才能判断是否命中，这就退回全量解析路径（ensure/refresh_
-        # observability_cache），牺牲一次性速度换取筛选的完整覆盖范围。
-        if not refresh and not has_filter:
-            proxy_items = parse_proxy_requests(limit=300)
-            error_items = parse_error_logs(limit=300)
-            precise_page, precise_total = get_precise_request_events_page(offset, limit)
-            provider_models = get_configured_provider_models()
-            page_events = merge_request_events(proxy_items, precise_page, error_items, provider_models)
-            if not include_models:
-                page_events = [
-                    item for item in page_events
-                    if str(item.get('path') or '').strip().split('?', 1)[0].rstrip('/') != '/v1/models'
-                ]
-            page_events.sort(key=lambda item: int(item.get('timestamp') or 0), reverse=True)
-            # total 补上归档 jsonl 里的历史事件数量（估算），避免用户从"无筛选"
-            # 切到"有筛选"（退回全量路径，total 语义变成"精细+proxy+error+归档"
-            # 去重后的总数）时看到总条数断崖式跳变，误以为数据不一致。
-            estimated_total = precise_total + estimate_archived_event_count()
+        if not request_monitoring_enabled():
             send_json(handler, {
                 'ok': True,
-                'items': page_events[:limit],
-                'total': estimated_total,
+                'items': [],
+                'total': 0,
                 'cached': True,
-                'refreshed_at': time.time(),
-                'lazy': True,
+                'refreshed_at': 0,
+                'data_as_of': 0,
+                'cache_generation': 0,
+                'data_source': 'request-monitoring-disabled',
+                'lazy': False,
+                'refreshing': False,
+                'monitoring_enabled': False,
+                'disabled': True,
             })
             return True
 
-        cache = refresh_observability_cache(force=True) if refresh else ensure_observability_cache()
-        items = cache.get('events') or []
+        # Every table query must be a slice of one stable, globally sorted event
+        # set. Applying filters to a separate recent-summary cache would change
+        # the data range and page boundaries as soon as a filter was selected.
+        snapshot = get_request_events_cache(force=refresh, wait=False)
+        events = snapshot.get('events') or []
         filtered = []
-        for item in items:
+        for item in events:
             item_path = str(item.get('path') or '').strip()
             if not include_models and item_path.split('?', 1)[0].rstrip('/') == '/v1/models':
                 continue
@@ -460,15 +456,33 @@ def handle_get(handler, parsed):
                     continue
             filtered.append(item)
         total = len(filtered)
+        page_events = filtered[offset:offset + limit]
+        latest_event_timestamp = max(
+            (float(item.get('timestamp') or 0) for item in page_events),
+            default=float(snapshot.get('refreshed_at') or 0),
+        )
         send_json(handler, {
             'ok': True,
-            'items': filtered[offset:offset + limit],
+            'items': page_events,
             'total': total,
-            'cached': bool(cache.get('ready')),
-            'refreshed_at': cache.get('refreshed_at') or 0,
+            'cached': bool(snapshot.get('ready')),
+            'refreshed_at': snapshot.get('refreshed_at') or 0,
+            'data_as_of': latest_event_timestamp,
+            'cache_generation': int(snapshot.get('generation') or 0),
+            'data_source': 'request-events-cache',
+            'lazy': False,
+            'refreshing': bool(snapshot.get('refreshing')),
         })
         return True
     if parsed.path == '/api/request-log-raw':
+        if not request_monitoring_enabled():
+            send_json(handler, {
+                'ok': False,
+                'message': 'Dashboard request monitoring is disabled.',
+                'monitoring_enabled': False,
+                'disabled': True,
+            }, status=409)
+            return True
         params = parse_qs(parsed.query)
         filename = (params.get('file') or [''])[0].strip()
         if not filename or '/' in filename or '\\' in filename or not filename.endswith('.log'):
@@ -496,6 +510,16 @@ def handle_get(handler, parsed):
             send_json(handler, {'ok': False, 'message': str(e)}, status=500)
         return True
     if parsed.path == '/api/request-clients':
+        if not request_monitoring_enabled():
+            send_json(handler, {
+                'ok': True,
+                'items': [],
+                'cached': True,
+                'refreshed_at': 0,
+                'monitoring_enabled': False,
+                'disabled': True,
+            })
+            return True
         params = parse_qs(parsed.query)
         try:
             limit = max(1, min(500, int((params.get('limit') or ['100'])[0] or 100)))
@@ -513,6 +537,16 @@ def handle_get(handler, parsed):
         })
         return True
     if parsed.path == '/api/model-health':
+        if not request_monitoring_enabled():
+            send_json(handler, {
+                'ok': True,
+                'items': [],
+                'runtime_model_ids': [],
+                'runtime_loaded': False,
+                'monitoring_enabled': False,
+                'disabled': True,
+            })
+            return True
         provider_models = get_configured_provider_models(include_override_only=False)
         params = parse_qs(parsed.query)
         include_runtime = str((params.get('runtime') or ['0'])[0] or '').strip().lower() in ('1', 'true', 'yes')
@@ -535,6 +569,17 @@ def handle_get(handler, parsed):
         })
         return True
     if parsed.path == '/api/model-test-stats':
+        if not request_monitoring_enabled():
+            send_json(handler, {
+                'ok': True,
+                'items': [],
+                'limit': 0,
+                'cached': True,
+                'refreshed_at': 0,
+                'monitoring_enabled': False,
+                'disabled': True,
+            })
+            return True
         params = parse_qs(parsed.query)
         try:
             limit = max(1, min(2000, int((params.get('limit') or ['500'])[0] or 500)))
@@ -563,6 +608,16 @@ def handle_get(handler, parsed):
         })
         return True
     if parsed.path == '/api/auth-health':
+        if not request_monitoring_enabled():
+            send_json(handler, {
+                'ok': True,
+                'items': [],
+                'cached': True,
+                'refreshed_at': 0,
+                'monitoring_enabled': False,
+                'disabled': True,
+            })
+            return True
         params = parse_qs(parsed.query)
         try:
             limit = max(1, min(500, int((params.get('limit') or ['100'])[0] or 100)))
@@ -776,6 +831,7 @@ def handle_get(handler, parsed):
             'error_logs_max_files': state.get('error_logs_max_files', 10),
             'usage_statistics_enabled': state.get('usage_statistics_enabled', False),
             'usage_queue_retention_seconds': state.get('usage_queue_retention_seconds', 60),
+            **normalize_request_monitoring_config(state),
             'nonstream_keepalive_interval': state.get('nonstream_keepalive_interval', 0),
             'streaming_keepalive_seconds': state.get('streaming_keepalive_seconds', 0),
             'streaming_bootstrap_retries': state.get('streaming_bootstrap_retries', 0),
@@ -882,7 +938,20 @@ def handle_get(handler, parsed):
         send_json(handler, download_update())
         return True
     if parsed.path == '/api/cumulative-stats':
-        send_json(handler, {'ok': True, 'stats': get_cumulative_stats()})
+        if not request_monitoring_enabled():
+            send_json(handler, {
+                'ok': True,
+                'stats': {},
+                'monitoring_enabled': False,
+                'disabled': True,
+            })
+            return True
+        send_json(handler, {
+            'ok': True,
+            'stats': get_cumulative_stats(),
+            'monitoring_enabled': True,
+            'disabled': False,
+        })
         return True
     if parsed.path == '/api/auth/check':
         from backend.access_auth import password_is_set, validate_token, extract_token_from_handler

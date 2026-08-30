@@ -1,5 +1,6 @@
 param(
-    [switch]$OpenBrowser
+    [switch]$OpenBrowser,
+    [switch]$RestartExisting
 )
 
 $ErrorActionPreference = 'Stop'
@@ -200,7 +201,14 @@ Write-Host "Directory: $scriptDir"
 Write-Host "Open: $dashboardUrl" -ForegroundColor Green
 Write-Host "Bind: ${dashboardHost}:${dashboardPort}" -ForegroundColor DarkCyan
 
-$logDir = Join-Path $scriptDir '..\CLIProxyAPI\storage\logs'
+$storageDir = if ($env:CLIPROXYAPI_STORAGE_DIR) {
+    $env:CLIPROXYAPI_STORAGE_DIR
+} elseif ($env:RELAYX_STORAGE_DIR) {
+    $env:RELAYX_STORAGE_DIR
+} else {
+    Join-Path $scriptDir '..\CLIProxyAPI\storage'
+}
+$logDir = Join-Path $storageDir 'logs'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $stdoutLog = Join-Path $logDir 'dashboard.stdout.log'
 $stderrLog = Join-Path $logDir 'dashboard.stderr.log'
@@ -210,12 +218,15 @@ $stderrLog = Join-Path $logDir 'dashboard.stderr.log'
 $existingPids = Get-ListeningPids -Port ([int]$dashboardPort)
 $dashboardListenerPids = Get-DashboardListenerPids -Pids $existingPids
 $isHealthy = Test-LocalHttpReady -Url $healthUrl
-if ($isHealthy -and $dashboardListenerPids.Count -eq 1 -and $existingPids.Count -eq 1) {
+if ($isHealthy -and $dashboardListenerPids.Count -eq 1 -and $existingPids.Count -eq 1 -and -not $RestartExisting) {
     Write-Host "Dashboard is already running at $dashboardUrl" -ForegroundColor Green
     if ($OpenBrowser) {
         Start-Process $dashboardUrl | Out-Null
     }
     exit 0
+}
+if ($isHealthy -and $dashboardListenerPids.Count -eq 1 -and $existingPids.Count -eq 1 -and $RestartExisting) {
+    Write-Host "Restarting the existing Dashboard so it uses this workspace storage..." -ForegroundColor Yellow
 }
 
 if ($existingPids.Count -gt 0 -and $dashboardListenerPids.Count -ne $existingPids.Count) {
@@ -297,7 +308,8 @@ if (-not $env:NO_PROXY) {
 }
 
 try {
-    $proc = Start-Process -WindowStyle Hidden -FilePath $python.Source -ArgumentList @('.\app.py') -WorkingDirectory $scriptDir -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
+    $appEntry = Join-Path $scriptDir 'app.py'
+    $proc = Start-Process -WindowStyle Hidden -FilePath $python.Source -ArgumentList @($appEntry) -WorkingDirectory $scriptDir -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
 } catch {
     Write-Error "Failed to launch python: $($_.Exception.Message)"
     exit 1

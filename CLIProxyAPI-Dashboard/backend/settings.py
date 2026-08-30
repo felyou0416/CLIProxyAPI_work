@@ -122,6 +122,8 @@ def get_version_info():
             'version': current_version,
             'cli_version': cli_version,
             'dashboard_version': current_version,
+            'desktop_version': current_version,
+            # Kept for older Dashboard Web UI builds that still read this field.
             'electron_version': current_version,
             'build_date': build_date,
             'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),

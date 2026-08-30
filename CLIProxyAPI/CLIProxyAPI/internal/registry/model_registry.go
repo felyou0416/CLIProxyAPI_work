@@ -19,7 +19,7 @@ import (
 const OpenAIImageModelType = "openai-image"
 
 const (
-	DefaultClaudeMaxInputTokens  = 200000
+	DefaultClaudeMaxInputTokens  = 372000
 	DefaultClaudeMaxOutputTokens = 64000
 )
 

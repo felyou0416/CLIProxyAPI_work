@@ -1,5 +1,8 @@
 # CLIProxyAPI Dashboard — 独立面板项目
-param([switch]$OpenBrowser)
+param(
+    [switch]$OpenBrowser,
+    [switch]$RestartExisting
+)
 
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot

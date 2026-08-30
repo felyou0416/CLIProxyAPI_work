@@ -33,6 +33,34 @@ function formatTokenCount(num) {
   return val.toString();
 }
 
+function setTokenUsageDisabledState(disabled) {
+  const message = requestMonitoringDisabledText();
+  const metricIds = [
+    'metric-total-tokens',
+    'metric-prompt-tokens',
+    'metric-completion-tokens',
+    'metric-request-count',
+    'metric-avg-tokens',
+    'metric-active-days',
+    'metric-peak-tokens',
+  ];
+  metricIds.forEach((id) => {
+    const element = document.getElementById(id);
+    if (element) element.textContent = disabled ? '-' : element.textContent;
+  });
+
+  ['daily-bar-chart', 'model-ranking-list', 'client-ranking-list', 'provider-ranking-list']
+    .forEach((id) => {
+      const element = document.getElementById(id);
+      if (element && disabled) {
+        element.innerHTML = `<div class="metric-empty">${escapeHtml(message)}</div>`;
+      }
+    });
+
+  const meta = document.getElementById('token-usage-meta');
+  if (meta && disabled) meta.textContent = message;
+}
+
 async function loadTokenUsagePanel(force = false) {
   if (tokenUsagePanelLoaded && !force) return;
 
@@ -63,13 +91,21 @@ async function loadTokenUsagePanel(force = false) {
     }
 
     const res = await api('/api/cumulative-stats');
+    if (isRequestMonitoringDisabled(res)) {
+      tokenUsageData = null;
+      setTokenUsageDisabledState(true);
+      tokenUsagePanelLoaded = true;
+      return;
+    }
+
     tokenUsageData = res.stats || {};
-    
+    setTokenUsageDisabledState(false);
+
     // Update metadata refreshed time
     const metaEl = document.getElementById('token-usage-meta');
     if (metaEl) {
-      const refreshed = res.stats?.updated_at 
-        ? new Date(Number(res.stats.updated_at) * 1000).toLocaleTimeString() 
+      const refreshed = res.stats?.updated_at
+        ? new Date(Number(res.stats.updated_at) * 1000).toLocaleTimeString()
         : new Date().toLocaleTimeString();
       metaEl.textContent = `最近刷新: ${refreshed}`;
     }

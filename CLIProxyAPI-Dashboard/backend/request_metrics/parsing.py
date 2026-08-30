@@ -12,13 +12,14 @@ from backend.paths import (
     ACTIVE_AUTH_DIR,
     AUTH_ARCHIVE_DIR,
     AUTH_DIR,
+    LEGACY_REQUEST_LOG_DIR,
     PROXY_STDOUT,
     REQUEST_ARCHIVE_DIR,
     REQUEST_LOG_DIR,
     RUNTIME_CONFIG,
-    STORAGE_DIR,
 )
 from backend.api_keys import find_key_by_masked_value, record_api_key_usage, record_api_key_usage_batch
+from backend.request_monitoring_config import load_request_monitoring_config
 
 # 批量解析日志文件期间，用量记录先攒在这里，避免每个文件触发一次磁盘读写。
 # 由 flush_pending_api_key_usage() 在批量循环结束后一次性落盘。
@@ -387,12 +388,8 @@ _REQUEST_LOG_PARSE_CACHE_LOCK = threading.Lock()
 _PRECISE_REQUEST_LOG_CACHE = {}
 _ERROR_REQUEST_LOG_CACHE = {}
 _REQUEST_LOG_PARSE_CACHE_VERSION = 4  # bumped when event format or extraction logic changes
-_OBSERVABILITY_REFRESH_INTERVAL_SECONDS = 15.0
 _OBSERVABILITY_EVENT_LIMIT = 300
 _OBSERVABILITY_SUMMARY_LIMIT = 200
-_REQUEST_LOG_KEEP_FILES = 1000          # 原始 .log 文件保留数量（每文件约 1.5MB，1000 个 ≈ 1.5GB）
-_REQUEST_EVENT_ARCHIVE_KEEP_ENTRIES = 20000  # jsonl 归档摘要最大条数（按请求量约保留数天历史）
-
 
 def _normalize_client_ip(raw: str) -> str:
     value = str(raw or '').strip().strip('"[]')
@@ -875,7 +872,8 @@ def _append_archived_request_event(event: dict) -> None:
 
 
 def _tail_archived_request_events(limit: int, source: str | None = None) -> list[dict]:
-    if limit <= 0 or not REQUEST_ARCHIVE_DIR.exists():
+    """Return recent archived events, or all retained events when limit is zero."""
+    if not REQUEST_ARCHIVE_DIR.exists():
         return []
     items = []
     try:
@@ -887,7 +885,12 @@ def _tail_archived_request_events(limit: int, source: str | None = None) -> list
     except Exception:
         return []
     for archive_path in archive_files:
-        for line in reversed(_tail_lines(archive_path, max(limit * 2, 100))):
+        lines = (
+            archive_path.read_text(encoding='utf-8', errors='ignore').splitlines()
+            if limit <= 0
+            else _tail_lines(archive_path, max(limit * 2, 100))
+        )
+        for line in reversed(lines):
             try:
                 item = json.loads(line)
             except Exception:
@@ -897,7 +900,7 @@ def _tail_archived_request_events(limit: int, source: str | None = None) -> list
             if source and str(item.get('source') or '') != source:
                 continue
             items.append(item)
-            if len(items) >= limit:
+            if limit > 0 and len(items) >= limit:
                 return items
     return items
 
@@ -953,7 +956,7 @@ def _request_log_dirs() -> list[Path]:
         REQUEST_LOG_DIR,
         AUTH_DIR / 'logs',
         AUTH_ARCHIVE_DIR / 'default' / 'metadata' / 'logs',
-        STORAGE_DIR / 'storage' / 'runtime' / 'active-auth' / 'logs',
+        LEGACY_REQUEST_LOG_DIR,
     ]
     result = []
     seen = set()
@@ -965,7 +968,9 @@ def _request_log_dirs() -> list[Path]:
     return result
 
 
-def _trim_request_event_archives(max_entries: int = _REQUEST_EVENT_ARCHIVE_KEEP_ENTRIES) -> None:
+def _trim_request_event_archives(max_entries: int | None = None) -> None:
+    if max_entries is None:
+        max_entries = load_request_monitoring_config()['request_event_archive_keep_entries']
     if max_entries <= 0 or not REQUEST_ARCHIVE_DIR.exists():
         return
     try:
@@ -1289,7 +1294,9 @@ def _parse_request_log_file(path: Path, content: str, stat, error_log: bool = Fa
     }
 
 
-def prune_request_logs(max_files: int = _REQUEST_LOG_KEEP_FILES) -> None:
+def prune_request_logs(max_files: int | None = None) -> None:
+    if max_files is None:
+        max_files = load_request_monitoring_config()['request_log_keep_files']
     if max_files <= 0:
         return
     stale_paths = []
@@ -1331,7 +1338,8 @@ def prune_request_logs(max_files: int = _REQUEST_LOG_KEEP_FILES) -> None:
 
 def parse_proxy_requests(limit: int = 500) -> list[dict]:
     items = []
-    for line in _tail_lines(PROXY_STDOUT, max(200, limit * 4)):
+    line_limit = 0 if limit <= 0 else max(200, limit * 4)
+    for line in _tail_lines(PROXY_STDOUT, line_limit):
         match = _PROXY_LINE_RE.search(line)
         if not match:
             continue
@@ -1354,7 +1362,7 @@ def parse_proxy_requests(limit: int = 500) -> list[dict]:
             'method': str(match.group('method') or '').strip(),
         })
     items.sort(key=lambda item: int(item.get('timestamp') or 0), reverse=True)
-    return items[:limit]
+    return items[:limit] if limit > 0 else items
 
 
 def _list_precise_log_paths() -> list[Path]:
@@ -1430,29 +1438,23 @@ def _sorted_by_mtime_desc(paths: list[Path]) -> list[Path]:
 
 
 def parse_precise_request_events(limit: int = 500) -> list[dict]:
-    """
-    全量解析精细日志（用于后台观测缓存：客户端汇总 / Auth 健康度 / 累计
-    Token 统计——这些汇总功能需要看到足够多的样本，不能只看当前分页）。
+    """Parse precise request events, including retained archive events.
 
-    重要：这里只解析最多 limit 个文件（外加已缓存命中的部分几乎零成本），
-    不再像旧实现那样取 max(200, limit*4)。旧实现的 4 倍冗余系数是在保留
-    文件数很少（如 50 个）时代留下的，那时"多取几倍"几乎不产生额外成本；
-    但保留数提高到 1000 后，4 倍冗余意味着每次刷新最多要解析 1200 个大文件
-    （每个约 1-2MB），这个后台线程每 15 秒被唤醒一次做这么重的工作，会持续
-    与其他请求（包括"重启代理服务”这类需要快速响应的操作）抢占 CPU 和磁盘
-    I/O，使原本该很快的操作被拖慢。汇总统计不需要比展示层看到更多的文件，
-    直接用 limit 本身即可（仍有解析结果缓存，重复扫描同一批文件的开销很低）。
+    A positive limit keeps this suitable for lightweight background summaries.
+    Passing zero reads the complete retained set for the request-table snapshot.
     """
     items = []
-    log_paths = _list_precise_log_paths()
-    for path in _sorted_by_mtime_desc(log_paths)[:max(50, limit)]:
+    log_paths = _sorted_by_mtime_desc(_list_precise_log_paths())
+    if limit > 0:
+        log_paths = log_paths[:max(50, limit)]
+    for path in log_paths:
         parsed = _parse_one_precise_log_file(path)
         if parsed:
             items.append(parsed)
     flush_pending_api_key_usage()
     items.extend(_tail_archived_request_events(limit, source='precise-log'))
     items.sort(key=lambda item: int(item.get('timestamp') or 0), reverse=True)
-    return items[:limit]
+    return items[:limit] if limit > 0 else items
 
 
 def get_precise_request_events_page(offset: int, limit: int) -> tuple[list[dict], int]:
@@ -1466,7 +1468,7 @@ def get_precise_request_events_page(offset: int, limit: int) -> tuple[list[dict]
 
     返回 (这一页的事件列表, 参与分页的文件总数)。
     注意：这里的"总数"只统计精细日志文件本身，不包含归档 jsonl 里的历史事件——
-    归档部分数据量小（受 _REQUEST_EVENT_ARCHIVE_KEEP_ENTRIES 限制），调用方如果
+    归档部分数据量小（受 Dashboard 请求监控中的归档保留数限制），调用方如果
     需要归档数据可以在没有更多精细日志文件时再自行补充。
     """
     log_paths = _list_precise_log_paths()
@@ -1496,7 +1498,9 @@ def parse_error_logs(limit: int = 500) -> list[dict]:
             if path.is_file() and path.name.startswith('error-') and key not in seen_paths:
                 files.append(path)
                 seen_paths.add(key)
-    files = sorted(files, key=lambda path: path.stat().st_mtime, reverse=True)[:limit]
+    files = _sorted_by_mtime_desc(files)
+    if limit > 0:
+        files = files[:limit]
     for path in files:
         try:
             stat = path.stat()
@@ -1527,4 +1531,4 @@ def parse_error_logs(limit: int = 500) -> list[dict]:
     flush_pending_api_key_usage()
     items.extend(_tail_archived_request_events(limit, source='error-log'))
     items.sort(key=lambda item: int(item.get('timestamp') or 0), reverse=True)
-    return items[:limit]
+    return items[:limit] if limit > 0 else items

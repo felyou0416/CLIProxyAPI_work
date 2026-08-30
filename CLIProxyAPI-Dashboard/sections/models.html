@@ -1,0 +1,14 @@
+<section id="section-models" class="panel panel-scroll section-view" hidden>
+  <div class="panel-head">
+    <div>
+      <div class="section-kicker">Models</div>
+      <h2 class="section-title">模型健康</h2>
+      <p class="tool-desc-zh">查看当前运行时模型的注册、可用性和请求概况。</p>
+    </div>
+    <div class="action-row">
+      <span class="auth-chip" id="model-health-meta">-</span>
+      <button class="secondary" type="button" onclick="loadModelsPanel(true)" data-i18n="btn.refresh">刷新</button>
+    </div>
+  </div>
+  <div id="model-health-list" class="metric-card-grid"></div>
+</section>

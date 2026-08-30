@@ -15,6 +15,9 @@ const advancedConfigDefaults = Object.freeze({
   nonstream_keepalive_interval: 0, streaming_keepalive_seconds: 0, streaming_bootstrap_retries: 0,
   logging_to_file: false, logs_max_total_size_mb: 0, error_logs_max_files: 10,
   usage_statistics_enabled: false, usage_queue_retention_seconds: 60,
+  request_monitoring_enabled: true, request_observability_refresh_seconds: 15,
+  request_events_cache_ttl_seconds: 30, request_log_keep_files: 300,
+  request_event_archive_keep_entries: 20000,
 });
 
 function acEscape(value) {
@@ -103,14 +106,21 @@ function renderAdvancedConfig() {
     acToggle('claude-code-disable-cloaking-model-list','Claude 模型列表使用原名',d.claude_code_disable_cloaking_model_list,'Anthropic 模型列表返回原始模型 ID，不再使用伪装 ID。'),
     acToggle('xai-inject-x-search','自动注入 xAI 搜索',d.xai_inject_x_search,'请求未声明时注入原生 x_search，并同步 allowed_tools。'),
   ].join('');
-  const logging = [
-    acToggle('logging-to-file','写入轮转日志',d.logging_to_file,'让 CPA 将应用日志写入轮转文件。'),
-    acNumber('logs-max-total-size-mb','日志总大小上限',d.logs_max_total_size_mb,0,102400,'MB','0 表示不限制。'),
-    acNumber('error-logs-max-files','错误日志保留数',d.error_logs_max_files,0,10000,'份','请求日志关闭时保留的错误日志数量。'),
-    acToggle('usage-statistics-enabled','内存用量统计',d.usage_statistics_enabled,'启用内核内存中的请求与 Token 汇总。'),
+  const cpaLogging = [
+    acToggle('logging-to-file','CPA 应用轮转日志',d.logging_to_file,'控制 CPA 内核自己的运行日志是否写入轮转文件；不影响 Dashboard 请求监控。'),
+    acNumber('logs-max-total-size-mb','日志总大小上限',d.logs_max_total_size_mb,0,102400,'MB','CPA 应用轮转日志的总大小；0 表示不限制。'),
+    acNumber('error-logs-max-files','错误日志保留数',d.error_logs_max_files,0,10000,'份','CPA 错误日志文件的保留数量。'),
+    acToggle('usage-statistics-enabled','CPA 内存用量统计',d.usage_statistics_enabled,'启用 CPA 内存中的请求与 Token 汇总，不等于 Dashboard 请求日志监控。'),
     acNumber('usage-queue-retention-seconds','用量队列保留',d.usage_queue_retention_seconds,1,3600,'秒','Management API 用量队列保留时间。'),
   ].join('');
-  content.innerHTML = [acCard('路由与会话','Routing',routing),acCard('重试与冷却','Reliability',retry),acCard('配额与服务','Service',service),acCard('响应与媒体','Response',response),acCard('协议兼容','Compatibility',compatibility),acCard('日志与统计','Observability',logging,true)].join('');
+  const requestMonitoring = [
+    acToggle('request-monitoring-enabled','Dashboard 请求监控',d.request_monitoring_enabled,'控制 Dashboard 是否读取、解析和归档 CPA request-log；关闭后不生成新的请求日志监控数据。'),
+    acNumber('request-observability-refresh-seconds','监控刷新间隔',d.request_observability_refresh_seconds,5,300,'秒','Dashboard 后台汇总缓存的刷新周期。'),
+    acNumber('request-events-cache-ttl-seconds','请求表格缓存 TTL',d.request_events_cache_ttl_seconds,5,300,'秒','请求表格完整排序快照的有效时间。'),
+    acNumber('request-log-keep-files','原始请求日志保留数',d.request_log_keep_files,50,10000,'份','Dashboard 清理归档时保留的原始请求日志文件数量。'),
+    acNumber('request-event-archive-keep-entries','请求归档保留数',d.request_event_archive_keep_entries,1000,1000000,'条','归档 JSONL 中保留的历史请求事件总数。'),
+  ].join('');
+  content.innerHTML = [acCard('路由与会话','Routing',routing),acCard('重试与冷却','Reliability',retry),acCard('配额与服务','Service',service),acCard('响应与媒体','Response',response),acCard('协议兼容','Compatibility',compatibility),acCard('CPA 应用日志','CPA runtime',cpaLogging,true),acCard('Dashboard 请求监控','Dashboard monitor',requestMonitoring,true)].join('');
   content.querySelectorAll('input, select').forEach(el => { el.addEventListener('input', markAdvancedConfigDirty); el.addEventListener('change', markAdvancedConfigDirty); });
 }
 
@@ -119,7 +129,7 @@ function acInteger(id) { const v=Number.parseInt(document.getElementById(id)?.va
 function collectAdvancedConfig() {
   const checked=id=>!!document.getElementById(id)?.checked;
   return {
-    core_routing_strategy:document.getElementById('core-routing-strategy')?.value||'round-robin', session_affinity_enabled:checked('session-affinity-enabled'), session_affinity_ttl:document.getElementById('session-affinity-ttl')?.value?.trim()||'1h', force_model_prefix:checked('force-model-prefix'), codex_identity_confuse:checked('codex-identity-confuse'), codex_disable_cloaking:checked('codex-disable-cloaking'), codex_optimize_multi_agent_v2:checked('codex-optimize-multi-agent-v2'), claude_code_disable_cloaking_model_list:checked('claude-code-disable-cloaking-model-list'), xai_inject_x_search:checked('xai-inject-x-search'), request_retry:acInteger('request-retry'), max_retry_credentials:acInteger('max-retry-credentials'), max_retry_interval:acInteger('max-retry-interval'), disable_cooling:checked('disable-cooling'), save_cooldown_status:checked('save-cooldown-status'), transient_error_cooldown_seconds:acInteger('transient-error-cooldown-seconds'), quota_switch_project:checked('quota-switch-project'), quota_switch_preview_model:checked('quota-switch-preview-model'), quota_antigravity_credits:checked('quota-antigravity-credits'), auth_auto_refresh_workers:acInteger('auth-auto-refresh-workers'), local_model:checked('local-model'), ws_auth:checked('ws-auth'), commercial_mode:checked('commercial-mode'), disable_image_generation:document.getElementById('disable-image-generation')?.value||'off', video_result_auth_cache_ttl:document.getElementById('video-result-auth-cache-ttl')?.value?.trim()||'3h', passthrough_headers:checked('passthrough-headers'), nonstream_keepalive_interval:acInteger('nonstream-keepalive-interval'), streaming_keepalive_seconds:acInteger('streaming-keepalive-seconds'), streaming_bootstrap_retries:acInteger('streaming-bootstrap-retries'), logging_to_file:checked('logging-to-file'), logs_max_total_size_mb:acInteger('logs-max-total-size-mb'), error_logs_max_files:acInteger('error-logs-max-files'), usage_statistics_enabled:checked('usage-statistics-enabled'), usage_queue_retention_seconds:acInteger('usage-queue-retention-seconds'),
+    core_routing_strategy:document.getElementById('core-routing-strategy')?.value||'round-robin', session_affinity_enabled:checked('session-affinity-enabled'), session_affinity_ttl:document.getElementById('session-affinity-ttl')?.value?.trim()||'1h', force_model_prefix:checked('force-model-prefix'), codex_identity_confuse:checked('codex-identity-confuse'), codex_disable_cloaking:checked('codex-disable-cloaking'), codex_optimize_multi_agent_v2:checked('codex-optimize-multi-agent-v2'), claude_code_disable_cloaking_model_list:checked('claude-code-disable-cloaking-model-list'), xai_inject_x_search:checked('xai-inject-x-search'), request_retry:acInteger('request-retry'), max_retry_credentials:acInteger('max-retry-credentials'), max_retry_interval:acInteger('max-retry-interval'), disable_cooling:checked('disable-cooling'), save_cooldown_status:checked('save-cooldown-status'), transient_error_cooldown_seconds:acInteger('transient-error-cooldown-seconds'), quota_switch_project:checked('quota-switch-project'), quota_switch_preview_model:checked('quota-switch-preview-model'), quota_antigravity_credits:checked('quota-antigravity-credits'), auth_auto_refresh_workers:acInteger('auth-auto-refresh-workers'), local_model:checked('local-model'), ws_auth:checked('ws-auth'), commercial_mode:checked('commercial-mode'), disable_image_generation:document.getElementById('disable-image-generation')?.value||'off', video_result_auth_cache_ttl:document.getElementById('video-result-auth-cache-ttl')?.value?.trim()||'3h', passthrough_headers:checked('passthrough-headers'), nonstream_keepalive_interval:acInteger('nonstream-keepalive-interval'), streaming_keepalive_seconds:acInteger('streaming-keepalive-seconds'), streaming_bootstrap_retries:acInteger('streaming-bootstrap-retries'), logging_to_file:checked('logging-to-file'), logs_max_total_size_mb:acInteger('logs-max-total-size-mb'), error_logs_max_files:acInteger('error-logs-max-files'), usage_statistics_enabled:checked('usage-statistics-enabled'), usage_queue_retention_seconds:acInteger('usage-queue-retention-seconds'), request_monitoring_enabled:checked('request-monitoring-enabled'), request_observability_refresh_seconds:acInteger('request-observability-refresh-seconds'), request_events_cache_ttl_seconds:acInteger('request-events-cache-ttl-seconds'), request_log_keep_files:acInteger('request-log-keep-files'), request_event_archive_keep_entries:acInteger('request-event-archive-keep-entries'),
   };
 }
 function setAdvancedConfigBusy(busy) { ['advanced-config-save','advanced-config-save-restart'].forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=busy;}); }

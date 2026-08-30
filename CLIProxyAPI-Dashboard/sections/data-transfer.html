@@ -1,118 +1,98 @@
 <section class="section-view" id="section-data-transfer">
-  <div class="section-card">
-    <h2>数据导入导出</h2>
-    <p class="section-desc">
-      导出当前全部配置用于备份或迁移，或从导出文件恢复。
-      兼容<strong>开发版</strong>与<strong>用户端/安装版</strong>：导入时会自动改写 <code>auth-dir</code> 等绝对路径到本机 storage。
-    </p>
+  <div class="data-transfer-page">
+    <header class="data-transfer-hero">
+      <div class="data-transfer-hero-copy">
+        <span class="data-transfer-eyebrow">DATA PORTABILITY</span>
+        <h2>数据导入导出</h2>
+        <p class="data-transfer-lead">
+          用一个 JSON 文件完成备份、迁移与恢复。系统会保留必要的环境信息，并在导入时适配本机路径。
+        </p>
+      </div>
+      <div class="data-transfer-hero-mark" aria-hidden="true">
+        <span class="data-transfer-mark-line"></span>
+        <span class="data-transfer-mark-arrow">↗</span>
+        <span class="data-transfer-mark-line short"></span>
+      </div>
+    </header>
 
     <div id="data-transfer-env" class="dt-env-banner" hidden></div>
 
-    <div class="data-type-list">
-      <div class="data-type-group">
-        <div class="data-type-group-title">认证 &amp; 密钥</div>
-        <ul>
-          <li>认证文件 (OAuth / API Key 凭证)</li>
-          <li>虚拟 API Key (密钥管理)</li>
-        </ul>
-      </div>
-      <div class="data-type-group">
-        <div class="data-type-group-title">模型配置</div>
-        <ul>
-          <li>运行时配置 (active config)</li>
-          <li>模型映射 / 聚合别名</li>
-          <li>模型代理 / Thinking 配置</li>
-        </ul>
-      </div>
-      <div class="data-type-group">
-        <div class="data-type-group-title">系统配置</div>
-        <ul>
-          <li>基础配置 (base-config.yaml)</li>
-          <li>认证源 (sources.json)</li>
-          <li>面板设置 &amp; 状态 (state.json，跳过本机 PID 等)</li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="card-row" style="margin-top:20px;">
-      <div class="card" style="flex:1; min-width:280px;">
-        <h3>导出数据</h3>
-        <p>导出到 JSON（含环境元数据，便于跨开发/安装版迁移）。</p>
-        <button class="btn primary" id="export-btn" onclick="exportData()">导出 JSON</button>
-        <div id="export-status" class="status-line" style="margin-top:8px;"></div>
-        <div id="export-detail" class="detail-block" style="margin-top:4px; display:none;"></div>
-      </div>
-      <div class="card" style="flex:1; min-width:280px;">
-        <h3>导入数据</h3>
-        <p>支持 v1–v3 导出文件。替换模式会先清空可导入数据。</p>
-        <div style="margin-bottom:8px;">
-          <label><input type="radio" name="import-mode" value="merge" checked> 合并（保留已有，仅补充缺失）</label>
-          <label style="margin-left:12px;"><input type="radio" name="import-mode" value="replace"> 替换（清空后导入）</label>
+    <section class="dt-scope" aria-labelledby="data-transfer-scope-title">
+      <div class="dt-section-heading">
+        <div>
+          <span class="dt-section-kicker">Included in transfer</span>
+          <h3 id="data-transfer-scope-title">这次会处理哪些数据</h3>
         </div>
-        <input type="file" id="import-file-input" accept=".json,application/json" style="display:none;" onchange="handleImportFile(event)">
-        <button class="btn" id="import-btn" onclick="document.getElementById('import-file-input').click()">选择文件并导入</button>
-        <div id="import-status" class="status-line" style="margin-top:8px;"></div>
-        <div id="import-detail" class="detail-block" style="margin-top:4px; display:none;"></div>
+        <span class="dt-scope-note">路径会自动适配</span>
       </div>
-    </div>
-  </div>
+      <div class="data-type-list">
+        <article class="data-type-group">
+          <span class="data-type-icon" aria-hidden="true">⌁</span>
+          <div>
+            <div class="data-type-group-title">认证 &amp; 密钥</div>
+            <p>OAuth / API Key 凭证<br />虚拟 API Key</p>
+          </div>
+        </article>
+        <article class="data-type-group">
+          <span class="data-type-icon" aria-hidden="true">✦</span>
+          <div>
+            <div class="data-type-group-title">模型配置</div>
+            <p>运行时配置<br />模型映射、代理与 Thinking</p>
+          </div>
+        </article>
+        <article class="data-type-group">
+          <span class="data-type-icon" aria-hidden="true">▣</span>
+          <div>
+            <div class="data-type-group-title">系统配置</div>
+            <p>基础配置、认证源<br />面板设置与状态</p>
+          </div>
+        </article>
+      </div>
+    </section>
 
-  <style>
-    .dt-env-banner {
-      margin: 10px 0 14px;
-      padding: 10px 12px;
-      border-radius: 10px;
-      font-size: 12px;
-      line-height: 1.55;
-      color: var(--text);
-      background: color-mix(in srgb, var(--panel) 90%, var(--accent));
-      border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-    }
-    .dt-env-banner code {
-      font-size: 11px;
-      word-break: break-all;
-    }
-    .dt-hint {
-      margin-top: 4px;
-      color: var(--muted);
-    }
-    .data-type-list {
-      display: flex;
-      gap: 24px;
-      flex-wrap: wrap;
-      margin-top: 4px;
-    }
-    .data-type-group {
-      flex: 1;
-      min-width: 180px;
-      padding: 12px 16px;
-      border-radius: 10px;
-      background: color-mix(in srgb, var(--panel) 94%, var(--accent));
-      border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-    }
-    .data-type-group-title {
-      font-weight: 600;
-      font-size: 13px;
-      color: var(--accent);
-      margin-bottom: 6px;
-    }
-    .data-type-group ul {
-      margin: 0;
-      padding-left: 16px;
-      font-size: 12px;
-      color: var(--muted);
-      line-height: 1.7;
-    }
-    .detail-block {
-      font-size: 12px;
-      color: var(--muted);
-      line-height: 1.6;
-      padding: 6px 10px;
-      border-radius: 6px;
-      background: color-mix(in srgb, var(--panel) 94%, var(--accent));
-    }
-    .detail-block .item-ok { color: var(--success); }
-    .detail-block .item-skip { color: var(--warning); }
-    .detail-block .item-err { color: var(--danger); }
-  </style>
+    <section class="dt-actions" aria-label="数据操作">
+      <article class="dt-action-card dt-export-card">
+        <div class="dt-action-topline">
+          <span class="dt-action-index">01</span>
+          <span class="dt-action-badge">BACKUP</span>
+        </div>
+        <div class="dt-action-icon" aria-hidden="true">↓</div>
+        <h3>导出当前数据</h3>
+        <p>生成一份带环境元数据的 JSON 备份文件，可保存到安全位置或迁移到另一台设备。</p>
+        <button class="btn primary dt-action-button" id="export-btn" onclick="exportData()">
+          导出 JSON <span aria-hidden="true">↗</span>
+        </button>
+        <div id="export-status" class="status-line dt-status" role="status" aria-live="polite"></div>
+        <div id="export-detail" class="detail-block dt-detail" style="display:none;"></div>
+      </article>
+
+      <article class="dt-action-card dt-import-card">
+        <div class="dt-action-topline">
+          <span class="dt-action-index">02</span>
+          <span class="dt-action-badge">RESTORE</span>
+        </div>
+        <div class="dt-action-icon" aria-hidden="true">↑</div>
+        <h3>导入备份文件</h3>
+        <p>支持 v1–v3 导出文件。合并模式更安全；替换模式会先清空当前可导入数据。</p>
+        <div class="dt-mode-switch" role="radiogroup" aria-label="导入方式">
+          <label class="dt-mode-option is-selected">
+            <input type="radio" name="import-mode" value="merge" checked />
+            <span class="dt-mode-copy"><strong>合并</strong><small>保留已有数据</small></span>
+          </label>
+          <label class="dt-mode-option">
+            <input type="radio" name="import-mode" value="replace" />
+            <span class="dt-mode-copy"><strong>替换</strong><small>清空后导入</small></span>
+          </label>
+        </div>
+        <input type="file" id="import-file-input" accept=".json,application/json" hidden onchange="handleImportFile(event)" />
+        <button class="btn dt-action-button dt-import-button" id="import-btn" onclick="document.getElementById('import-file-input').click()">
+          选择文件并导入 <span aria-hidden="true">↗</span>
+        </button>
+        <div id="import-status" class="status-line dt-status" role="status" aria-live="polite"></div>
+        <div id="import-detail" class="detail-block dt-detail" style="display:none;"></div>
+      </article>
+    </section>
+
+    <p class="dt-safety-note"><span aria-hidden="true">ⓘ</span> 导入不会覆盖本机运行目录之外的文件；替换操作开始前会再次确认。</p>
+  </div>
 </section>

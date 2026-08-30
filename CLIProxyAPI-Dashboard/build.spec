@@ -44,7 +44,7 @@ a = Analysis(
         'backend.data_transfer',
         'backend.settings',
         'backend.access_auth',
-        'pywinpty',
+        'winpty',
     ],
     hookspath=[],
     hooksconfig={},

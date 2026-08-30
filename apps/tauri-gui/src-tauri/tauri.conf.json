@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CLIProxyAPI Dashboard",
+  "version": "1.5.0",
+  "identifier": "com.cliproxyapi.dashboard.tauri",
+  "build": {
+    "frontendDist": "../frontend",
+    "devUrl": "http://127.0.0.1:8765"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.ico"],
+    "resources": [
+      "resources/dashboard/**/*",
+      "resources/cli-proxy-api*",
+      "resources/CLIProxyAPI-AccessGateway/**/*",
+      "resources/CLIProxyAPI-MediaProxy/**/*",
+      "resources/plugins/**/*"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      }
+    }
+  }
+}

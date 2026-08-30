@@ -2,6 +2,7 @@ import json
 import secrets
 import threading
 from backend.paths import STATE_FILE, RUNTIME_CONFIG, POOL_AUTH_DIR, ROOT_DIR
+from backend.request_monitoring_config import DEFAULT_REQUEST_MONITORING_CONFIG
 
 _state_lock = threading.Lock()
 
@@ -120,6 +121,7 @@ def default_state():
         'error_logs_max_files': 10,
         'usage_statistics_enabled': False,
         'usage_queue_retention_seconds': 60,
+        **DEFAULT_REQUEST_MONITORING_CONFIG,
         'nonstream_keepalive_interval': 0,
         'streaming_keepalive_seconds': 0,
         'streaming_bootstrap_retries': 0,

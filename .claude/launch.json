@@ -6,6 +6,18 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["CLIProxyAPI-Dashboard/app.py"],
       "autoPort": true
+    },
+    {
+      "name": "dashboard-preview",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-c", "import os,runpy; os.environ['CLIPROXYAPI_DASHBOARD_PORT']='18765'; runpy.run_path('CLIProxyAPI-Dashboard/app.py', run_name='__main__')"],
+      "port": 18765
+    },
+    {
+      "name": "dashboard-isolated-preview",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-c", "import os,tempfile,runpy; os.environ['CLIPROXYAPI_DASHBOARD_PORT']='18766'; os.environ['CLIPROXYAPI_STORAGE_DIR']=tempfile.mkdtemp(prefix='cliproxyapi-dashboard-preview-'); os.environ['CLIPROXYAPI_AUTO_START']='0'; runpy.run_path('CLIProxyAPI-Dashboard/app.py', run_name='__main__')"],
+      "port": 18766
     }
   ]
 }

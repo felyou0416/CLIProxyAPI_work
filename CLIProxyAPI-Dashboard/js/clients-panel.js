@@ -280,12 +280,17 @@ async function loadClientsPanel(force = false) {
     const data = await api(`/api/request-clients?limit=${limit}`);
     clientsPanelItems = Array.isArray(data.items) ? data.items : [];
     if (countBadge) countBadge.textContent = String(clientsPanelItems.length);
-    if (meta) meta.textContent = `更新于 ${formatFreshness(data.refreshed_at)}`;
+    if (meta) meta.textContent = isRequestMonitoringDisabled(data)
+      ? requestMonitoringDisabledText()
+      : `更新于 ${formatFreshness(data.refreshed_at)}`;
     if (!clientsPanelItems.some(item => String(item.key || 'unknown') === selectedClientKey)) {
       selectedClientKey = String(clientsPanelItems[0]?.key || '');
     }
     clientsPanelLoaded = true;
     renderClientsPanel();
+    if (isRequestMonitoringDisabled(data) && body) {
+      body.innerHTML = `<tr><td colspan="8" class="clients-empty-row">${escapeHtml(requestMonitoringDisabledText())}</td></tr>`;
+    }
   } catch (error) {
     if (body) body.innerHTML = `<tr><td colspan="8" class="clients-empty-row error">${escapeHtml(error.message || '加载失败')}</td></tr>`;
   }

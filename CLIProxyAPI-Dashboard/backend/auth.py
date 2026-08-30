@@ -5405,7 +5405,8 @@ def build_runtime_config(
         pass
     runtime_text = rewrite_api_keys(runtime_text, all_api_keys)
 
-    runtime_text = rewrite_request_log(runtime_text, True)
+    from backend.request_monitoring_config import request_monitoring_enabled
+    runtime_text = rewrite_request_log(runtime_text, request_monitoring_enabled(current_state))
     runtime_text = rewrite_oauth_model_aliases(runtime_text, providers, auth_refs=None)
     runtime_text = rewrite_claude_api_key(runtime_text, claude_compat_entries)
     runtime_text = rewrite_openai_compatibility(runtime_text, openai_compat_entries)

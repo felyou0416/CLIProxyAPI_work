@@ -1,0 +1,55 @@
+name: Build Tauri GUI
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  tauri-windows:
+    name: Tauri Windows GUI
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: CLIProxyAPI/CLIProxyAPI/go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: '0.13.0'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build service resources
+        shell: pwsh
+        run: |
+          cd CLIProxyAPI/CLIProxyAPI
+          go build -o bin\cli-proxy-api.exe ./cmd/server/
+          cd ../..
+          .\CLIProxyAPI-AccessGateway\build.ps1 -Output CLIProxyAPI-AccessGateway\cli-access-gateway.exe
+          .\CLIProxyAPI-MediaProxy\build.ps1 -Output CLIProxyAPI-MediaProxy\cli-media-proxy.exe
+          .\CLIProxyAPI-LocalPlugin\build.ps1
+      - name: Build Dashboard
+        shell: pwsh
+        run: |
+          cd CLIProxyAPI-Dashboard
+          python -m pip install --upgrade pip
+          pip install pyinstaller psutil pywinpty
+          pyinstaller build.spec
+      - name: Stage Tauri resources
+        shell: pwsh
+        run: .\apps\tauri-gui\scripts\stage-windows.ps1
+      - name: Install Tauri CLI
+        working-directory: apps/tauri-gui
+        run: npm install
+      - name: Build Tauri GUI
+        working-directory: apps/tauri-gui
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cliproxyapi-tauri-windows
+          path: apps/tauri-gui/src-tauri/target/release/bundle/**

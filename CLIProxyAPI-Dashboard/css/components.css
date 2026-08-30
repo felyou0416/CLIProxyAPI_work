@@ -736,22 +736,6 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
-#section-overview {
-  padding: 8px 10px;
-}
-#section-overview .top-strip-items {
-  gap: 6px;
-}
-#section-overview .mini-stat {
-  padding: 4px 6px;
-}
-#section-overview .mini-label {
-  font-size: 9px;
-  letter-spacing: .04em;
-}
-#section-overview .mini-stat strong {
-  font-size: 11px;
-}
 .panel-account .panel-head {
   gap: 6px;
 }

@@ -57,4 +57,4 @@ git status --short | Select-String "storage/"
 | `CLIProxyAPI/CLIProxyAPI/`（Go 内核） | 上游官方仓库负责维护 | 跟随 `update-core.ps1` 保持内核为最新 Tag |
 | `CLIProxyAPI-AccessGateway/`、`CLIProxyAPI-MediaProxy/`、`CLIProxyAPI-LocalPlugin/`（Go） | `go.sum` 锁定依赖 | 定期 `go mod tidy && go mod verify` |
 | `CLIProxyAPI-Dashboard/`（Python） | `pyproject.toml` | 定期 `pip-audit` 或 `safety check` |
-| `electron-app/`（Node） | `package.json` | 定期 `npm audit` |
+| `apps/tauri-gui/`（Node + Rust） | `package-lock.json` + `Cargo.lock` | 定期 `npm audit` 与 `cargo audit` |

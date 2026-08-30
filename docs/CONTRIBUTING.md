@@ -17,6 +17,7 @@
 1. 先读 [AGENTS.md](../AGENTS.md) 的五条准则，尤其是第 5 条"内核纯粹"。
 2. 涉及配置改动时，先读 [docs/CONFIGURATION.md](CONFIGURATION.md) 确认改的是哪一层配置文件，不要把面板会覆盖的运行态配置当成长期维护对象。
 3. 涉及跨模块改动（比如网关改了转发逻辑）时，先在 [docs/ARCHITECTURE.md](ARCHITECTURE.md) 里确认对应模块的职责边界，不要越界实现。
+4. 涉及 Dashboard 或 Tauri 时，先读 [docs/ARCHITECTURE.md](ARCHITECTURE.md) 确认 Dashboard 仍是配置、进程和数据的唯一控制面。
 
 ## 改哪里、不改哪里
 
@@ -58,6 +59,7 @@ docs: 记录内核纯粹原则及一键升级导引指南
 | `CLIProxyAPI-LocalPlugin/` | `.\build.ps1`（内部会跑 `go test`，除非传 `-SkipTests`） |
 | `CLIProxyAPI-MediaProxy/` | `.\build.ps1`（同上） |
 | `CLIProxyAPI-Dashboard/` | `CLIProxyAPI-Dashboard/tests/` 下的 pytest 用例 |
+| `apps/tauri-gui/` | 在 `src-tauri/` 下运行 `cargo test`，并执行 `npm run build:windows` 验证 Windows 安装包构建 |
 | 内核升级 | `update-core.ps1` 会自动依次验证内核、插件、MediaProxy、Dashboard 的构建，全部通过才更新 `UPSTREAM_VERSION` |
 
 改动只涉及文档（`*.md`）时可以跳过上述测试，但要检查文档里引用的路径、命令、字段名与实际代码/配置一致。

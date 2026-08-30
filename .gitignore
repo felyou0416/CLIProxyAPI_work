@@ -59,9 +59,6 @@ Thumbs.db
 # --- Local runtime configs (examples stay tracked) ---
 CLIProxyAPI-MediaProxy/config.json
 
-# Per-machine dashboard links and service commands
-CLIProxyAPI-Dashboard/.local/
-
 # --- 临时文件 ---
 *.tmp
 *.bak

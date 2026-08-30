@@ -1,0 +1,14 @@
+{
+  "name": "cliproxyapi-tauri-gui",
+  "private": true,
+  "version": "1.4.0",
+  "scripts": {
+    "tauri": "tauri",
+    "build": "tauri build",
+    "build:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1",
+    "dev": "tauri dev"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.5.0"
+  }
+}

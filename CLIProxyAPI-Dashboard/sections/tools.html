@@ -1,11 +1,56 @@
 <section id="section-tools" class="panel panel-scroll panel-tools section-view" hidden>
-  <div class="panel-head">
-    <div>
+  <!-- 顶部标题与全局操作区 -->
+  <div class="panel-head tools-head">
+    <div class="tools-head-copy">
+      <div class="section-kicker">CPA CONTROL SURFACE</div>
       <h2 class="section-title" data-i18n="tools.title">工具</h2>
+      <p class="tools-subtitle">把认证、诊断和维护操作集中在一个可追踪的工作台。所有代理请求经由当前 CPA 内核与运行时配置处理。</p>
     </div>
-    <div class="summary-inline toolbar-scroll">
-      <span class="chip"><span data-i18n="summary.proxy">CLIProxyAPI</span> <strong id="status-proxy-main-chip">Not running</strong></span>
-      <span class="chip"><span data-i18n="summary.activeAccount">账号</span> <strong id="tools-summary-auth"><span data-i18n="common.notSelected">未选择</span></strong></span>
+    <div class="action-row tools-head-actions">
+      <button class="secondary" type="button" onclick="refreshStatus(); loadToolsVersion();" data-i18n="btn.refresh">
+        <span class="btn-icon">↻</span> 刷新状态
+      </button>
+    </div>
+  </div>
+
+  <!-- 运行环境核心指标卡片 -->
+  <div class="tools-runtime-grid" aria-label="运行环境指标">
+    <div class="tools-stat-card">
+      <div class="tools-stat-head">
+        <span class="tools-stat-label">CPA 内核</span>
+        <span class="tools-stat-tag">Core</span>
+      </div>
+      <div class="tools-stat-value" id="tools-core-version">v7.2.145</div>
+      <div class="tools-stat-hint">Go 原生代理内核</div>
+    </div>
+
+    <div class="tools-stat-card">
+      <div class="tools-stat-head">
+        <span class="tools-stat-label">代理状态</span>
+        <span class="tools-stat-tag tools-tag-status">State</span>
+      </div>
+      <div class="tools-stat-value" id="status-proxy-main-chip">Not running</div>
+      <div class="tools-stat-hint" id="status-proxy-sub-hint">实时守护进程</div>
+    </div>
+
+    <div class="tools-stat-card">
+      <div class="tools-stat-head">
+        <span class="tools-stat-label">当前账号</span>
+        <span class="tools-stat-tag">Auth Pool</span>
+      </div>
+      <div class="tools-stat-value tools-stat-truncate" id="tools-summary-auth" title="未选择">
+        <span data-i18n="common.notSelected">未选择</span>
+      </div>
+      <div class="tools-stat-hint">活跃凭据与路由源</div>
+    </div>
+
+    <div class="tools-stat-card">
+      <div class="tools-stat-head">
+        <span class="tools-stat-label">运行目录</span>
+        <span class="tools-stat-tag">Workspace</span>
+      </div>
+      <div class="tools-stat-value tools-stat-truncate" id="runtime-roots-hint" title="加载中...">加载中...</div>
+      <div class="tools-stat-hint">代理及控制面板工作区</div>
     </div>
   </div>
 
@@ -16,237 +61,429 @@
     </div>
   </div>
 
-  <div class="tool-grid compact-tool-grid tools-action-list">
-    <details class="tool-card">
-      <summary class="tool-top">
-        <div class="tool-heading">
-          <h3>Codex OAuth Login</h3>
-        </div>
-        <div class="tool-status tool-stopped" id="status-codex-login">Not running</div>
-      </summary>
-      <details class="tool-cmd-details">
-        <summary class="tool-cmd-summary">命令</summary>
-        <div class="tool-cmd" data-cli-tool="-codex-login"></div>
-      </details>
-      <div class="action-row">
-        <button onclick="runTool('codex-login', this)" data-i18n="btn.start">Start</button>
-        <button class="secondary" onclick="stopTool('codex-login', this)" data-i18n="btn.stop">Stop</button>
+  <!-- 分组 1: 运行入口 (RUNTIME) -->
+  <section class="tools-section" aria-labelledby="tools-runtime-title">
+    <div class="tools-section-head">
+      <div>
+        <div class="tools-group-kicker">RUNTIME</div>
+        <h3 id="tools-runtime-title">运行入口</h3>
       </div>
-      <pre id="log-codex-login" class="log-output compact is-hidden"></pre>
-    </details>
+      <p class="tools-section-note">启动面板或独立终端工具。适合本地维护与排障。</p>
+    </div>
+    <div class="tools-card-grid">
+      <!-- Dashboard 面板 -->
+      <article class="tool-card tool-card-featured">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3>Dashboard 面板</h3>
+              <span class="tool-status tool-stopped" id="status-dashboard-panel">Ready</span>
+            </div>
+            <div class="tool-desc-zh">使用当前工作区 storage 启动、重启或停止控制面板。</div>
+          </div>
+        </div>
+        <div class="tool-meta">
+          <span class="tool-meta-live">8765 / HTTP</span>
+          <span>面板控制面</span>
+        </div>
+        <div class="action-row tool-actions">
+          <button class="primary" onclick="runDashboardScript('ps', this)">启动</button>
+          <button class="secondary" onclick="restartDashboardPanel(this)">重启</button>
+          <button class="secondary" onclick="stopDashboardPanel(this)">停止</button>
+        </div>
+        <pre id="dashboard-script-log" class="log-output compact is-hidden"></pre>
+      </article>
 
-    <details class="tool-card">
-      <summary class="tool-top">
-        <div class="tool-heading">
-          <h3>Codex Device Login</h3>
+      <!-- 独立 TUI -->
+      <article class="tool-card">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3>独立 TUI</h3>
+              <span class="tool-status tool-stopped" id="status-tui">Not running</span>
+            </div>
+            <div class="tool-desc-zh">在终端中运行 CPA 管理界面，不影响 Dashboard 页面。</div>
+          </div>
         </div>
-        <div class="tool-status tool-stopped" id="status-codex-device-login">Not running</div>
-      </summary>
-      <details class="tool-cmd-details">
-        <summary class="tool-cmd-summary">命令</summary>
-        <div class="tool-cmd" data-cli-tool="-codex-device-login"></div>
-      </details>
-      <div class="action-row">
-        <button onclick="runTool('codex-device-login', this)" data-i18n="btn.start">Start</button>
-        <button class="secondary" onclick="stopTool('codex-device-login', this)">Stop</button>
-      </div>
-      <pre id="log-codex-device-login" class="log-output compact is-hidden"></pre>
-    </details>
+        <div class="tool-meta">
+          <span>CPA CLI</span>
+          <span>standalone</span>
+        </div>
+        <details class="tool-cmd-details">
+          <summary class="tool-cmd-summary">查看命令</summary>
+          <div class="tool-cmd" data-cli-tool="-tui -standalone"></div>
+        </details>
+        <div class="action-row tool-actions">
+          <button class="primary" onclick="runTool('tui', this)">启动</button>
+          <button class="secondary" onclick="stopTool('tui', this)">停止</button>
+        </div>
+        <pre id="log-tui" class="log-output compact is-hidden"></pre>
+      </article>
+    </div>
+  </section>
 
-    <details class="tool-card">
-      <summary class="tool-top">
-        <div class="tool-heading">
-          <h3>Claude OAuth Login</h3>
-        </div>
-        <div class="tool-status tool-stopped" id="status-claude-login">Not running</div>
-      </summary>
-      <details class="tool-cmd-details">
-        <summary class="tool-cmd-summary">命令</summary>
-        <div class="tool-cmd" data-cli-tool="-claude-login"></div>
-      </details>
-      <div class="action-row">
-        <button onclick="runTool('claude-login', this)" data-i18n="btn.start">Start</button>
-        <button class="secondary" onclick="stopTool('claude-login', this)">Stop</button>
+  <!-- 分组 2: 认证接入 (IDENTITY) -->
+  <section class="tools-section" aria-labelledby="tools-auth-title">
+    <div class="tools-section-head">
+      <div>
+        <div class="tools-group-kicker">IDENTITY</div>
+        <h3 id="tools-auth-title">认证接入</h3>
       </div>
-      <pre id="log-claude-login" class="log-output compact is-hidden"></pre>
-    </details>
+      <p class="tools-section-note">登录结果会写入当前认证目录，完成后可在账号页确认状态。</p>
+    </div>
+    <div class="tools-card-grid tools-auth-grid">
+      <!-- Codex OAuth -->
+      <article class="tool-card">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3>Codex OAuth</h3>
+              <span class="tool-status tool-stopped" id="status-codex-login">Not running</span>
+            </div>
+            <div class="tool-desc-zh">浏览器授权登录 Codex 账号。</div>
+          </div>
+        </div>
+        <div class="tool-meta">
+          <span class="tool-meta-badge">OAuth</span>
+          <span>浏览器授权</span>
+        </div>
+        <details class="tool-cmd-details">
+          <summary class="tool-cmd-summary">查看命令</summary>
+          <div class="tool-cmd" data-cli-tool="-codex-login"></div>
+        </details>
+        <div class="action-row tool-actions">
+          <button class="primary" onclick="runTool('codex-login', this)">启动</button>
+          <button class="secondary" onclick="stopTool('codex-login', this)">停止</button>
+        </div>
+        <pre id="log-codex-login" class="log-output compact is-hidden"></pre>
+      </article>
 
-    <details class="tool-card">
-      <summary class="tool-top">
-        <div class="tool-heading">
-          <h3>xAI / Grok OAuth</h3>
+      <!-- Codex Device Login -->
+      <article class="tool-card">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3>Codex Device Login</h3>
+              <span class="tool-status tool-stopped" id="status-codex-device-login">Not running</span>
+            </div>
+            <div class="tool-desc-zh">无法打开浏览器时使用设备码完成登录。</div>
+          </div>
         </div>
-        <div class="tool-status tool-stopped" id="status-xai-login">Not running</div>
-      </summary>
-      <details class="tool-cmd-details">
-        <summary class="tool-cmd-summary">命令</summary>
-        <div class="tool-cmd" data-cli-tool="-xai-login"></div>
-      </details>
-      <div class="action-row">
-        <button onclick="runTool('xai-login', this)" data-i18n="btn.start">Start</button>
-        <button class="secondary" onclick="stopTool('xai-login', this)">Stop</button>
-      </div>
-      <pre id="log-xai-login" class="log-output compact is-hidden"></pre>
-    </details>
+        <div class="tool-meta">
+          <span class="tool-meta-badge">OAuth</span>
+          <span>Device Code</span>
+        </div>
+        <details class="tool-cmd-details">
+          <summary class="tool-cmd-summary">查看命令</summary>
+          <div class="tool-cmd" data-cli-tool="-codex-device-login"></div>
+        </details>
+        <div class="action-row tool-actions">
+          <button class="primary" onclick="runTool('codex-device-login', this)">启动</button>
+          <button class="secondary" onclick="stopTool('codex-device-login', this)">停止</button>
+        </div>
+        <pre id="log-codex-device-login" class="log-output compact is-hidden"></pre>
+      </article>
 
-    <details class="tool-card">
-      <summary class="tool-top">
-        <div class="tool-heading">
-          <h3>MiniMax OAuth</h3>
+      <!-- Claude OAuth -->
+      <article class="tool-card">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3>Claude OAuth</h3>
+              <span class="tool-status tool-stopped" id="status-claude-login">Not running</span>
+            </div>
+            <div class="tool-desc-zh">授权 Claude 账号并保存到 CPA 认证池。</div>
+          </div>
         </div>
-        <div class="tool-status tool-stopped" id="status-minimax-login-direct">Not running</div>
-      </summary>
-      <details class="tool-cmd-details">
-        <summary class="tool-cmd-summary">命令</summary>
-        <div class="tool-cmd">python scripts\minimax_oauth_login.py</div>
-      </details>
-      <div class="action-row">
-        <button onclick="runTool('minimax-login-direct', this)" data-i18n="btn.start">Start</button>
-        <button class="secondary" onclick="stopTool('minimax-login-direct', this)">Stop</button>
-      </div>
-      <pre id="log-minimax-login-direct" class="log-output compact is-hidden"></pre>
-    </details>
+        <div class="tool-meta">
+          <span class="tool-meta-badge">OAuth</span>
+          <span>Claude</span>
+        </div>
+        <details class="tool-cmd-details">
+          <summary class="tool-cmd-summary">查看命令</summary>
+          <div class="tool-cmd" data-cli-tool="-claude-login"></div>
+        </details>
+        <div class="action-row tool-actions">
+          <button class="primary" onclick="runTool('claude-login', this)">启动</button>
+          <button class="secondary" onclick="stopTool('claude-login', this)">停止</button>
+        </div>
+        <pre id="log-claude-login" class="log-output compact is-hidden"></pre>
+      </article>
 
-    <details class="tool-card">
-      <summary class="tool-top">
-        <div class="tool-heading">
-          <h3>Generic OAuth</h3>
+      <!-- xAI / Grok OAuth -->
+      <article class="tool-card">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3>xAI / Grok OAuth</h3>
+              <span class="tool-status tool-stopped" id="status-xai-login">Not running</span>
+            </div>
+            <div class="tool-desc-zh">授权 xAI，用于 Grok 模型路由。</div>
+          </div>
         </div>
-        <div class="tool-status tool-stopped" id="status-login">Not running</div>
-      </summary>
-      <details class="tool-cmd-details">
-        <summary class="tool-cmd-summary">命令</summary>
-        <div class="tool-cmd" data-cli-tool="-login"></div>
-      </details>
-      <div class="action-row">
-        <button onclick="runTool('login', this)" data-i18n="btn.start">Start</button>
-        <button class="secondary" onclick="stopTool('login', this)">Stop</button>
-      </div>
-      <pre id="log-login" class="log-output compact is-hidden"></pre>
-    </details>
+        <div class="tool-meta">
+          <span class="tool-meta-badge">OAuth</span>
+          <span>xAI</span>
+        </div>
+        <details class="tool-cmd-details">
+          <summary class="tool-cmd-summary">查看命令</summary>
+          <div class="tool-cmd" data-cli-tool="-xai-login"></div>
+        </details>
+        <div class="action-row tool-actions">
+          <button class="primary" onclick="runTool('xai-login', this)">启动</button>
+          <button class="secondary" onclick="stopTool('xai-login', this)">停止</button>
+        </div>
+        <pre id="log-xai-login" class="log-output compact is-hidden"></pre>
+      </article>
 
-    <details class="tool-card">
-      <summary class="tool-top">
-        <div class="tool-heading">
-          <h3>Antigravity OAuth</h3>
+      <!-- Gemini OAuth -->
+      <article class="tool-card">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3>Gemini OAuth</h3>
+              <span class="tool-status tool-stopped" id="status-login">Not running</span>
+            </div>
+            <div class="tool-desc-zh">通用 Gemini OAuth 登录入口。</div>
+          </div>
         </div>
-        <div class="tool-status tool-stopped" id="status-antigravity-login">Not running</div>
-      </summary>
-      <details class="tool-cmd-details">
-        <summary class="tool-cmd-summary">命令</summary>
-        <div class="tool-cmd" data-cli-tool="-antigravity-login"></div>
-      </details>
-      <div class="action-row">
-        <button onclick="runTool('antigravity-login', this)" data-i18n="btn.start">Start</button>
-        <button class="secondary" onclick="stopTool('antigravity-login', this)">Stop</button>
-      </div>
-      <pre id="log-antigravity-login" class="log-output compact is-hidden"></pre>
-    </details>
+        <div class="tool-meta">
+          <span class="tool-meta-badge">OAuth</span>
+          <span>Gemini</span>
+        </div>
+        <details class="tool-cmd-details">
+          <summary class="tool-cmd-summary">查看命令</summary>
+          <div class="tool-cmd" data-cli-tool="-login"></div>
+        </details>
+        <div class="action-row tool-actions">
+          <button class="primary" onclick="runTool('login', this)">启动</button>
+          <button class="secondary" onclick="stopTool('login', this)">停止</button>
+        </div>
+        <pre id="log-login" class="log-output compact is-hidden"></pre>
+      </article>
 
-    <details class="tool-card">
-      <summary class="tool-top">
-        <div class="tool-heading">
-          <h3>Kimi OAuth</h3>
+      <!-- Antigravity OAuth -->
+      <article class="tool-card">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3>Antigravity OAuth</h3>
+              <span class="tool-status tool-stopped" id="status-antigravity-login">Not running</span>
+            </div>
+            <div class="tool-desc-zh">连接 Antigravity 认证并刷新模型目录。</div>
+          </div>
         </div>
-        <div class="tool-status tool-stopped" id="status-kimi-login">Not running</div>
-      </summary>
-      <details class="tool-cmd-details">
-        <summary class="tool-cmd-summary">命令</summary>
-        <div class="tool-cmd" data-cli-tool="-kimi-login"></div>
-      </details>
-      <div class="action-row">
-        <button onclick="runTool('kimi-login', this)" data-i18n="btn.start">Start</button>
-        <button class="secondary" onclick="stopTool('kimi-login', this)">Stop</button>
-      </div>
-      <pre id="log-kimi-login" class="log-output compact is-hidden"></pre>
-    </details>
+        <div class="tool-meta">
+          <span class="tool-meta-badge">OAuth</span>
+          <span>Antigravity</span>
+        </div>
+        <details class="tool-cmd-details">
+          <summary class="tool-cmd-summary">查看命令</summary>
+          <div class="tool-cmd" data-cli-tool="-antigravity-login"></div>
+        </details>
+        <div class="action-row tool-actions">
+          <button class="primary" onclick="runTool('antigravity-login', this)">启动</button>
+          <button class="secondary" onclick="stopTool('antigravity-login', this)">停止</button>
+        </div>
+        <pre id="log-antigravity-login" class="log-output compact is-hidden"></pre>
+      </article>
 
-    <details class="tool-card">
-      <summary class="tool-top">
-        <div class="tool-heading">
-          <h3>TUI</h3>
+      <!-- Kimi OAuth -->
+      <article class="tool-card">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3>Kimi OAuth</h3>
+              <span class="tool-status tool-stopped" id="status-kimi-login">Not running</span>
+            </div>
+            <div class="tool-desc-zh">连接 Kimi 账号并加入认证池。</div>
+          </div>
         </div>
-        <div class="tool-status tool-stopped" id="status-tui">Not running</div>
-      </summary>
-      <details class="tool-cmd-details">
-        <summary class="tool-cmd-summary">命令</summary>
-        <div class="tool-cmd" data-cli-tool="-tui -standalone"></div>
-      </details>
-      <div class="action-row">
-        <button onclick="runTool('tui', this)" data-i18n="btn.start">Start</button>
-        <button class="secondary" onclick="stopTool('tui', this)">Stop</button>
-      </div>
-      <pre id="log-tui" class="log-output compact is-hidden"></pre>
-    </details>
+        <div class="tool-meta">
+          <span class="tool-meta-badge">OAuth</span>
+          <span>Kimi</span>
+        </div>
+        <details class="tool-cmd-details">
+          <summary class="tool-cmd-summary">查看命令</summary>
+          <div class="tool-cmd" data-cli-tool="-kimi-login"></div>
+        </details>
+        <div class="action-row tool-actions">
+          <button class="primary" onclick="runTool('kimi-login', this)">启动</button>
+          <button class="secondary" onclick="stopTool('kimi-login', this)">停止</button>
+        </div>
+        <pre id="log-kimi-login" class="log-output compact is-hidden"></pre>
+      </article>
 
-    <details class="tool-card tool-card-wide" open>
-      <summary class="tool-top">
-        <div class="tool-heading">
-          <h3 data-i18n="tool.modelsTitle">查询 /v1/models</h3>
+      <!-- MiniMax OAuth -->
+      <article class="tool-card">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3>MiniMax OAuth</h3>
+              <span class="tool-status tool-stopped" id="status-minimax-login-direct">Not running</span>
+            </div>
+            <div class="tool-desc-zh">通过 MiniMax 登录脚本保存认证信息。</div>
+          </div>
         </div>
-      </summary>
-      <div class="action-row">
-        <button onclick="queryModels()">Query</button>
-      </div>
-      <pre id="log-models" class="log-output compact is-hidden"></pre>
-    </details>
+        <div class="tool-meta">
+          <span class="tool-meta-badge">OAuth</span>
+          <span>外部脚本</span>
+        </div>
+        <details class="tool-cmd-details">
+          <summary class="tool-cmd-summary">查看命令</summary>
+          <div class="tool-cmd">python scripts\minimax_oauth_login.py</div>
+        </details>
+        <div class="action-row tool-actions">
+          <button class="primary" onclick="runTool('minimax-login-direct', this)">启动</button>
+          <button class="secondary" onclick="stopTool('minimax-login-direct', this)">停止</button>
+        </div>
+        <pre id="log-minimax-login-direct" class="log-output compact is-hidden"></pre>
+      </article>
+    </div>
+  </section>
 
-    <details class="tool-card tool-card-wide" open>
-      <summary class="tool-top">
-        <div class="tool-heading">
-          <h3 data-i18n="tool.testTitle">发送测试请求</h3>
-        </div>
-      </summary>
-      <div class="action-row">
-        <button onclick="testProxy()">Send Test</button>
+  <!-- 分组 3: 诊断与路由 (DIAGNOSTICS) -->
+  <section class="tools-section" aria-labelledby="tools-diagnostics-title">
+    <div class="tools-section-head">
+      <div>
+        <div class="tools-group-kicker">DIAGNOSTICS</div>
+        <h3 id="tools-diagnostics-title">诊断与路由</h3>
       </div>
-      <pre id="log-test" class="log-output compact is-hidden"></pre>
-    </details>
+      <p class="tools-section-note">验证 CPA 内核的模型目录与请求链路。结果保留原始响应。</p>
+    </div>
+    <div class="tools-card-grid tools-card-grid-diag">
+      <!-- 查询模型目录 -->
+      <article class="tool-card tool-card-diag">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3 data-i18n="tool.modelsTitle">查询模型目录</h3>
+            </div>
+            <div class="tool-desc-zh">读取当前网关暴露的 <code>/v1/models</code>，确认模型别名已进入运行态。</div>
+          </div>
+        </div>
+        <div class="tool-meta">
+          <span class="tool-meta-live">GET /v1/models</span>
+          <span>8317 Gateway</span>
+        </div>
+        <div class="action-row tool-actions">
+          <button class="primary" onclick="queryModels()">查询模型</button>
+        </div>
+        <div class="tool-result-wrap">
+          <p class="tool-result-label">响应结果</p>
+          <pre id="log-models" class="log-output compact is-hidden"></pre>
+        </div>
+      </article>
 
-    <details class="tool-card tool-card-wide">
-      <summary class="tool-top">
-        <div class="tool-heading">
-          <h3 data-i18n="tool.helpTitle">查看 Help</h3>
+      <!-- 发送测试请求 -->
+      <article class="tool-card tool-card-diag">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3 data-i18n="tool.testTitle">发送测试请求</h3>
+            </div>
+            <div class="tool-desc-zh">通过当前 Gateway 发起一次低成本连通性检查。</div>
+          </div>
         </div>
-      </summary>
-      <div class="action-row">
-        <button onclick="runTool('help', this)">Run</button>
-      </div>
-      <pre id="log-help" class="log-output compact is-hidden"></pre>
-    </details>
+        <div class="tool-meta">
+          <span class="tool-meta-live">POST /v1/responses</span>
+          <span>需要可用账号</span>
+        </div>
+        <div class="action-row tool-actions">
+          <button class="primary" onclick="testProxy()">发送测试</button>
+        </div>
+        <div class="tool-result-wrap">
+          <p class="tool-result-label">响应结果</p>
+          <pre id="log-test" class="log-output compact is-hidden"></pre>
+        </div>
+      </article>
 
-    <details class="tool-card tool-card-wide">
-      <summary class="tool-top">
-        <div class="tool-heading">
-          <h3>Storage Cleanup</h3>
+      <!-- 查看 CPA Help -->
+      <article class="tool-card tool-card-diag tool-card-diag-full">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3 data-i18n="tool.helpTitle">查看 CPA Help</h3>
+            </div>
+            <div class="tool-desc-zh">查看 CPA 当前可用的 CLI 参数和登录入口选项。</div>
+          </div>
         </div>
-      </summary>
-      <div class="config-grid compact-config-grid">
-        <label class="checkline"><input type="checkbox" id="cleanup-include-old-auth" /> 旧认证残留</label>
-        <label class="checkline"><input type="checkbox" id="cleanup-include-archived-error-logs" /> 归档错误日志</label>
-        <label class="checkline"><input type="checkbox" id="cleanup-include-logs" /> 其他历史日志</label>
-        <label class="checkline"><input type="checkbox" id="cleanup-include-backups" /> 旧备份</label>
-        <label class="checkline"><input type="checkbox" id="cleanup-include-generated-images" /> 生成图片</label>
-      </div>
-      <div class="action-row">
-        <button onclick="runStorageCleanup(false, this)">预览</button>
-        <button class="danger" onclick="if(confirm('确认执行清理？此操作不可撤销。')) runStorageCleanup(true, this)">执行清理</button>
-      </div>
-      <pre id="log-storage-cleanup" class="log-output compact is-hidden"></pre>
-    </details>
+        <div class="tool-meta">
+          <span>CLI</span>
+          <span>--help</span>
+        </div>
+        <div class="action-row tool-actions">
+          <button class="secondary" onclick="runTool('help', this)">查看 Help</button>
+        </div>
+        <div class="tool-result-wrap">
+          <pre id="log-help" class="log-output compact is-hidden"></pre>
+        </div>
+      </article>
+    </div>
+  </section>
 
-    <details class="tool-card">
-      <summary class="tool-top">
-        <div class="tool-heading">
-          <h3>Vertex SA Key 导入</h3>
-        </div>
-      </summary>
-      <div class="config-row" style="margin:8px 0">
-        <input type="file" id="vertex-sa-key-file" accept=".json" />
-        <input type="text" id="vertex-import-prefix" placeholder="模型前缀 (可选)" style="width:150px;margin-left:8px" />
+  <!-- 分组 4: 维护与导入 (MAINTENANCE) -->
+  <section class="tools-section" aria-labelledby="tools-maintenance-title">
+    <div class="tools-section-head">
+      <div>
+        <div class="tools-group-kicker">MAINTENANCE</div>
+        <h3 id="tools-maintenance-title">维护与导入</h3>
       </div>
-      <div class="action-row"><button onclick="runVertexImport()">上传并导入</button></div>
-      <pre id="log-vertex-import" class="log-output compact is-hidden"></pre>
-    </details>
-  </div>
+      <p class="tools-section-note">涉及本地文件。先预览结果，再执行不可逆操作。</p>
+    </div>
+    <div class="tools-card-grid tools-card-grid-wide">
+      <!-- Storage Cleanup -->
+      <article class="tool-card tool-card-warning">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3>Storage 存储空间清理</h3>
+              <span class="tool-badge-warn">不可撤销</span>
+            </div>
+            <div class="tool-desc-zh">清理历史日志、旧认证、备份和生成媒体，释放 storage 存储空间。</div>
+          </div>
+        </div>
+        <div class="tools-warning-box">
+          <span class="tools-warn-icon">⚠</span>
+          <span>删除操作不可撤销。建议先勾选范围并执行“预览候选”，确认文件后再执行清理。</span>
+        </div>
+        <div class="tools-cleanup-options">
+          <label class="checkline"><input type="checkbox" id="cleanup-include-old-auth" /> 旧认证残留</label>
+          <label class="checkline"><input type="checkbox" id="cleanup-include-archived-error-logs" /> 归档错误日志</label>
+          <label class="checkline"><input type="checkbox" id="cleanup-include-logs" /> 其他历史日志</label>
+          <label class="checkline"><input type="checkbox" id="cleanup-include-backups" /> 旧备份</label>
+          <label class="checkline"><input type="checkbox" id="cleanup-include-generated-images" /> 生成图片</label>
+        </div>
+        <div class="action-row tool-actions">
+          <button class="secondary" onclick="runStorageCleanup(false, this)">预览候选</button>
+          <button class="danger" onclick="runStorageCleanup(true, this)">执行清理</button>
+        </div>
+        <pre id="log-storage-cleanup" class="log-output compact is-hidden"></pre>
+      </article>
+
+      <!-- Vertex SA Key 导入 -->
+      <article class="tool-card">
+        <div class="tool-card-top">
+          <div class="tool-heading">
+            <div class="tool-title-row">
+              <h3>Vertex SA Key 导入</h3>
+            </div>
+            <div class="tool-desc-zh">暂存 Google Vertex Service Account JSON，并按前缀导入 CPA。</div>
+          </div>
+        </div>
+        <div class="tool-meta">
+          <span>JSON</span>
+          <span>Vertex AI</span>
+        </div>
+        <div class="config-row tools-upload-row">
+          <input type="file" id="vertex-sa-key-file" accept=".json" class="file-input" />
+          <input type="text" id="vertex-import-prefix" placeholder="模型前缀（可选，如 vertex-）" />
+        </div>
+        <div class="action-row tool-actions">
+          <button class="primary" onclick="runVertexImport()">上传并暂存</button>
+        </div>
+        <pre id="log-vertex-import" class="log-output compact is-hidden"></pre>
+      </article>
+    </div>
+  </section>
 </section>

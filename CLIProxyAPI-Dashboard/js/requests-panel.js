@@ -4,6 +4,48 @@ let requestEventsCurrentPage = 1;
 let requestEventsPageSize = 50;
 let requestEventsTotal = 0;
 let requestEventsTotalPages = 1;
+let requestEventsStateHydrated = false;
+let requestEventsLoadSeq = 0;
+let requestEventsLastMeta = null;
+
+const REQUEST_EVENTS_STATE_KEY = 'dashboard_requests_pagination_v1';
+
+function hydrateRequestEventsState() {
+  if (requestEventsStateHydrated) return;
+  requestEventsStateHydrated = true;
+  try {
+    const raw = localStorage.getItem(REQUEST_EVENTS_STATE_KEY);
+    const state = raw ? JSON.parse(raw) : {};
+    const pageSize = Number(state?.pageSize);
+    const page = Number(state?.page);
+    if (Number.isFinite(pageSize)) {
+      requestEventsPageSize = Math.max(10, Math.min(500, Math.round(pageSize)));
+    }
+    if (Number.isFinite(page)) {
+      requestEventsCurrentPage = Math.max(1, Math.floor(page));
+    }
+    const selectors = [
+      document.getElementById('request-page-size-select'),
+      document.getElementById('request-page-size'),
+    ];
+    selectors.forEach((select) => {
+      if (select) select.value = String(requestEventsPageSize);
+    });
+  } catch {
+    // Ignore malformed local state and use the defaults.
+  }
+}
+
+function persistRequestEventsState() {
+  try {
+    localStorage.setItem(REQUEST_EVENTS_STATE_KEY, JSON.stringify({
+      page: requestEventsCurrentPage,
+      pageSize: requestEventsPageSize,
+    }));
+  } catch {
+    // Storage may be unavailable in private or restricted browser contexts.
+  }
+}
 
 let _requestGroupSeq = 0;
 let _requestGroupClickInit = false;
@@ -169,18 +211,49 @@ function getRequestEventsPageSize() {
 function setRequestEventsMeta(data, shownCount, loading = false) {
   const meta = document.getElementById('request-events-meta');
   if (!meta) return;
-  if (loading) {
-    meta.textContent = typeof getLanguage === 'function' && getLanguage() === 'en'
-      ? 'Refreshing…'
-      : '刷新中…';
+  if (isRequestMonitoringDisabled(data)) {
+    meta.classList.remove('is-refreshing', 'has-error');
+    meta.textContent = requestMonitoringDisabledText();
     return;
   }
+  if (loading) {
+    const copy = requestEventsCopy();
+    const source = data?.data_source || requestEventsLastMeta?.data?.data_source;
+    const sourceLabel = source === 'observability-cache'
+      ? (typeof getLanguage === 'function' && getLanguage() === 'en' ? 'cache' : '缓存')
+      : source === 'request-events-cache'
+        ? (typeof getLanguage === 'function' && getLanguage() === 'en' ? 'log cache' : '日志缓存')
+        : '';
+    const total = Number(data?.total || requestEventsLastMeta?.data?.total || 0);
+    const hasUsableData = !!data?.cached && (requestEventsLoaded || total > 0);
+    meta.classList.add('is-refreshing');
+    if (hasUsableData) {
+      const refreshedAt = Number(data?.data_as_of || data?.refreshed_at || 0);
+      const freshness = formatFreshness(refreshedAt);
+      const generation = Number(data?.cache_generation || 0);
+      const generationLabel = generation > 0 ? ` · G${generation}` : '';
+      meta.textContent = `${sourceLabel ? `${sourceLabel} · ` : ''}${copy.cache} · ${copy.total} ${total} ${copy.records} · 第 ${requestEventsCurrentPage}/${requestEventsTotalPages} 页 · ${freshness}${generationLabel} · ${typeof getLanguage === 'function' && getLanguage() === 'en' ? 'Refreshing…' : '刷新中…'}`;
+    } else {
+      meta.textContent = sourceLabel
+        ? `${sourceLabel} · ${typeof getLanguage === 'function' && getLanguage() === 'en' ? 'Refreshing…' : '刷新中…'}`
+        : (typeof getLanguage === 'function' && getLanguage() === 'en' ? 'Loading…' : '加载中…');
+    }
+    return;
+  }
+  meta.classList.remove('is-refreshing', 'has-error');
   const copy = requestEventsCopy();
   const total = Number(data?.total || 0);
-  const refreshedAt = Number(data?.refreshed_at || 0);
+  const refreshedAt = Number(data?.data_as_of || data?.refreshed_at || 0);
   const freshness = formatFreshness(refreshedAt);
   const cachedLabel = data?.cached ? copy.cache : copy.notCached;
-  meta.textContent = `${cachedLabel} · ${copy.total} ${total} ${copy.records} · 第 ${requestEventsCurrentPage}/${requestEventsTotalPages} 页 · ${freshness}`;
+  const source = data?.data_source === 'observability-cache'
+    ? (typeof getLanguage === 'function' && getLanguage() === 'en' ? 'observability' : '观测缓存')
+    : data?.data_source === 'request-events-cache'
+      ? (typeof getLanguage === 'function' && getLanguage() === 'en' ? 'log cache' : '日志缓存')
+      : '';
+  const generation = Number(data?.cache_generation || 0);
+  const generationLabel = generation > 0 ? ` · G${generation}` : '';
+  meta.textContent = `${source ? `${source} · ` : ''}${cachedLabel} · ${copy.total} ${total} ${copy.records} · 第 ${requestEventsCurrentPage}/${requestEventsTotalPages} 页 · ${freshness}${generationLabel}`;
 }
 
 function setRequestEventsBusy(busy) {
@@ -190,7 +263,13 @@ function setRequestEventsBusy(busy) {
   buttons.forEach((btn) => {
     if (!btn) return;
     btn.disabled = !!busy;
+    btn.setAttribute('aria-busy', busy ? 'true' : 'false');
   });
+  const wrap = document.querySelector('.request-table-wrap');
+  if (wrap) {
+    wrap.classList.toggle('is-refreshing', !!busy);
+    wrap.setAttribute('aria-busy', busy ? 'true' : 'false');
+  }
 }
 
 function getRequestModelPlaceholder(item) {
@@ -550,6 +629,8 @@ function getRequestEventsQueryKey(filters) {
 }
 
 async function loadRequestEventsPanel(force = false) {
+  hydrateRequestEventsState();
+  const loadSeq = ++requestEventsLoadSeq;
   const table = getRequestEventsTable();
   const filters = getRequestEventFilters();
   const queryKey = getRequestEventsQueryKey(filters);
@@ -559,23 +640,57 @@ async function loadRequestEventsPanel(force = false) {
     requestEventsCurrentPage = 1;
   }
 
-  if (table) {
+  if (table && !requestEventsLoaded) {
     table.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 24px; color: var(--text-muted);">正在加载请求记录…</td></tr>';
   }
   setRequestEventsBusy(true);
-  setRequestEventsMeta(null, 0, true);
+  setRequestEventsMeta(requestEventsLastMeta?.data, requestEventsLastMeta?.shownCount || 0, true);
 
   const offset = (requestEventsCurrentPage - 1) * requestEventsPageSize;
 
   try {
     const data = await api(getRequestEventsQueryUrl(requestEventsPageSize, offset, filters, force));
+    if (loadSeq !== requestEventsLoadSeq) return;
     const items = Array.isArray(data?.items) ? data.items : [];
     const total = Number(data?.total || 0);
+
+    if (isRequestMonitoringDisabled(data)) {
+      requestEventsLoaded = true;
+      requestEventsTotal = 0;
+      requestEventsTotalPages = 1;
+      requestEventsCurrentPage = 1;
+      requestEventsLastQueryKey = queryKey;
+      requestEventsLastMeta = { data: { ...(data || {}), total: 0 }, shownCount: 0 };
+      _requestEventsMap.clear();
+      persistRequestEventsState();
+      if (table) {
+        table.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 30px; color: var(--text-muted);">${escapeHtml(requestMonitoringDisabledText())}</td></tr>`;
+      }
+      renderRequestPagination();
+      setRequestEventsMeta(data, 0);
+      return;
+    }
+
+    // The snapshot is rebuilt in the background. During a first load, avoid
+    // treating its temporary empty response as an empty log. During a refresh,
+    // render the previous stable generation but keep polling until the new one
+    // has arrived so the table cannot remain silently stuck on stale records.
+    if (data?.refreshing && !data?.cached) {
+      if (table && !requestEventsLoaded) {
+        table.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 24px; color: var(--text-muted);">正在准备请求记录…</td></tr>';
+      }
+      setRequestEventsMeta(data, 0, true);
+      window.setTimeout(() => {
+        if (loadSeq === requestEventsLoadSeq) loadRequestEventsPanel(false);
+      }, 350);
+      return;
+    }
 
     requestEventsTotal = total;
     requestEventsTotalPages = Math.max(1, Math.ceil(total / requestEventsPageSize));
     if (requestEventsCurrentPage > requestEventsTotalPages && requestEventsTotalPages > 0) {
       requestEventsCurrentPage = requestEventsTotalPages;
+      persistRequestEventsState();
       return loadRequestEventsPanel(false);
     }
 
@@ -587,21 +702,46 @@ async function loadRequestEventsPanel(force = false) {
 
     requestEventsLoaded = true;
     requestEventsLastQueryKey = queryKey;
-    setRequestEventsMeta({ ...(data || {}), total }, items.length);
+    requestEventsLastMeta = {
+      data: { ...(data || {}), total },
+      shownCount: items.length,
+    };
+    persistRequestEventsState();
     renderRequestPagination();
+
+    if (data?.refreshing) {
+      setRequestEventsMeta(requestEventsLastMeta.data, items.length, true);
+      window.setTimeout(() => {
+        if (loadSeq === requestEventsLoadSeq) loadRequestEventsPanel(false);
+      }, 350);
+      return;
+    }
+
+    setRequestEventsMeta(requestEventsLastMeta.data, items.length);
   } catch (error) {
-    if (table) {
-      table.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 24px; color: #ef4444;">${escapeHtml(error.message || '加载请求记录失败')}</td></tr>`;
+    if (loadSeq !== requestEventsLoadSeq) return;
+    const message = escapeHtml(error.message || '加载请求记录失败');
+    if (requestEventsLoaded) {
+      const meta = document.getElementById('request-events-meta');
+      if (meta) {
+        meta.classList.remove('is-refreshing');
+        meta.classList.add('has-error');
+        meta.textContent = `${typeof getLanguage === 'function' && getLanguage() === 'en' ? 'Refresh failed' : '刷新失败'} · ${message}`;
+      }
+    } else if (table) {
+      table.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 24px; color: #ef4444;">${message}</td></tr>`;
     }
   } finally {
-    setRequestEventsBusy(false);
+    if (loadSeq === requestEventsLoadSeq) setRequestEventsBusy(false);
   }
 }
 
 function goToRequestPage(page) {
+  hydrateRequestEventsState();
   const target = Math.max(1, Math.min(requestEventsTotalPages, Number(page) || 1));
   if (target === requestEventsCurrentPage && requestEventsLoaded) return;
   requestEventsCurrentPage = target;
+  persistRequestEventsState();
   loadRequestEventsPanel(false);
   
   // Smoothly scroll the table container to top
@@ -610,8 +750,10 @@ function goToRequestPage(page) {
 }
 
 function onRequestPageSizeChange(newSize) {
+  hydrateRequestEventsState();
   requestEventsPageSize = Math.max(10, Math.min(500, Number(newSize) || 50));
   requestEventsCurrentPage = 1;
+  persistRequestEventsState();
   
   // Sync page size selects
   const p1 = document.getElementById('request-page-size-select');
@@ -634,6 +776,7 @@ function handleRequestPageJumpKeydown(event) {
 }
 
 function renderRequestPagination() {
+  hydrateRequestEventsState();
   const info = document.getElementById('req-pag-info');
   const btnFirst = document.getElementById('req-pag-first');
   const btnPrev = document.getElementById('req-pag-prev');
@@ -697,7 +840,9 @@ function renderRequestPagination() {
 }
 
 function applyRequestEventFilters() {
+  hydrateRequestEventsState();
   requestEventsCurrentPage = 1;
+  persistRequestEventsState();
   loadRequestEventsPanel(true);
 }
 
@@ -708,7 +853,9 @@ function clearRequestEventFilters() {
   });
   const success = document.getElementById('request-filter-success');
   if (success) success.value = '';
+  hydrateRequestEventsState();
   requestEventsCurrentPage = 1;
+  persistRequestEventsState();
   loadRequestEventsPanel(true);
 }
 
@@ -745,6 +892,7 @@ function resetAndClearRequestSettings() {
 
   requestEventsPageSize = 50;
   requestEventsCurrentPage = 1;
+  persistRequestEventsState();
 
   hideRequestSettingsModal();
   applyRequestEventFilters();

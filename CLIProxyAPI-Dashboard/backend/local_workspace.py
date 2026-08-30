@@ -5,17 +5,22 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from backend.paths import DASHBOARD_ROOT
+from backend.paths import DASHBOARD_ROOT, STORAGE_DIR
 
 
-LOCAL_WORKSPACE_DIR = Path(
-    os.environ.get("CLIPROXYAPI_DASHBOARD_LOCAL_DIR", "")
-).expanduser() if os.environ.get("CLIPROXYAPI_DASHBOARD_LOCAL_DIR", "").strip() else DASHBOARD_ROOT / ".local"
+_LOCAL_WORKSPACE_OVERRIDE = os.environ.get("CLIPROXYAPI_DASHBOARD_LOCAL_DIR", "").strip()
+LOCAL_WORKSPACE_DIR = (
+    Path(_LOCAL_WORKSPACE_OVERRIDE).expanduser()
+    if _LOCAL_WORKSPACE_OVERRIDE
+    else STORAGE_DIR / "config" / "local-workspace"
+)
 LOCAL_WORKSPACE_FILE = LOCAL_WORKSPACE_DIR / "dashboard-actions.json"
+LEGACY_LOCAL_WORKSPACE_FILE = DASHBOARD_ROOT / ".local" / "dashboard-actions.json"
 
 _ALLOWED_OPERATIONS = ("start", "restart", "stop")
 _BUILTIN_SERVICE_OPERATIONS = {
@@ -137,8 +142,21 @@ def _normalize_config(raw) -> dict:
     return normalized
 
 
+def _migrate_legacy_workspace_file() -> None:
+    """Move the old code-tree config into the shared user-data directory once."""
+    if _LOCAL_WORKSPACE_OVERRIDE or LOCAL_WORKSPACE_FILE.exists() or not LEGACY_LOCAL_WORKSPACE_FILE.is_file():
+        return
+    try:
+        LOCAL_WORKSPACE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(LEGACY_LOCAL_WORKSPACE_FILE), str(LOCAL_WORKSPACE_FILE))
+    except OSError:
+        # Loading remains read-only if the migration cannot be completed.
+        return
+
+
 def load_local_workspace() -> tuple[dict, str | None]:
     """Return normalized local config and a validation error, if any."""
+    _migrate_legacy_workspace_file()
     if not LOCAL_WORKSPACE_FILE.is_file():
         return {"title": "本地工作台", "description": "", "links": [], "services": []}, None
     try:
