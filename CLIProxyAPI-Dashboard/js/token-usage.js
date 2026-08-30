@@ -1,6 +1,7 @@
 let tokenUsagePanelLoaded = false;
 let tokenUsageData = null;
 let tokenUsageActiveRange = 15;
+let tokenUsageSelectedDate = 'all';
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -30,7 +31,7 @@ function formatTokenCount(num) {
     if (formatted.endsWith('.0')) formatted = formatted.slice(0, -2);
     return formatted + 'K';
   }
-  return val.toString();
+  return val.toLocaleString();
 }
 
 function setTokenUsageDisabledState(disabled) {
@@ -112,6 +113,7 @@ async function loadTokenUsagePanel(force = false) {
 
     renderTokenMetrics();
     renderDailyBarChart();
+    populateTokenDateSelect();
     renderTokenRankings();
 
     tokenUsagePanelLoaded = true;
@@ -178,6 +180,77 @@ function setTokenRange(days) {
   renderDailyBarChart();
 }
 
+function populateTokenDateSelect() {
+  const select = document.getElementById('token-ranking-date-select');
+  if (!select || !tokenUsageData) return;
+
+  const daily = tokenUsageData.daily || {};
+  const dates = Object.keys(daily).sort().reverse();
+  const todayStr = getLocalDateString(new Date());
+
+  let optionsHtml = '<option value="all">选择指定日期查看单日排行...</option>';
+  dates.forEach(d => {
+    const dayData = daily[d] || {};
+    const total = Number(dayData.total_tokens || 0);
+    const count = Number(dayData.request_count || 0);
+    const isToday = (d === todayStr);
+    const label = `${d}${isToday ? ' (今天)' : ''} · ${formatTokenCount(total)} Tokens (${count.toLocaleString()}次)`;
+    optionsHtml += `<option value="${d}">${escapeHtml(label)}</option>`;
+  });
+
+  select.innerHTML = optionsHtml;
+}
+
+function setTokenRankingDate(targetDate) {
+  const todayStr = getLocalDateString(new Date());
+  const yesterdayStr = getLocalDateString(new Date(Date.now() - 86400000));
+
+  if (targetDate === 'today') {
+    tokenUsageSelectedDate = todayStr;
+  } else if (targetDate === 'yesterday') {
+    tokenUsageSelectedDate = yesterdayStr;
+  } else {
+    tokenUsageSelectedDate = targetDate || 'all';
+  }
+
+  // Update quick pills state
+  const pillAll = document.getElementById('token-pill-all');
+  const pillToday = document.getElementById('token-pill-today');
+  const pillYesterday = document.getElementById('token-pill-yesterday');
+  const select = document.getElementById('token-ranking-date-select');
+
+  if (pillAll) pillAll.classList.toggle('active', tokenUsageSelectedDate === 'all');
+  if (pillToday) pillToday.classList.toggle('active', tokenUsageSelectedDate === todayStr);
+  if (pillYesterday) pillYesterday.classList.toggle('active', tokenUsageSelectedDate === yesterdayStr);
+
+  if (select) {
+    if (tokenUsageSelectedDate === 'all') {
+      select.value = 'all';
+    } else if (select.querySelector(`option[value="${tokenUsageSelectedDate}"]`)) {
+      select.value = tokenUsageSelectedDate;
+    } else {
+      select.value = 'all';
+    }
+  }
+
+  // Highlight selected bar in chart
+  updateSelectedChartBar();
+
+  // Re-render rankings
+  renderTokenRankings();
+}
+
+function updateSelectedChartBar() {
+  const chartContainer = document.getElementById('daily-bar-chart');
+  if (!chartContainer) return;
+
+  chartContainer.querySelectorAll('.chart-bar-column').forEach(col => {
+    const colDate = col.dataset.date;
+    const isSelected = (tokenUsageSelectedDate !== 'all' && (colDate === tokenUsageSelectedDate || colDate?.startsWith(tokenUsageSelectedDate)));
+    col.classList.toggle('is-selected', isSelected);
+  });
+}
+
 function renderDailyBarChart() {
   const chartContainer = document.getElementById('daily-bar-chart');
   if (!chartContainer || !tokenUsageData) return;
@@ -187,9 +260,18 @@ function renderDailyBarChart() {
 
   if (range === 'hourly') {
     const hourly = tokenUsageData.hourly || {};
-    const now = new Date();
+    const hourlyKeys = Object.keys(hourly).sort();
+    let anchorTime = new Date();
+    if (hourlyKeys.length > 0) {
+      const latestHourStr = hourlyKeys[hourlyKeys.length - 1];
+      const parsedLatest = new Date(latestHourStr.replace(' ', 'T') + ':00');
+      if (!isNaN(parsedLatest.getTime())) {
+        anchorTime = parsedLatest;
+      }
+    }
+
     for (let i = 23; i >= 0; i--) {
-      const d = new Date(now.getTime() - i * 3600 * 1000);
+      const d = new Date(anchorTime.getTime() - i * 3600 * 1000);
       const y = d.getFullYear();
       const m = String(d.getMonth() + 1).padStart(2, '0');
       const day = String(d.getDate()).padStart(2, '0');
@@ -209,11 +291,22 @@ function renderDailyBarChart() {
   } else {
     const daily = tokenUsageData.daily || {};
     const rangeDays = Number(range || 15);
+    const dailyKeys = Object.keys(daily).sort();
 
-    // Generate date series for the last rangeDays
+    // 智能推断锚点日期：以数据中最新日期为准（或本地当前日期）
+    let anchorDate = new Date();
+    if (dailyKeys.length > 0) {
+      const latestDateStr = dailyKeys[dailyKeys.length - 1];
+      const parsedLatest = new Date(latestDateStr + 'T00:00:00');
+      if (!isNaN(parsedLatest.getTime())) {
+        anchorDate = parsedLatest;
+      }
+    }
+
+    // Generate date series for the last rangeDays ending at anchorDate
     const dates = [];
     for (let i = rangeDays - 1; i >= 0; i--) {
-      const d = new Date();
+      const d = new Date(anchorDate.getTime());
       d.setDate(d.getDate() - i);
       dates.push(getLocalDateString(d));
     }
@@ -234,24 +327,22 @@ function renderDailyBarChart() {
   const maxTotal = Math.max(...chartData.map(d => d.total));
   const scaleMax = maxTotal > 0 ? maxTotal : 100;
 
-  if (maxTotal === 0) {
-    chartContainer.innerHTML = '<div class="metric-empty">指定时间段内暂无 Token 消耗数据</div>';
-    return;
-  }
-
   let html = '';
   chartData.forEach(item => {
-    const heightPercent = Math.max(1, (item.total / scaleMax) * 100);
+    const heightPercent = maxTotal > 0 ? Math.max(2, (item.total / scaleMax) * 100) : 2;
     const promptPercent = item.total > 0 ? (item.prompt / item.total) * 100 : 0;
     const completionPercent = item.total > 0 ? (item.completion / item.total) * 100 : 0;
+    const isSelected = (tokenUsageSelectedDate !== 'all' && (item.date === tokenUsageSelectedDate || item.date.startsWith(tokenUsageSelectedDate)));
 
     html += `
-      <div class="chart-bar-column" 
-           data-date="${item.date}" 
-           data-total="${formatTokenCount(item.total)}" 
-           data-prompt="${formatTokenCount(item.prompt)}" 
-           data-completion="${formatTokenCount(item.completion)}" 
-           data-requests="${item.requests.toLocaleString()}">
+      <div class="chart-bar-column${isSelected ? ' is-selected' : ''}"
+           data-date="${item.date}"
+           data-total="${formatTokenCount(item.total)}"
+           data-prompt="${formatTokenCount(item.prompt)}"
+           data-completion="${formatTokenCount(item.completion)}"
+           data-requests="${item.requests.toLocaleString()}"
+           onclick="setTokenRankingDate('${item.date}')"
+           title="点击查看 ${item.date} 具体的模型用量排行">
         <div class="chart-bar-wrapper" style="height: ${heightPercent}%;">
           ${item.completion > 0 ? `<div class="chart-bar-segment completion" style="height: ${completionPercent}%;"></div>` : ''}
           ${item.prompt > 0 ? `<div class="chart-bar-segment prompt" style="height: ${promptPercent}%;"></div>` : ''}
@@ -305,6 +396,7 @@ function initChartTooltipEvents() {
           <span class="tooltip-dot requests"></span>
           <span>请求数: <strong>${requests}</strong></span>
         </div>
+        <div class="tooltip-hint">👆 点击柱子查看此单日模型排行</div>
       `;
       tooltip.style.display = 'flex';
     });
@@ -321,24 +413,85 @@ function initChartTooltipEvents() {
   });
 }
 
+function _rankFromDict(dict, nameKey) {
+  return Object.entries(dict || {}).map(([k, v]) => ({
+    [nameKey]: k,
+    ...v,
+  })).sort((a, b) => {
+    const diff = Number(b.total_tokens || 0) - Number(a.total_tokens || 0);
+    if (diff !== 0) return diff;
+    return Number(b.request_count || 0) - Number(a.request_count || 0);
+  });
+}
+
 function renderTokenRankings() {
   if (!tokenUsageData) return;
 
-  const modelRanking = tokenUsageData.model_ranking || [];
-  const clientRanking = tokenUsageData.client_ranking || [];
-  const providerRanking = tokenUsageData.provider_ranking || [];
+  const filterChip = document.getElementById('token-filter-active-chip');
+  const filterSummary = document.getElementById('token-filter-summary-text');
+  const modelBadge = document.getElementById('model-ranking-badge');
+  const clientBadge = document.getElementById('client-ranking-badge');
+  const providerBadge = document.getElementById('provider-ranking-badge');
 
-  renderRankingList('model-ranking-list', modelRanking, 'model');
-  renderRankingList('client-ranking-list', clientRanking, 'client');
-  renderRankingList('provider-ranking-list', providerRanking, 'provider');
+  let modelRanking = [];
+  let clientRanking = [];
+  let providerRanking = [];
+  let currentTotalTokens = 0;
+
+  if (tokenUsageSelectedDate === 'all') {
+    modelRanking = tokenUsageData.model_ranking || [];
+    clientRanking = tokenUsageData.client_ranking || [];
+    providerRanking = tokenUsageData.provider_ranking || [];
+
+    const totals = tokenUsageData.totals || {};
+    currentTotalTokens = Number(totals.total_tokens || 0);
+    const totalRequests = Number(totals.request_count || 0);
+
+    if (filterChip) filterChip.textContent = '全部累积';
+    if (filterSummary) {
+      filterSummary.textContent = `展示历史全量调用与 Token 排名（共 ${formatTokenCount(currentTotalTokens)} Tokens · ${totalRequests.toLocaleString()} 次请求 · 点击图表柱子可下钻单日排行）`;
+    }
+    if (modelBadge) modelBadge.textContent = '全量';
+    if (clientBadge) clientBadge.textContent = '全量';
+    if (providerBadge) providerBadge.textContent = '全量';
+  } else {
+    const daily = tokenUsageData.daily || {};
+    const hourly = tokenUsageData.hourly || {};
+    const dayData = daily[tokenUsageSelectedDate] || hourly[tokenUsageSelectedDate] || {};
+
+    modelRanking = _rankFromDict(dayData.by_model, 'model');
+    clientRanking = _rankFromDict(dayData.by_client, 'client');
+    providerRanking = _rankFromDict(dayData.by_provider, 'provider');
+
+    currentTotalTokens = Number(dayData.total_tokens || 0);
+    const dayRequests = Number(dayData.request_count || 0);
+
+    const isHour = tokenUsageSelectedDate.includes(':');
+    const badgeLabel = isHour ? `时段: ${tokenUsageSelectedDate}` : `单日: ${tokenUsageSelectedDate}`;
+
+    if (filterChip) filterChip.textContent = badgeLabel;
+    if (filterSummary) {
+      filterSummary.textContent = `${tokenUsageSelectedDate} 共消耗 ${formatTokenCount(currentTotalTokens)} Tokens · ${dayRequests.toLocaleString()} 次调用 · 活跃模型 ${modelRanking.length} 个`;
+    }
+    if (modelBadge) modelBadge.textContent = isHour ? tokenUsageSelectedDate.substring(11) : tokenUsageSelectedDate.substring(5);
+    if (clientBadge) clientBadge.textContent = isHour ? tokenUsageSelectedDate.substring(11) : tokenUsageSelectedDate.substring(5);
+    if (providerBadge) providerBadge.textContent = isHour ? tokenUsageSelectedDate.substring(11) : tokenUsageSelectedDate.substring(5);
+  }
+
+  renderRankingList('model-ranking-list', modelRanking, 'model', currentTotalTokens);
+  renderRankingList('client-ranking-list', clientRanking, 'client', currentTotalTokens);
+  renderRankingList('provider-ranking-list', providerRanking, 'provider', currentTotalTokens);
 }
 
-function renderRankingList(elementId, items, nameKey) {
+function renderRankingList(elementId, items, nameKey, parentTotalTokens = 0) {
   const container = document.getElementById(elementId);
   if (!container) return;
 
   if (!items || items.length === 0) {
-    container.innerHTML = '<div class="metric-empty">暂无排行数据</div>';
+    const emptyHint = (tokenUsageSelectedDate === 'all')
+      ? '暂无排行数据'
+      : `该时段（${escapeHtml(tokenUsageSelectedDate)}）暂无细分数据`;
+    container.innerHTML = `<div class="metric-empty">${emptyHint}</div>`;
     return;
   }
 
@@ -346,8 +499,8 @@ function renderRankingList(elementId, items, nameKey) {
   const maxTokens = Math.max(...items.map(item => Number(item.total_tokens || 0)));
   const scaleMax = maxTokens > 0 ? maxTokens : 1;
 
-  // Render top 10 items
-  const topItems = items.slice(0, 10);
+  // Render top 15 items
+  const topItems = items.slice(0, 15);
   let html = '';
 
   topItems.forEach((item, index) => {
@@ -358,9 +511,10 @@ function renderRankingList(elementId, items, nameKey) {
     const count = Number(item.request_count || 0);
 
     const widthPercent = (total / scaleMax) * 100;
-    
+    const sharePercent = parentTotalTokens > 0 ? ((total / parentTotalTokens) * 100).toFixed(1) : '0';
+
     // Create detailed title attribute
-    const detailTitle = `Prompt: ${formatTokenCount(prompt)} | Completion: ${formatTokenCount(completion)} | 请求数: ${count.toLocaleString()}`;
+    const detailTitle = `总计: ${formatTokenCount(total)} Tokens | Prompt: ${formatTokenCount(prompt)} | Completion: ${formatTokenCount(completion)} | 调用量: ${count.toLocaleString()} 次${parentTotalTokens > 0 ? ` | 占比: ${sharePercent}%` : ''}`;
 
     // Check for actual_model_distribution (only relevant for model ranking)
     const dist = (nameKey === 'model') ? (item.actual_model_distribution || null) : null;
@@ -371,10 +525,14 @@ function renderRankingList(elementId, items, nameKey) {
         <div class="ranking-info">
           <span class="ranking-name-wrap">
             <span class="ranking-badge">${index + 1}</span>
-            <span class="ranking-name">${escapeHtml(name)}</span>
-            ${hasDist ? `<span class="ranking-expand-btn" onclick="toggleActualModelDist(event)">▶ <span class="dist-badge">${Object.keys(dist).length}</span></span>` : ''}
+            <span class="ranking-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+            <span class="ranking-call-count" title="调用次数">${count.toLocaleString()} 次</span>
+            ${hasDist ? `<span class="ranking-expand-btn" onclick="toggleActualModelDist(event)" title="展开查看实际调用的上游真实模型">▶ <span class="dist-badge">${Object.keys(dist).length}</span></span>` : ''}
           </span>
-          <span class="ranking-value">${formatTokenCount(total)}</span>
+          <div class="ranking-value-group">
+            <span class="ranking-value">${formatTokenCount(total)}</span>
+            ${parentTotalTokens > 0 ? `<span class="ranking-pct">${sharePercent}%</span>` : ''}
+          </div>
         </div>
         <div class="ranking-bar-bg">
           <div class="ranking-bar-fill" style="width: ${widthPercent}%;"></div>
@@ -401,14 +559,14 @@ function buildActualModelDistHtml(distribution, parentTotal) {
     const subCount = Number(data.request_count || 0);
     const subPct = parentTotal > 0 ? ((subTotal / parentTotal) * 100).toFixed(1) : 0;
     const barPct = parentTotal > 0 ? (subTotal / parentTotal) * 100 : 0;
-    const subTitle = `Prompt: ${formatTokenCount(subPrompt)} | Completion: ${formatTokenCount(subCompletion)} | 请求数: ${subCount.toLocaleString()}`;
+    const subTitle = `总计: ${formatTokenCount(subTotal)} | Prompt: ${formatTokenCount(subPrompt)} | Completion: ${formatTokenCount(subCompletion)} | 调用量: ${subCount.toLocaleString()} 次`;
 
     html += `
       <div class="dist-item" title="${subTitle}">
         <div class="dist-info">
           <span class="dist-indent"></span>
-          <span class="dist-name">${escapeHtml(actualModel)}</span>
-          <span class="dist-value">${formatTokenCount(subTotal)} <span class="dist-pct">(${subPct}%)</span></span>
+          <span class="dist-name" title="${escapeHtml(actualModel)}">${escapeHtml(actualModel)}</span>
+          <span class="dist-value">${formatTokenCount(subTotal)} <span class="dist-pct">(${subPct}%)</span> · <span class="dist-call-count">${subCount.toLocaleString()}次</span></span>
         </div>
         <div class="dist-bar-bg">
           <div class="dist-bar-fill" style="width: ${barPct}%;"></div>

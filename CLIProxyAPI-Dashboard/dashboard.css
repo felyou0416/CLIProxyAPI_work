@@ -13,7 +13,7 @@
 @import url('/css/panels/firewall-access.css');
 @import url('/css/panels/model-stats.css');
 @import url('/css/panels/requests.css?v=20260721-success-collapse');
-@import url('/css/panels/token-usage.css');
+@import url('/css/panels/token-usage.css?v=20260830-token-rankings');
 @import url('/css/panels/clients.css');
 @import url('/css/panels/providers.css?v=20260718-filter-drawer');
 @import url('/css/panels/auths.css?v=20260718-mobile-collapse');
