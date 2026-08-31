@@ -11,7 +11,11 @@ THINKING_MODE_FORCE_ON = 'force_on'
 THINKING_MODE_FORCE_OFF = 'force_off'
 VALID_MODES = (THINKING_MODE_DEFAULT, THINKING_MODE_FORCE_ON, THINKING_MODE_FORCE_OFF)
 
-REASONING_EFFORT_LEVELS = ('', 'low', 'medium', 'high')
+REASONING_EFFORT_LEVELS = ('', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max')
+
+LEVELS_PRESET_STANDARD_3 = ('low', 'medium', 'high')
+LEVELS_PRESET_EXTENDED_5 = ('low', 'medium', 'high', 'xhigh', 'max')
+LEVELS_PRESET_FULL_6 = ('minimal', 'low', 'medium', 'high', 'xhigh', 'max')
 
 # Heuristic tokens that identify models likely to support reasoning/thinking.
 THINKING_HINT_TOKENS = (
@@ -24,19 +28,38 @@ THINKING_HINT_TOKENS = (
     'gemini-2.5-flash-thinking',
     'glm-4.1v-thinking',
     'glm-4.1v-thinking-flash',
+    'glm-4',
     'hunyuan-2.0-thinking',
     'step-3.5-flash',
+    'step-3',
     'agnes-2.0-flash',
     # OpenAI Reasoning models
     'o1-',
     'o3-',
+    'o4-',
+    'o1',
+    'o3',
+    'o4',
     'o1-mini',
     'o1-preview',
+    # GPT 5.x series
+    'gpt-5.6',
+    'gpt-5.5',
+    'gpt-5',
+    'sol',
+    'terra',
+    'luna',
     # DeepSeek Reasoning / R1 models
     '-r1',
     'deepseek-r',
+    'deepseek-reasoner',
+    'r1',
+    # Qwen reasoning
+    'qwq',
+    'qwen-max-thinking',
     # Newer reasoning-capable versions
     'claude-3-7',
+    'claude-3.7',
     'gemini-2.5',
     'grok-3',
     'kimi-k2',
@@ -109,15 +132,37 @@ def save_model_thinking_configs(payload: dict) -> dict:
             except (TypeError, ValueError):
                 budget = None
 
+        levels_raw = item.get('thinking_levels')
+        thinking_levels = None
+        if isinstance(levels_raw, str):
+            levels_list = [x.strip() for x in levels_raw.split(',') if x.strip()]
+            thinking_levels = []
+            for lvl in levels_list:
+                token = str(lvl or '').strip().lower()
+                if token and token not in thinking_levels:
+                    thinking_levels.append(token)
+        elif isinstance(levels_raw, (list, tuple)):
+            thinking_levels = []
+            for lvl in levels_raw:
+                token = str(lvl or '').strip().lower()
+                if token and token not in thinking_levels:
+                    thinking_levels.append(token)
+
         entry = {
             'mode': mode,
             'provider': str(item.get('provider') or '').strip() or None,
             'upstream_id': str(item.get('upstream_id') or '').strip() or None,
             'reasoning_effort': effort or None,
             'thinking_budget': budget,
+            'thinking_levels': thinking_levels,
         }
-        # Only keep entries that actually change something from the default.
-        if mode != THINKING_MODE_DEFAULT or entry['reasoning_effort'] or entry['thinking_budget'] is not None:
+        # Only keep entries that actually change something from the default or have explicit settings.
+        if (
+            mode != THINKING_MODE_DEFAULT
+            or entry['reasoning_effort']
+            or entry['thinking_budget'] is not None
+            or entry['thinking_levels'] is not None
+        ):
             cleaned[model_id] = entry
 
     result = {
@@ -150,8 +195,12 @@ def get_model_thinking_config(model_id: str) -> dict | None:
 
 
 def collect_thinking_candidates() -> list[dict]:
-    """Collect provider and aggregate models that look thinking-capable."""
-    from backend.auth import get_configured_provider_models, get_configured_aggregate_models
+    """Collect all provider and aggregate models categorized by provider with effective thinking levels."""
+    from backend.auth import (
+        get_configured_provider_models,
+        get_configured_aggregate_models,
+        _openai_compat_thinking_levels,
+    )
 
     candidates: dict[str, dict] = {}
 
@@ -159,22 +208,29 @@ def collect_thinking_candidates() -> list[dict]:
         model_id = str(model_id or '').strip()
         if not model_id:
             return
-        if not looks_thinking_capable(model_id, upstream_id, provider):
-            return
         key = model_id.lower()
+        effective = (
+            _openai_compat_thinking_levels(upstream_id)
+            or _openai_compat_thinking_levels(model_id)
+            or ()
+        )
         existing = candidates.get(key)
         if existing:
             existing['sources'].add(source)
-            if provider and existing.get('provider') in ('', '-'):
+            if provider and existing.get('provider') in ('', '-', 'custom', '其他/自定义'):
                 existing['provider'] = provider
             if upstream_id and not existing.get('upstream_id'):
                 existing['upstream_id'] = upstream_id
+            if effective and not existing.get('effective_levels'):
+                existing['effective_levels'] = list(effective)
             return
         candidates[key] = {
             'model_id': model_id,
-            'provider': str(provider or '').strip() or '-',
+            'provider': str(provider or '').strip() or '其他/自定义',
             'upstream_id': str(upstream_id or '').strip(),
             'sources': {str(source or '').strip()},
+            'effective_levels': list(effective),
+            'thinking_hint': looks_thinking_capable(model_id, upstream_id, provider),
         }
 
     for item in get_configured_provider_models(include_override_only=False):
@@ -189,16 +245,16 @@ def collect_thinking_candidates() -> list[dict]:
 
     for aggregate in get_configured_aggregate_models():
         alias_id = str(aggregate.get('alias_id') or '').strip()
-        if alias_id and looks_thinking_capable(alias_id):
-            add(alias_id, '', '', 'aggregate')
+        if alias_id:
+            add(alias_id, 'aggregate', '', 'aggregate')
         for member in aggregate.get('members') or []:
             member_provider = str(member.get('provider') or '').strip().lower()
             member_upstream = str(member.get('upstream_id') or '').strip()
             member_call = str(member.get('call_id') or '').strip()
             if member_call:
-                add(member_call, member_provider, member_upstream, f'aggregate:{alias_id}')
+                add(member_call, member_provider or 'aggregate', member_upstream, f'aggregate:{alias_id}')
             if member_upstream and member_upstream != member_call:
-                add(member_upstream, member_provider, member_upstream, f'aggregate:{alias_id}')
+                add(member_upstream, member_provider or 'aggregate', member_upstream, f'aggregate:{alias_id}')
 
     result = sorted(candidates.values(), key=lambda x: (x['provider'], x['model_id']))
     for item in result:

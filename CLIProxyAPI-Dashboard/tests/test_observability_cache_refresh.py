@@ -1,3 +1,5 @@
+import pathlib
+import tempfile
 import threading
 import time
 import unittest
@@ -20,6 +22,187 @@ class ObservabilityCacheRefreshTests(unittest.TestCase):
                 'auth_health': [],
             })
 
+    def _reset_request_events_cache(self, **updates):
+        defaults = {
+            'ready': False,
+            'refreshing': False,
+            'refreshed_at': 0.0,
+            'generation': 0,
+            'expires_at': 0.0,
+            'source_signatures': None,
+            'events': [],
+        }
+        defaults.update(updates)
+        with self.obs._REQUEST_EVENTS_CACHE_COND:
+            self.obs._REQUEST_EVENTS_CACHE.update(defaults)
+
+    def test_request_event_cache_invalidates_for_each_log_source_change(self):
+        obs = self.obs
+        config = {
+            'request_monitoring_enabled': True,
+            'request_events_cache_ttl_seconds': 300,
+            'request_observability_refresh_seconds': 15,
+            'request_log_keep_files': 300,
+            'request_event_archive_keep_entries': 20000,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            log_dir = root / 'logs'
+            archive_dir = root / 'archive'
+            log_dir.mkdir()
+            archive_dir.mkdir()
+            stdout_path = root / 'proxy.stdout.log'
+            precise_path = log_dir / 'request-1.log'
+            error_path = log_dir / 'error-1.log'
+            archive_path = archive_dir / 'request-events-1.jsonl'
+
+            self._reset_request_events_cache()
+            with patch.object(obs, '_request_log_dirs', return_value=[log_dir]), \
+                 patch.object(obs, 'PROXY_STDOUT', stdout_path), \
+                 patch.object(obs, 'REQUEST_ARCHIVE_DIR', archive_dir), \
+                 patch.object(obs, 'request_monitoring_enabled', return_value=True), \
+                 patch.object(obs, 'load_request_monitoring_config', return_value=config), \
+                 patch.object(obs, 'parse_proxy_requests', return_value=[]), \
+                 patch.object(obs, 'parse_precise_request_events', return_value=[]), \
+                 patch.object(obs, 'parse_error_logs', return_value=[]), \
+                 patch.object(obs, 'get_configured_provider_models', return_value=[]), \
+                 patch.object(obs, 'merge_request_events', return_value=[]) as merge:
+                generation = 0
+
+                def refresh_after_change():
+                    nonlocal generation
+                    snapshot = obs.get_request_events_cache(wait=True)
+                    generation += 1
+                    self.assertFalse(snapshot['refreshing'])
+                    self.assertEqual(snapshot['generation'], generation)
+
+                refresh_after_change()
+
+                precise_path.write_text('first', encoding='utf-8')
+                refresh_after_change()
+                with precise_path.open('a', encoding='utf-8') as stream:
+                    stream.write('-append')
+                refresh_after_change()
+
+                error_path.write_text('first error', encoding='utf-8')
+                refresh_after_change()
+                with error_path.open('a', encoding='utf-8') as stream:
+                    stream.write('-append')
+                refresh_after_change()
+
+                stdout_path.write_text('first stdout', encoding='utf-8')
+                refresh_after_change()
+                with stdout_path.open('a', encoding='utf-8') as stream:
+                    stream.write('-append')
+                refresh_after_change()
+
+                archive_path.write_text('first archive', encoding='utf-8')
+                refresh_after_change()
+                with archive_path.open('a', encoding='utf-8') as stream:
+                    stream.write('-append')
+                refresh_after_change()
+
+                archive_path.unlink()
+                refresh_after_change()
+
+            self.assertEqual(merge.call_count, generation)
+
+    def test_request_event_cache_rechecks_changes_made_during_rebuild(self):
+        obs = self.obs
+        config = {
+            'request_monitoring_enabled': True,
+            'request_events_cache_ttl_seconds': 300,
+            'request_observability_refresh_seconds': 15,
+            'request_log_keep_files': 300,
+            'request_event_archive_keep_entries': 20000,
+        }
+        started = threading.Event()
+        release = threading.Event()
+        second_started = threading.Event()
+        parse_calls = {'count': 0}
+
+        def slow_parse(*_args, **_kwargs):
+            parse_calls['count'] += 1
+            if parse_calls['count'] == 1:
+                started.set()
+                if not release.wait(timeout=2):
+                    raise RuntimeError('rebuild was not released')
+            elif parse_calls['count'] == 2:
+                second_started.set()
+            return [{
+                'request_id': f'rebuilt-{parse_calls["count"]}',
+                'timestamp': 200 + parse_calls['count'],
+                'path': '/v1/messages',
+            }]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            log_dir = root / 'logs'
+            archive_dir = root / 'archive'
+            log_dir.mkdir()
+            archive_dir.mkdir()
+            stdout_path = root / 'proxy.stdout.log'
+            stdout_path.write_text('initial', encoding='utf-8')
+
+            self._reset_request_events_cache()
+            with patch.object(obs, '_request_log_dirs', return_value=[log_dir]), \
+                 patch.object(obs, 'PROXY_STDOUT', stdout_path), \
+                 patch.object(obs, 'REQUEST_ARCHIVE_DIR', archive_dir), \
+                 patch.object(obs, 'request_monitoring_enabled', return_value=True), \
+                 patch.object(obs, 'load_request_monitoring_config', return_value=config), \
+                 patch.object(obs, 'parse_proxy_requests', side_effect=slow_parse), \
+                 patch.object(obs, 'parse_precise_request_events', return_value=[]), \
+                 patch.object(obs, 'parse_error_logs', return_value=[]), \
+                 patch.object(obs, 'get_configured_provider_models', return_value=[]), \
+                 patch.object(obs, 'merge_request_events', side_effect=lambda proxy, precise, errors, models: proxy):
+                initial_signatures = obs._request_log_source_signatures()
+                self._reset_request_events_cache(
+                    ready=True,
+                    refreshed_at=time.time(),
+                    generation=10,
+                    expires_at=time.time() + 300,
+                    source_signatures=initial_signatures,
+                    events=[{'request_id': 'old'}],
+                )
+
+                pending = obs.get_request_events_cache(force=True, wait=False)
+                self.assertTrue(pending['refreshing'])
+                self.assertTrue(started.wait(timeout=2), 'background rebuild never started')
+
+                with stdout_path.open('a', encoding='utf-8') as stream:
+                    stream.write('-written-during-rebuild')
+                release.set()
+
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    with obs._REQUEST_EVENTS_CACHE_COND:
+                        refreshing = bool(obs._REQUEST_EVENTS_CACHE.get('refreshing'))
+                    if not refreshing:
+                        break
+                    time.sleep(0.01)
+
+                with obs._REQUEST_EVENTS_CACHE_COND:
+                    self.assertFalse(obs._REQUEST_EVENTS_CACHE['refreshing'])
+                    self.assertEqual(obs._REQUEST_EVENTS_CACHE['generation'], 11)
+                    self.assertEqual(obs._REQUEST_EVENTS_CACHE['source_signatures'], initial_signatures)
+
+                obs.get_request_events_cache(wait=False)
+                self.assertTrue(second_started.wait(timeout=2), 'second rebuild never started')
+
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    with obs._REQUEST_EVENTS_CACHE_COND:
+                        refreshing = bool(obs._REQUEST_EVENTS_CACHE.get('refreshing'))
+                    if not refreshing:
+                        break
+                    time.sleep(0.01)
+                final = obs.get_request_events_cache(wait=True)
+
+        self.assertFalse(final['refreshing'])
+        self.assertEqual(final['generation'], 12)
+        self.assertEqual([item['request_id'] for item in final['events']], ['rebuilt-2'])
+        self.assertEqual(parse_calls['count'], 2)
+
     def test_request_event_snapshot_is_stable_and_reused_until_refresh(self):
         obs = self.obs
         with obs._REQUEST_EVENTS_CACHE_COND:
@@ -29,6 +212,7 @@ class ObservabilityCacheRefreshTests(unittest.TestCase):
                 'refreshed_at': 0.0,
                 'generation': 0,
                 'expires_at': 0.0,
+                'source_signatures': None,
                 'events': [],
             })
 
@@ -57,6 +241,7 @@ class ObservabilityCacheRefreshTests(unittest.TestCase):
                 'refreshed_at': 0.0,
                 'generation': 0,
                 'expires_at': 0.0,
+                'source_signatures': None,
                 'events': [],
             })
 
@@ -157,6 +342,7 @@ class ObservabilityCacheRefreshTests(unittest.TestCase):
                 'refreshed_at': 0.0,
                 'generation': 0,
                 'expires_at': 0.0,
+                'source_signatures': None,
                 'events': [],
             })
 

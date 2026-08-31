@@ -172,5 +172,41 @@ class TestModelPoolStorage(unittest.TestCase):
             self.assertIn('weight: 5', yaml_block)
             self.assertIn('alias: "custom-gpt4-pool"', yaml_block)
 
+    def test_openai_compat_gpt56_models_declare_extended_thinking_levels(self):
+        entries = [{
+            'provider': 'custom-openai',
+            'base_url': 'https://example.invalid/v1',
+            'api_key': 'test-key',
+            'models': [
+                'gpt-5.6-sol',
+                'gpt-5.6-terra(max)',
+                'openai/gpt-5.6-luna',
+            ],
+        }]
+
+        with patch('backend.auth._load_model_mapping_overrides', return_value={}):
+            rendered = build_openai_compatibility_block(entries)
+
+        expected = 'levels: ["low", "medium", "high", "xhigh", "max"]'
+        self.assertEqual(rendered.count(expected), 3)
+        self.assertIn('name: "gpt-5.6-sol"', rendered)
+        self.assertIn('name: "gpt-5.6-terra(max)"', rendered)
+        self.assertIn('name: "openai/gpt-5.6-luna"', rendered)
+
+    def test_openai_compat_unknown_models_keep_core_default_capabilities(self):
+        entries = [{
+            'provider': 'custom-openai',
+            'base_url': 'https://example.invalid/v1',
+            'api_key': 'test-key',
+            'models': ['gpt-5.5', 'custom-reasoning-model'],
+        }]
+
+        with patch('backend.auth._load_model_mapping_overrides', return_value={}):
+            rendered = build_openai_compatibility_block(entries)
+
+        self.assertNotIn('thinking:', rendered)
+        self.assertIn('name: "gpt-5.5"', rendered)
+        self.assertIn('name: "custom-reasoning-model"', rendered)
+
 if __name__ == "__main__":
     unittest.main()

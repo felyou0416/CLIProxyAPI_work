@@ -408,21 +408,27 @@ function getNavGroups() {
 
 function getSectionGroup(section) {
   const groups = getNavGroups();
-  const value = String(section || '').trim();
+  const value = normalizeSectionName(section);
   for (const [groupKey, items] of Object.entries(groups)) {
     if (items.includes(value)) return groupKey;
   }
   return 'runtime';
 }
 
+function normalizeSectionName(name) {
+  const value = String(name || '').trim();
+  return value === 'api-key-inplace' ? 'api-key-intake' : value;
+}
+
 function getActiveSection() {
-  const fromHash = String(window.location.hash || '').replace(/^#/, '').trim();
+  const fromHash = normalizeSectionName(String(window.location.hash || '').replace(/^#/, '').trim());
   if (fromHash) return fromHash;
-  return localStorage.getItem('dashboard_active_section') || 'account';
+  return normalizeSectionName(localStorage.getItem('dashboard_active_section')) || 'account';
 }
 
 function persistActiveSection(name) {
-  const value = String(name || '').trim();
+  const normalizedName = normalizeSectionName(name);
+  const value = String(normalizedName || '').trim();
   if (!value) return;
   localStorage.setItem('dashboard_active_section', value);
   localStorage.setItem('dashboard_active_group', getSectionGroup(value));
@@ -444,7 +450,7 @@ function persistActiveGroup(group) {
 function getDefaultSidebarNavOrder() {
   return [
     'account', 'chat', 'requests', 'token-usage', 'model-stats', 'clients', 'settings',
-    'providers', 'media-models', 'aggregates', 'model-thinking', 'model-map', 'api-key-inplace', 'auths',
+    'providers', 'media-models', 'aggregates', 'model-thinking', 'model-map', 'api-key-intake', 'auths',
     'virtual-keys', 'system',
   ];
 }
@@ -455,7 +461,10 @@ function getSidebarNavOrder() {
     const parsed = raw ? JSON.parse(raw) : [];
     const defaults = getDefaultSidebarNavOrder();
     if (!Array.isArray(parsed) || !parsed.length) return defaults;
-    const known = parsed.filter(key => defaults.includes(key));
+    const known = parsed
+      .map(normalizeSectionName)
+      .filter(key => defaults.includes(key))
+      .filter((key, index, keys) => keys.indexOf(key) === index);
     defaults.forEach(key => {
       if (!known.includes(key)) known.push(key);
     });
@@ -872,6 +881,7 @@ async function ensureSectionAssets(name) {
 }
 
 async function showSection(name, options = {}) {
+  name = normalizeSectionName(name);
   if (name === 'external-access') {
     name = 'firewall-access';
   }
@@ -889,7 +899,9 @@ async function showSection(name, options = {}) {
   }
 
   const requestedGroup = options && options.fromSystemHub ? 'system' : getSectionGroup(name);
-  if (document.getElementById('section-' + name)?.classList.contains('active-view')) {
+  const targetSection = document.getElementById('section-' + name);
+  if (targetSection?.classList.contains('active-view')) {
+    targetSection.hidden = false;
     persistActiveSection(name);
     persistActiveGroup(requestedGroup);
     document.querySelectorAll('.top-nav-btn').forEach(el => el.classList.remove('active'));
@@ -934,10 +946,14 @@ async function showSection(name, options = {}) {
   }
 
   const activeGroup = requestedGroup;
+  const activeSection = document.getElementById('section-' + name);
   document.querySelectorAll('.section-view').forEach(el => el.classList.remove('active-view'));
   document.querySelectorAll('.top-nav-btn').forEach(el => el.classList.remove('active'));
   updateGroupNavigation(activeGroup);
-  document.getElementById('section-' + name)?.classList.add('active-view');
+  if (activeSection) {
+    activeSection.hidden = false;
+    activeSection.classList.add('active-view');
+  }
   const activeTabId = getNavTabForSection(name, activeGroup);
   if (activeTabId) document.getElementById(activeTabId)?.classList.add('active');
   persistActiveSection(name);

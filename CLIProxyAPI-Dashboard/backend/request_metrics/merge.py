@@ -50,6 +50,7 @@ _EXTRA_MERGE_FIELDS = (
     'tps',
     'cached_tokens',
     'reasoning_tokens',
+    'reasoning_effort',
     'auth_label',
     'auth_id',
     'auth_file',

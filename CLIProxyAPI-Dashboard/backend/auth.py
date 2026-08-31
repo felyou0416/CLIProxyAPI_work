@@ -4048,6 +4048,61 @@ def resolve_provider_call_id(provider: str, upstream_id: str, alias: str | None 
     return resolve_provider_mapping(provider, upstream_id, alias, overrides).get('call_id', '')
 
 
+# OpenAI compatibility entries otherwise inherit the core's conservative
+# low/medium/high default. Keep this allowlist limited to model IDs whose
+# extended levels are known so custom providers are not advertised falsely.
+_OPENAI_COMPAT_EXTENDED_THINKING_LEVELS = {
+    'gpt-5.6-sol': ('low', 'medium', 'high', 'xhigh', 'max'),
+    'gpt-5.6-terra': ('low', 'medium', 'high', 'xhigh', 'max'),
+    'gpt-5.6-luna': ('low', 'medium', 'high', 'xhigh', 'max'),
+}
+
+
+def _openai_compat_thinking_levels(model_name: str):
+    """Return explicitly supported reasoning levels for a known upstream ID or user-configured model."""
+    value = str(model_name or '').strip().lower()
+    if not value:
+        return ()
+
+    # The core accepts model(value) suffixes for per-request effort. Strip the
+    # suffix before looking up the static capability of the underlying model.
+    value = re.sub(r'\([^()]*\)$', '', value).strip()
+    stripped_value = re.sub(r'^[a-z0-9._-]+-', '', value).strip()
+    candidates = tuple(dict.fromkeys((value, value.rsplit('/', 1)[-1], stripped_value, stripped_value.rsplit('/', 1)[-1])))
+
+    # 1. Check user-configured model thinking levels in model_thinking_configs.json
+    try:
+        from backend.model_thinking import load_model_thinking_configs
+        thinking_payload = load_model_thinking_configs()
+        user_configs = thinking_payload.get('configs') or {}
+        if isinstance(user_configs, dict):
+            for candidate in candidates:
+                cfg = user_configs.get(candidate)
+                if not cfg:
+                    for k, v in user_configs.items():
+                        if str(k or '').strip().lower() == candidate:
+                            cfg = v
+                            break
+                if isinstance(cfg, dict):
+                    configured_levels = cfg.get('thinking_levels')
+                    if configured_levels and isinstance(configured_levels, (list, tuple)):
+                        valid_levels = tuple(str(x).strip().lower() for x in configured_levels if str(x).strip())
+                        if valid_levels:
+                            return valid_levels
+                    elif configured_levels is not None and isinstance(configured_levels, (list, tuple)) and len(configured_levels) == 0:
+                        # User explicitly set empty thinking levels for this model
+                        return ()
+    except Exception:
+        pass
+
+    # 2. Fallback to built-in allowlist
+    for candidate in candidates:
+        levels = _OPENAI_COMPAT_EXTENDED_THINKING_LEVELS.get(candidate)
+        if levels:
+            return levels
+    return ()
+
+
 def build_openai_compatibility_block(entries):
     if not entries:
         return ''
@@ -4107,6 +4162,10 @@ def build_openai_compatibility_block(entries):
                     'name': model_name,
                     'alias': alias_name,
                     'image': is_agnes_media and 'image' in model_name.lower(),
+                    # This becomes the per-model capability snapshot used by
+                    # the core after API-key selection; omit it for unknown
+                    # models so the core keeps its conservative default.
+                    'thinking_levels': _openai_compat_thinking_levels(model_name),
                 })
 
     lines = ['openai-compatibility:']
@@ -4145,6 +4204,13 @@ def build_openai_compatibility_block(entries):
             ])
             if model.get('image'):
                 lines.append('        image: true')
+            thinking_levels = model.get('thinking_levels') or ()
+            if thinking_levels:
+                rendered_levels = ', '.join(f'"{level}"' for level in thinking_levels)
+                lines.extend([
+                    '        thinking:',
+                    f'          levels: [{rendered_levels}]',
+                ])
     return '\n'.join(lines) + '\n'
 
 

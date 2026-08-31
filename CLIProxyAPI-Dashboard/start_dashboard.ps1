@@ -72,7 +72,7 @@ function Get-DashboardListenerPids {
         try {
             $process = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerPid" -ErrorAction Stop
             $commandLine = [string]$process.CommandLine
-            if ($process.Name -match '^python(?:\.exe)?$' -and $commandLine -match '(?i)CLIProxyAPI-Dashboard[\\/]app\.py') {
+            if ($process.Name -match '^python(?:\.exe)?$' -and ($commandLine -match '(?i)CLIProxyAPI-Dashboard[\\/]app\.py' -or $commandLine -match '(?i)\bapp\.py\b')) {
                 $dashboardPids.Add([int]$listenerPid)
             }
         } catch {

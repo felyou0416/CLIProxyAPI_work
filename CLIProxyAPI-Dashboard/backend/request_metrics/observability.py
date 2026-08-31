@@ -3,11 +3,13 @@ import time
 
 from backend.auth import list_auth_files, get_configured_provider_models
 from backend.tools import get_provider_model_test_state
+from backend.paths import PROXY_STDOUT, REQUEST_ARCHIVE_DIR
 from backend.request_metrics.parsing import (
     parse_error_logs,
     parse_precise_request_events,
     parse_proxy_requests,
     prune_request_logs,
+    _request_log_dirs,
 )
 from backend.request_metrics.merge import merge_request_events
 from backend.request_metrics.summary import summarize_auth_health, summarize_clients
@@ -38,9 +40,50 @@ _REQUEST_EVENTS_CACHE = {
     'refreshed_at': 0.0,
     'generation': 0,
     'expires_at': 0.0,
+    'source_signatures': None,
     'events': [],
 }
 _REQUEST_EVENTS_CACHE_WAIT_SECONDS = 90.0
+
+
+def _request_log_source_signatures() -> tuple[tuple[str, int, int], ...]:
+    """Return signatures for every file consumed by the request-event parsers."""
+    paths = {}
+    for log_dir in _request_log_dirs():
+        try:
+            if not log_dir.is_dir():
+                continue
+            for path in log_dir.glob('*.log'):
+                if path.is_file():
+                    paths[str(path)] = path
+        except Exception:
+            continue
+
+    for path in (PROXY_STDOUT,):
+        try:
+            if path.is_file():
+                paths[str(path)] = path
+        except Exception:
+            continue
+
+    try:
+        if REQUEST_ARCHIVE_DIR.is_dir():
+            for path in REQUEST_ARCHIVE_DIR.glob('request-events-*.jsonl'):
+                if path.is_file():
+                    paths[str(path)] = path
+    except Exception:
+        pass
+
+    signatures = []
+    for key, path in paths.items():
+        try:
+            stat = path.stat()
+            signatures.append((key, int(stat.st_mtime_ns), int(stat.st_size)))
+        except Exception:
+            continue
+    signatures.sort(key=lambda item: item[0])
+    return tuple(signatures)
+
 
 # Fallback constants document the runtime defaults; state.json values are read
 # through load_request_monitoring_config at each refresh cycle.
@@ -140,6 +183,7 @@ def _clear_request_events_cache() -> dict:
         _REQUEST_EVENTS_CACHE['refreshing'] = False
         _REQUEST_EVENTS_CACHE['refreshed_at'] = time.time()
         _REQUEST_EVENTS_CACHE['expires_at'] = 0.0
+        _REQUEST_EVENTS_CACHE['source_signatures'] = _request_log_source_signatures()
         _REQUEST_EVENTS_CACHE['events'] = []
         _REQUEST_EVENTS_CACHE_COND.notify_all()
         return _request_events_cache_view()
@@ -224,10 +268,12 @@ def _request_events_cache_view() -> dict:
     }
 
 
-def _rebuild_request_events_cache() -> dict:
+def _rebuild_request_events_cache(start_signatures=None) -> dict:
     if not request_monitoring_enabled():
         return _clear_request_events_cache()
     config = load_request_monitoring_config()
+    if start_signatures is None:
+        start_signatures = _request_log_source_signatures()
     try:
         events = merge_request_events(
             # proxy.stdout.log is append-only and can span months. It only
@@ -270,6 +316,7 @@ def _rebuild_request_events_cache() -> dict:
             if not request_monitoring_enabled():
                 _REQUEST_EVENTS_CACHE['events'] = []
             _REQUEST_EVENTS_CACHE['expires_at'] = now + config['request_events_cache_ttl_seconds']
+            _REQUEST_EVENTS_CACHE['source_signatures'] = start_signatures
             _REQUEST_EVENTS_CACHE['ready'] = True
             _REQUEST_EVENTS_CACHE['generation'] = int(_REQUEST_EVENTS_CACHE.get('generation') or 0) + 1
             _REQUEST_EVENTS_CACHE['refreshing'] = False
@@ -282,15 +329,30 @@ def _rebuild_request_events_cache() -> dict:
             return _request_events_cache_view()
 
 
+def _has_new_request_logs(refreshed_at: float, source_signatures=None) -> bool:
+    """Check whether a consumed request-log file was created, changed, or removed."""
+    if refreshed_at <= 0:
+        return True
+    previous = source_signatures
+    if previous is None:
+        previous = _REQUEST_EVENTS_CACHE.get('source_signatures')
+    if previous is None:
+        return True
+    return _request_log_source_signatures() != tuple(previous)
+
+
 def get_request_events_cache(force: bool = False, wait: bool = True) -> dict:
     """Return a stable request-event snapshot, rebuilding in the background when requested."""
     if not request_monitoring_enabled():
         return _clear_request_events_cache()
     with _REQUEST_EVENTS_CACHE_COND:
         now = time.time()
+        refreshed_at = float(_REQUEST_EVENTS_CACHE.get('refreshed_at') or 0.0)
+        has_new_logs = _has_new_request_logs(refreshed_at)
         fresh = (
             _REQUEST_EVENTS_CACHE.get('ready')
             and now < float(_REQUEST_EVENTS_CACHE.get('expires_at') or 0.0)
+            and not has_new_logs
         )
         if not force and fresh:
             return _request_events_cache_view()
@@ -305,15 +367,17 @@ def get_request_events_cache(force: bool = False, wait: bool = True) -> dict:
                 _REQUEST_EVENTS_CACHE_COND.wait(timeout=remaining)
             return _request_events_cache_view()
         _REQUEST_EVENTS_CACHE['refreshing'] = True
+        rebuild_signatures = _request_log_source_signatures()
 
     if not wait:
         threading.Thread(
             target=_rebuild_request_events_cache,
+            args=(rebuild_signatures,),
             name='dashboard-request-events-cache',
             daemon=True,
         ).start()
         return _request_events_cache_view()
-    return _rebuild_request_events_cache()
+    return _rebuild_request_events_cache(rebuild_signatures)
 
 
 def ensure_observability_cache() -> dict:
@@ -346,8 +410,7 @@ def start_observability_refresh_thread(interval_seconds: float | None = None) ->
             if config['request_monitoring_enabled']:
                 refresh_observability_cache()
                 # Build the heavier, pagination-specific snapshot independently.
-                # This lets the request page return a loading state while the
-                # full scan runs in the background.
+                # The cache checks source signatures and performs any rebuild in the background.
                 get_request_events_cache(wait=False)
             else:
                 _clear_observability_cache()

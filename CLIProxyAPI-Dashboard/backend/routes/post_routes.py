@@ -433,6 +433,7 @@ def handle_post(handler, parsed, data):
             return True
         try:
             result = save_model_thinking_configs(data)
+            rebuild = rebuild_runtime_config_from_state(load_state())
         except ValueError as e:
             send_json(handler, {'ok': False, 'message': str(e)}, status=400)
             return True
@@ -441,9 +442,11 @@ def handle_post(handler, parsed, data):
             return True
         send_json(handler, {
             'ok': True,
-            'message': 'Saved model thinking/reasoning configurations.',
+            'message': '已保存模型思考/推理配置，并已同步更新运行时配置。',
             'configs': result.get('configs', {}),
             'updated_at': result.get('updated_at', 0),
+            'runtime_rebuilt': bool(rebuild.get('rebuilt')),
+            'runtime_validation': rebuild.get('validation'),
         })
         return True
     if parsed.path == '/api/aggregate-models/apply-runtime':

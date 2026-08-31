@@ -7,8 +7,91 @@ let requestEventsTotalPages = 1;
 let requestEventsStateHydrated = false;
 let requestEventsLoadSeq = 0;
 let requestEventsLastMeta = null;
+let _requestEventsAutoRefreshTimer = null;
+let _requestEventsRetryTimer = null;
+let _requestEventsRetrySeq = 0;
+let _requestEventsAutoRefreshEnabled = true;
+let _lastRequestEventsFingerprint = '';
 
 const REQUEST_EVENTS_STATE_KEY = 'dashboard_requests_pagination_v1';
+
+function updateAutoRefreshButtonUi() {
+  const btn = document.getElementById('req-auto-refresh-btn');
+  const text = document.getElementById('req-auto-refresh-text');
+  if (btn) {
+    btn.classList.toggle('is-active', _requestEventsAutoRefreshEnabled);
+  }
+  if (text) {
+    const en = typeof getLanguage === 'function' && getLanguage() === 'en';
+    text.textContent = _requestEventsAutoRefreshEnabled
+      ? (en ? 'Auto Refresh (5s)' : '自动刷新 (5s)')
+      : (en ? 'Auto Refresh' : '自动刷新');
+  }
+}
+
+function startRequestEventsAutoRefresh() {
+  stopRequestEventsAutoRefresh();
+  if (!_requestEventsAutoRefreshEnabled) return;
+  _requestEventsAutoRefreshTimer = setInterval(() => {
+    if (document.hidden) return;
+    const sec = document.getElementById('section-requests');
+    if (!sec || sec.hidden || sec.style.display === 'none') return;
+    const modal = document.getElementById('request-detail-modal');
+    if (modal && !modal.hidden && modal.style.display !== 'none') return;
+    if (requestEventsCurrentPage > 1) return;
+    loadRequestEventsPanel(true, true);
+  }, 5000);
+}
+
+function stopRequestEventsAutoRefresh() {
+  if (_requestEventsAutoRefreshTimer) {
+    clearInterval(_requestEventsAutoRefreshTimer);
+    _requestEventsAutoRefreshTimer = null;
+  }
+}
+
+function clearRequestEventsRetry() {
+  if (_requestEventsRetryTimer) {
+    clearTimeout(_requestEventsRetryTimer);
+    _requestEventsRetryTimer = null;
+  }
+}
+
+function scheduleRequestEventsRetry(isSilent, loadSeq) {
+  clearRequestEventsRetry();
+  _requestEventsRetrySeq = loadSeq;
+  _requestEventsRetryTimer = window.setTimeout(() => {
+    _requestEventsRetryTimer = null;
+    if (_requestEventsRetrySeq === requestEventsLoadSeq) {
+      loadRequestEventsPanel(false, isSilent);
+    }
+  }, 350);
+}
+
+function toggleRequestEventsAutoRefresh() {
+  _requestEventsAutoRefreshEnabled = !_requestEventsAutoRefreshEnabled;
+  updateAutoRefreshButtonUi();
+  persistRequestEventsState();
+  if (_requestEventsAutoRefreshEnabled) {
+    startRequestEventsAutoRefresh();
+    loadRequestEventsPanel(true, true);
+  } else {
+    stopRequestEventsAutoRefresh();
+  }
+}
+
+// Global page visibility handler for smart power-saving
+if (typeof document !== 'undefined' && !window._reqEventsVisibilityBound) {
+  window._reqEventsVisibilityBound = true;
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && _requestEventsAutoRefreshEnabled) {
+      const sec = document.getElementById('section-requests');
+      if (sec && !sec.hidden && sec.style.display !== 'none' && requestEventsCurrentPage === 1) {
+        loadRequestEventsPanel(true, true);
+      }
+    }
+  });
+}
 
 function hydrateRequestEventsState() {
   if (requestEventsStateHydrated) return;
@@ -24,6 +107,13 @@ function hydrateRequestEventsState() {
     if (Number.isFinite(page)) {
       requestEventsCurrentPage = Math.max(1, Math.floor(page));
     }
+    const successFilter = String(state?.quickSuccessFilter || '').trim();
+    if (successFilter === 'true' || successFilter === 'false') {
+      _quickSuccessFilter = successFilter;
+    }
+    if (typeof state?.autoRefresh === 'boolean') {
+      _requestEventsAutoRefreshEnabled = state.autoRefresh;
+    }
     const selectors = [
       document.getElementById('request-page-size-select'),
       document.getElementById('request-page-size'),
@@ -31,6 +121,15 @@ function hydrateRequestEventsState() {
     selectors.forEach((select) => {
       if (select) select.value = String(requestEventsPageSize);
     });
+    const modalSuccess = document.getElementById('request-filter-success');
+    if (modalSuccess && _quickSuccessFilter) {
+      modalSuccess.value = _quickSuccessFilter;
+    }
+    syncQuickFilterButtonStates();
+    updateAutoRefreshButtonUi();
+    if (_requestEventsAutoRefreshEnabled) {
+      startRequestEventsAutoRefresh();
+    }
   } catch {
     // Ignore malformed local state and use the defaults.
   }
@@ -41,6 +140,8 @@ function persistRequestEventsState() {
     localStorage.setItem(REQUEST_EVENTS_STATE_KEY, JSON.stringify({
       page: requestEventsCurrentPage,
       pageSize: requestEventsPageSize,
+      quickSuccessFilter: _quickSuccessFilter || '',
+      autoRefresh: _requestEventsAutoRefreshEnabled,
     }));
   } catch {
     // Storage may be unavailable in private or restricted browser contexts.
@@ -190,15 +291,58 @@ function isModelsRequestEvent(item) {
   return path === '/v1/models';
 }
 
+let _quickSuccessFilter = ''; // '' | 'true' | 'false'
+
+function syncQuickFilterButtonStates() {
+  const successBtn = document.getElementById('req-filter-success-btn');
+  const failedBtn = document.getElementById('req-filter-failed-btn');
+  if (successBtn) successBtn.classList.toggle('is-active', _quickSuccessFilter === 'true');
+  if (failedBtn) failedBtn.classList.toggle('is-active', _quickSuccessFilter === 'false');
+}
+
 function getRequestEventFilters() {
+  const modalSuccess = document.getElementById('request-filter-success')?.value?.trim() || '';
+  const successVal = _quickSuccessFilter || modalSuccess;
   return {
     ip: document.getElementById('request-filter-ip')?.value?.trim() || '',
     model: document.getElementById('request-filter-model')?.value?.trim() || '',
     provider: document.getElementById('request-filter-provider')?.value?.trim() || '',
     status: document.getElementById('request-filter-status')?.value?.trim() || '',
-    success: document.getElementById('request-filter-success')?.value?.trim() || '',
+    success: successVal,
     includeModels: !!document.getElementById('request-include-models')?.checked,
   };
+}
+
+function toggleOnlySuccessRequests() {
+  if (_quickSuccessFilter === 'true') {
+    _quickSuccessFilter = '';
+  } else {
+    _quickSuccessFilter = 'true';
+  }
+  syncQuickFilterButtonStates();
+  const successSelect = document.getElementById('request-filter-success');
+  if (successSelect) {
+    successSelect.value = _quickSuccessFilter;
+  }
+  requestEventsCurrentPage = 1;
+  persistRequestEventsState();
+  loadRequestEventsPanel(false);
+}
+
+function toggleOnlyFailedRequests() {
+  if (_quickSuccessFilter === 'false') {
+    _quickSuccessFilter = '';
+  } else {
+    _quickSuccessFilter = 'false';
+  }
+  syncQuickFilterButtonStates();
+  const successSelect = document.getElementById('request-filter-success');
+  if (successSelect) {
+    successSelect.value = _quickSuccessFilter;
+  }
+  requestEventsCurrentPage = 1;
+  persistRequestEventsState();
+  loadRequestEventsPanel(false);
 }
 
 function getRequestEventsPageSize() {
@@ -300,8 +444,16 @@ function requestEventFingerprint(item) {
   const requested = getRequestEventModelLabel(item);
   const routed = getRequestEventRoutedModelLabel(item);
   const provider = requestProviderLabel(item);
+  const effort = String(item?.reasoning_effort || '').trim();
   const error = success ? '' : String(item?.error_summary || '').trim();
-  return [path, status, success ? 1 : 0, requested, routed, provider, error].join('|');
+  return [path, status, success ? 1 : 0, requested, routed, provider, effort, error].join('|');
+}
+
+function requestEventsSnapshotFingerprint(data, items, total) {
+  const generation = Number(data?.cache_generation || 0);
+  const dataAsOf = Number(data?.data_as_of || 0);
+  const rows = items.slice(0, 8).map(item => JSON.stringify(item)).join('|');
+  return [total, generation, dataAsOf, rows].join('_');
 }
 
 function sumRequestGroupUsage(items) {
@@ -313,6 +465,7 @@ function sumRequestGroupUsage(items) {
   let hasTokens = false;
   let latencySum = 0;
   let latencyCount = 0;
+  const effort = (items && items[0]?.reasoning_effort) || '';
   for (const item of items || []) {
     const p = item?.prompt_tokens;
     const c = item?.completion_tokens;
@@ -344,6 +497,7 @@ function sumRequestGroupUsage(items) {
     total_tokens: hasTokens ? total : null,
     cached_tokens: cached || null,
     reasoning_tokens: reasoning || null,
+    reasoning_effort: effort || null,
     latency_ms: latencyCount ? Math.round(latencySum / latencyCount) : null,
     latency_sum_ms: latencyCount ? Math.round(latencySum) : null,
   };
@@ -445,6 +599,7 @@ function requestEventRowHtml(item, opts = {}) {
   const totalTokens = isAggregated ? aggregateUsage.total_tokens : item.total_tokens;
   const cachedTokens = isAggregated ? aggregateUsage.cached_tokens : item.cached_tokens;
   const reasoningTokens = isAggregated ? aggregateUsage.reasoning_tokens : item.reasoning_tokens;
+  const reasoningEffort = isAggregated ? (aggregateUsage.reasoning_effort || item.reasoning_effort) : item.reasoning_effort;
   const latencyMs = isAggregated
     ? (aggregateUsage.latency_ms != null ? aggregateUsage.latency_ms : item.latency_ms)
     : item.latency_ms;
@@ -506,26 +661,27 @@ function requestEventRowHtml(item, opts = {}) {
   const childStyle = isChild ? ' style="display:none;"' : '';
   const en = typeof getLanguage === 'function' && getLanguage() === 'en';
   const badgeTone = success ? 'is-ok' : 'is-error';
-  const badgeHtml = badgeCount >= 2
+  const badgeSlotHtml = badgeCount >= 2
     ? `<span class="req-dup-badge ${badgeTone}" data-gid="${groupId}" title="${en ? 'Click to expand ' + badgeCount + ' entries' : '点击展开 ' + badgeCount + ' 条'}" role="button" tabindex="0" aria-expanded="false">×${badgeCount}</span>`
-    : '';
-
-  const childIndent = isChild ? '<span class="req-child-tree-icon" title="折叠展开项">↳ </span>' : '';
+    : (isChild
+      ? `<span class="req-child-tree-icon" title="折叠展开项">↳</span>`
+      : `<span class="req-badge-spacer" aria-hidden="true"></span>`);
 
   return `
     <tr class="request-row ${success ? 'is-ok' : 'is-error'}${childClass}${isAggregated ? ' req-group-head' : ''} is-clickable" ${groupAttr}${childStyle} onclick="showRequestDetailModal('${escapeHtml(reqKey)}')">
       <!-- 1. Time & Latency -->
       <td class="req-col-time">
-        <div style="display: flex; flex-direction: column; gap: 2px;">
-          <div style="display: flex; align-items: center; gap: 5px;">
-            ${childIndent}
-            ${badgeHtml}
-            <span class="request-time font-mono" style="font-weight: 700; font-size: 12px;">${escapeHtml(time || day)}</span>
-            ${latencyText ? `<span class="req-latency-pill" title="请求耗时">⏱️ ${escapeHtml(latencyText)}</span>` : ''}
-          </div>
-          <div style="display: flex; align-items: center; gap: 4px; font-size: 10px; opacity: 0.7;">
-            <span>${escapeHtml(day)}</span>
-            ${respTimeShort ? `<span title="完成于 ${escapeHtml(item.response_time)}">· 🏁 ${escapeHtml(respTimeShort)}</span>` : ''}
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <div class="req-badge-slot">${badgeSlotHtml}</div>
+          <div style="display: flex; flex-direction: column; gap: 3px; justify-content: center; min-width: 0;">
+            <div style="display: flex; align-items: baseline; gap: 6px; white-space: nowrap;">
+              <span class="request-time font-mono" style="font-weight: 700; font-size: 12px;" title="${respTimeShort ? '开始: ' + (item.request_time || time) + ' | 完成: ' + (item.response_time || respTimeShort) : ''}">${escapeHtml(time || day)}</span>
+              <span style="font-size: 10px; opacity: 0.65;">${escapeHtml(day)}</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 5px; white-space: nowrap;">
+              ${reasoningEffort ? `<span class="request-chip effort" title="${en ? 'Reasoning effort: ' : '模型推理强度: '}${escapeHtml(reasoningEffort)}">🧠 ${escapeHtml(reasoningEffort)}</span>` : ''}
+              ${latencyText ? `<span class="req-latency-pill" title="请求耗时">⏱️ ${escapeHtml(latencyText)}</span>` : ''}
+            </div>
           </div>
         </div>
       </td>
@@ -628,9 +784,10 @@ function getRequestEventsQueryKey(filters) {
   ]);
 }
 
-async function loadRequestEventsPanel(force = false) {
+async function loadRequestEventsPanel(force = false, isSilent = false) {
   hydrateRequestEventsState();
   const loadSeq = ++requestEventsLoadSeq;
+  clearRequestEventsRetry();
   const table = getRequestEventsTable();
   const filters = getRequestEventFilters();
   const queryKey = getRequestEventsQueryKey(filters);
@@ -640,11 +797,13 @@ async function loadRequestEventsPanel(force = false) {
     requestEventsCurrentPage = 1;
   }
 
-  if (table && !requestEventsLoaded) {
-    table.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 24px; color: var(--text-muted);">正在加载请求记录…</td></tr>';
+  if (!isSilent) {
+    if (table && !requestEventsLoaded) {
+      table.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 24px; color: var(--text-muted);">正在加载请求记录…</td></tr>';
+    }
+    setRequestEventsBusy(true);
+    setRequestEventsMeta(requestEventsLastMeta?.data, requestEventsLastMeta?.shownCount || 0, true);
   }
-  setRequestEventsBusy(true);
-  setRequestEventsMeta(requestEventsLastMeta?.data, requestEventsLastMeta?.shownCount || 0, true);
 
   const offset = (requestEventsCurrentPage - 1) * requestEventsPageSize;
 
@@ -655,6 +814,7 @@ async function loadRequestEventsPanel(force = false) {
     const total = Number(data?.total || 0);
 
     if (isRequestMonitoringDisabled(data)) {
+      clearRequestEventsRetry();
       requestEventsLoaded = true;
       requestEventsTotal = 0;
       requestEventsTotalPages = 1;
@@ -671,19 +831,21 @@ async function loadRequestEventsPanel(force = false) {
       return;
     }
 
-    // The snapshot is rebuilt in the background. During a first load, avoid
-    // treating its temporary empty response as an empty log. During a refresh,
-    // render the previous stable generation but keep polling until the new one
-    // has arrived so the table cannot remain silently stuck on stale records.
-    if (data?.refreshing && !data?.cached) {
-      if (table && !requestEventsLoaded) {
-        table.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 24px; color: var(--text-muted);">正在准备请求记录…</td></tr>';
+    if (data?.refreshing) {
+      if (!data?.cached) {
+        if (table && !requestEventsLoaded && !isSilent) {
+          table.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 24px; color: var(--text-muted);">正在准备请求记录…</td></tr>';
+        }
+        setRequestEventsMeta(data, 0, true);
+        scheduleRequestEventsRetry(isSilent, loadSeq);
+        return;
       }
-      setRequestEventsMeta(data, 0, true);
-      window.setTimeout(() => {
-        if (loadSeq === requestEventsLoadSeq) loadRequestEventsPanel(false);
-      }, 350);
-      return;
+      if (requestEventsLoaded) {
+        setRequestEventsMeta(requestEventsLastMeta?.data || data, requestEventsLastMeta?.shownCount || items.length, true);
+      }
+      scheduleRequestEventsRetry(isSilent, loadSeq);
+    } else {
+      clearRequestEventsRetry();
     }
 
     requestEventsTotal = total;
@@ -691,8 +853,19 @@ async function loadRequestEventsPanel(force = false) {
     if (requestEventsCurrentPage > requestEventsTotalPages && requestEventsTotalPages > 0) {
       requestEventsCurrentPage = requestEventsTotalPages;
       persistRequestEventsState();
-      return loadRequestEventsPanel(false);
+      return loadRequestEventsPanel(false, isSilent);
     }
+
+    const fp = requestEventsSnapshotFingerprint(data, items, total);
+    if (isSilent && fp === _lastRequestEventsFingerprint && requestEventsLoaded) {
+      requestEventsLastMeta = {
+        data: { ...(data || {}), total },
+        shownCount: items.length,
+      };
+      setRequestEventsMeta(requestEventsLastMeta.data, items.length, !!data?.refreshing);
+      return;
+    }
+    _lastRequestEventsFingerprint = fp;
 
     if (table) {
       table.innerHTML = items.length
@@ -711,15 +884,13 @@ async function loadRequestEventsPanel(force = false) {
 
     if (data?.refreshing) {
       setRequestEventsMeta(requestEventsLastMeta.data, items.length, true);
-      window.setTimeout(() => {
-        if (loadSeq === requestEventsLoadSeq) loadRequestEventsPanel(false);
-      }, 350);
       return;
     }
 
     setRequestEventsMeta(requestEventsLastMeta.data, items.length);
   } catch (error) {
     if (loadSeq !== requestEventsLoadSeq) return;
+    if (isSilent) return; // Ignore silent polling errors without disrupting UI
     const message = escapeHtml(error.message || '加载请求记录失败');
     if (requestEventsLoaded) {
       const meta = document.getElementById('request-events-meta');
@@ -732,7 +903,7 @@ async function loadRequestEventsPanel(force = false) {
       table.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 24px; color: #ef4444;">${message}</td></tr>`;
     }
   } finally {
-    if (loadSeq === requestEventsLoadSeq) setRequestEventsBusy(false);
+    if (loadSeq === requestEventsLoadSeq && !isSilent) setRequestEventsBusy(false);
   }
 }
 
@@ -840,6 +1011,11 @@ function renderRequestPagination() {
 }
 
 function applyRequestEventFilters() {
+  const successSelect = document.getElementById('request-filter-success');
+  if (successSelect) {
+    _quickSuccessFilter = successSelect.value;
+    syncQuickFilterButtonStates();
+  }
   hydrateRequestEventsState();
   requestEventsCurrentPage = 1;
   persistRequestEventsState();
@@ -847,6 +1023,8 @@ function applyRequestEventFilters() {
 }
 
 function clearRequestEventFilters() {
+  _quickSuccessFilter = '';
+  syncQuickFilterButtonStates();
   ['request-filter-ip', 'request-filter-model', 'request-filter-provider', 'request-filter-status'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
@@ -878,6 +1056,8 @@ function submitRequestSettings() {
 }
 
 function resetAndClearRequestSettings() {
+  _quickSuccessFilter = '';
+  syncQuickFilterButtonStates();
   ['request-filter-ip', 'request-filter-model', 'request-filter-provider', 'request-filter-status'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
@@ -964,6 +1144,7 @@ function showRequestDetailModal(reqKey) {
   safeSetText('rd-req-model', reqModel);
   safeSetText('rd-routed-model', routedModel);
   safeSetText('rd-provider', provider);
+  safeSetText('rd-reasoning-effort', item.reasoning_effort || '-');
   safeSetText('rd-auth', authText);
 
   const authFileRow = document.getElementById('rd-auth-file-row');
@@ -1080,13 +1261,14 @@ function copyRequestCurlCommand() {
   const item = _currentDetailItem;
   const path = item.path || '/v1/chat/completions';
   const model = item.requested_model || 'gpt-4o';
+  const effortField = item.reasoning_effort ? `,\n    "reasoning_effort": "${item.reasoning_effort}"` : '';
   const curl = `curl -X POST "http://127.0.0.1:8000${path}" \\\n` +
     `  -H "Content-Type: application/json" \\\n` +
     `  -H "Authorization: Bearer YOUR_API_KEY" \\\n` +
     `  -d '{\n` +
     `    "model": "${model}",\n` +
     `    "messages": [{"role": "user", "content": "Hello"}],\n` +
-    `    "stream": ${item.stream ? 'true' : 'false'}\n` +
+    `    "stream": ${item.stream ? 'true' : 'false'}${effortField}\n` +
     `  }'`;
   navigator.clipboard.writeText(curl).then(() => {
     if (typeof showMessage === 'function') showMessage('已复制 cURL 请求示例到剪贴板！');

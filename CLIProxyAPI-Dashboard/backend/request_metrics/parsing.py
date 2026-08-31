@@ -361,6 +361,7 @@ _PRECISE_EVENT_KEYS = (
     'total_tokens',
     'cached_tokens',
     'reasoning_tokens',
+    'reasoning_effort',
     'user_agent',
     'upstream_url',
     'auth_label',
@@ -387,7 +388,7 @@ _OBSERVABILITY_CACHE = {
 _REQUEST_LOG_PARSE_CACHE_LOCK = threading.Lock()
 _PRECISE_REQUEST_LOG_CACHE = {}
 _ERROR_REQUEST_LOG_CACHE = {}
-_REQUEST_LOG_PARSE_CACHE_VERSION = 4  # bumped when event format or extraction logic changes
+_REQUEST_LOG_PARSE_CACHE_VERSION = 5  # bumped when event format or extraction logic changes
 _OBSERVABILITY_EVENT_LIMIT = 300
 _OBSERVABILITY_SUMMARY_LIMIT = 200
 
@@ -588,6 +589,93 @@ def _extract_model_from_text(body_text: str) -> str:
 
 def _extract_json_model(body_text: str) -> str:
     return _extract_model_from_text(body_text)
+
+
+def _extract_reasoning_effort(body_text: str, content: str = '') -> str:
+    """从请求体中提取推理强度（OpenAI reasoning_effort/reasoning.effort、Anthropic thinking、Gemini thinking_config 等）。"""
+    raw = str(body_text or '').strip()
+
+    def _from_dict(d: dict) -> str:
+        if not isinstance(d, dict):
+            return ''
+        re_val = d.get('reasoning_effort')
+        if re_val and isinstance(re_val, (str, int)):
+            return str(re_val).strip()
+        r = d.get('reasoning')
+        if isinstance(r, dict):
+            eff = r.get('effort') or r.get('reasoning_effort')
+            if eff:
+                return str(eff).strip()
+            bud = r.get('budget_tokens') or r.get('budget') or r.get('thinking_budget')
+            if bud:
+                return f'{bud} tok'
+        elif isinstance(r, str) and r.strip():
+            return r.strip()
+        th = d.get('thinking')
+        if isinstance(th, dict):
+            t_type = str(th.get('type') or '').strip()
+            eff = th.get('effort') or th.get('reasoning_effort')
+            if eff:
+                return str(eff).strip()
+            bud = th.get('budget_tokens') or th.get('thinking_budget')
+            if bud:
+                return f'{bud} tok'
+            if t_type and t_type not in ('enabled', 'disabled'):
+                return t_type
+        tc = d.get('thinking_config') or d.get('thinkingConfig')
+        if isinstance(tc, dict):
+            eff = tc.get('reasoning_effort') or tc.get('effort')
+            if eff:
+                return str(eff).strip()
+            bud = tc.get('thinking_budget') or tc.get('thinkingBudget') or tc.get('budget_tokens')
+            if bud:
+                return f'{bud} tok'
+        tb = d.get('thinking_budget') or d.get('thinkingBudget')
+        if tb:
+            return f'{tb} tok'
+        eb = d.get('extra_body')
+        if isinstance(eb, dict):
+            res = _from_dict(eb)
+            if res:
+                return res
+        return ''
+
+    effort = ''
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                effort = _from_dict(parsed)
+        except Exception:
+            pass
+
+    if not effort and raw:
+        m = re.search(r'"reasoning_effort"\s*:\s*"([^"]+)"', raw)
+        if m:
+            effort = m.group(1).strip()
+        else:
+            m = re.search(r'"reasoning"\s*:\s*\{[^{}]*"effort"\s*:\s*"([^"]+)"', raw)
+            if m:
+                effort = m.group(1).strip()
+            else:
+                m = re.search(r'"(?:budget_tokens|thinking_budget)"\s*:\s*(\d+)', raw)
+                if m:
+                    effort = f'{m.group(1)} tok'
+
+    if not effort and content and '=== API REQUEST' in content:
+        for section in content.split('=== API REQUEST')[1:]:
+            if '\nBody:\n' in section or 'Body:\n' in section:
+                api_body = (section.split('\nBody:\n', 1)[1] if '\nBody:\n' in section else section.split('Body:\n', 1)[1]).split('===', 1)[0].strip()
+                try:
+                    parsed = json.loads(api_body)
+                    if isinstance(parsed, dict):
+                        effort = _from_dict(parsed)
+                        if effort:
+                            break
+                except Exception:
+                    pass
+
+    return effort
 
 
 #  "API REQUEST N" section 只需要读 Timestamp / Upstream URL / HTTP Method /
@@ -871,6 +959,38 @@ def _append_archived_request_event(event: dict) -> None:
         fh.write(json.dumps(payload, ensure_ascii=False, separators=(',', ':')) + '\n')
 
 
+_ARCHIVE_FILE_CACHE_LOCK = threading.Lock()
+_ARCHIVE_FILE_CACHE: dict[str, dict] = {}
+
+
+def _get_parsed_archive_file_items(archive_path: Path) -> list[dict]:
+    try:
+        stat = archive_path.stat()
+    except Exception:
+        return []
+    sig = (int(stat.st_mtime_ns), int(stat.st_size))
+    with _ARCHIVE_FILE_CACHE_LOCK:
+        cached = _ARCHIVE_FILE_CACHE.get(str(archive_path))
+        if cached and cached.get('sig') == sig:
+            return cached.get('items', [])
+    items = []
+    try:
+        for line in archive_path.read_text(encoding='utf-8', errors='ignore').splitlines():
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+                if isinstance(item, dict):
+                    items.append(item)
+            except Exception:
+                continue
+    except Exception:
+        return []
+    with _ARCHIVE_FILE_CACHE_LOCK:
+        _ARCHIVE_FILE_CACHE[str(archive_path)] = {'sig': sig, 'items': items}
+    return items
+
+
 def _tail_archived_request_events(limit: int, source: str | None = None) -> list[dict]:
     """Return recent archived events, or all retained events when limit is zero."""
     if not REQUEST_ARCHIVE_DIR.exists():
@@ -885,18 +1005,8 @@ def _tail_archived_request_events(limit: int, source: str | None = None) -> list
     except Exception:
         return []
     for archive_path in archive_files:
-        lines = (
-            archive_path.read_text(encoding='utf-8', errors='ignore').splitlines()
-            if limit <= 0
-            else _tail_lines(archive_path, max(limit * 2, 100))
-        )
-        for line in reversed(lines):
-            try:
-                item = json.loads(line)
-            except Exception:
-                continue
-            if not isinstance(item, dict):
-                continue
+        file_items = _get_parsed_archive_file_items(archive_path)
+        for item in reversed(file_items):
             if source and str(item.get('source') or '') != source:
                 continue
             items.append(item)
@@ -1188,6 +1298,7 @@ def _parse_request_log_file(path: Path, content: str, stat, error_log: bool = Fa
 
     actual_provider, actual_model, route_source, auth_label, auth_id, auth_type, upstream_url, upstream_method = _extract_actual_upstream(content)
     prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens = _extract_usage_tokens(content)
+    reasoning_effort = _extract_reasoning_effort(body, content)
 
     # auth_label 原本只是服务商名（如 "ung"），无法区分具体走的哪个账号/API Key。
     # 通过 auth_id 反查 active runtime config，补上 base_url 与 key 尾号，方便面板定位。
@@ -1280,6 +1391,7 @@ def _parse_request_log_file(path: Path, content: str, stat, error_log: bool = Fa
         'total_tokens': total_tokens,
         'cached_tokens': cached_tokens,
         'reasoning_tokens': reasoning_tokens,
+        'reasoning_effort': reasoning_effort,
         'stream': snippets.get('stream', False),
         'trace_id': snippets.get('trace_id') or '',
         'upstream_request_id': snippets.get('upstream_request_id') or '',

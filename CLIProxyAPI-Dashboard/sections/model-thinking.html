@@ -1,44 +1,58 @@
 <section id="section-model-thinking" class="panel panel-scroll section-view" hidden>
-  <div class="panel-head">
-    <div>
-      <h2 class="section-title">模型思考/推理配置</h2>
+  <div class="provider-layout">
+    <!-- Left Column: Provider / Category Sidebar -->
+    <div class="aggregate-panel-card provider-sidebar-card filter-rail" data-filter-rail="model-thinking">
+      <div class="aggregate-panel-head filter-rail-head" data-filter-rail-head style="margin-bottom: 8px;">
+        <div>
+          <div class="aggregate-step-label">Workspace</div>
+          <h3 style="margin: 0; font-size: 15px; font-weight: 800;">可调用模型 ID</h3>
+        </div>
+      </div>
+      <div class="model-thinking-sidebar-search-box" style="margin-bottom: 8px;">
+        <input id="model-thinking-search-input" type="search" class="model-proxy-search-input" placeholder="搜索模型 / 服务商..." oninput="setModelThinkingSearch(this.value)" style="width: 100%; height: 30px; font-size: 12px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); box-sizing: border-box;" />
+      </div>
+      <div id="model-thinking-groups" class="provider-model-map-tabs-vertical filter-rail-body"></div>
     </div>
-    <div class="action-row toolbar-scroll">
-      <button class="secondary" type="button" onclick="loadModelThinkingPanel(true)">刷新</button>
-      <button type="button" onclick="saveModelThinkingPanel()">保存配置</button>
+
+    <!-- Right Column: Actions Dock + Add Row + Provider Group Cards -->
+    <div class="provider-right-pane">
+      <div class="provider-page-head" style="margin-bottom: 12px;">
+        <div class="provider-action-dock">
+          <button class="secondary" type="button" onclick="clearThinkingSelection()">清空选择</button>
+          <button class="secondary" type="button" onclick="quickAddPopularModels()">+ 主流推理模型</button>
+          <button class="secondary" id="thinking-batch-extended5-btn" type="button" onclick="batchApplyPresetToSelected('extended_5')">设为 5 级扩展 [low~max]</button>
+          <button class="secondary" id="thinking-batch-full6-btn" type="button" onclick="batchApplyPresetToSelected('full_6')">设为 6 级全量</button>
+          <button class="secondary" id="thinking-batch-default-btn" type="button" onclick="batchApplyPresetToSelected('none')">恢复默认</button>
+          <button class="secondary" id="thinking-delete-selected-btn" type="button" onclick="deleteSelectedThinkingModels()">删除选中</button>
+          <button class="secondary" type="button" onclick="loadModelThinkingPanel(true)">刷新</button>
+          <button id="thinking-save-all-btn" class="primary btn-save-thinking" type="button" onclick="saveModelThinkingPanel()">
+            <span id="thinking-save-btn-text">保存配置</span>
+            <span id="thinking-unsaved-badge" class="unsaved-badge" style="display: none;">● 未保存</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Add Model Bar -->
+      <div class="model-thinking-add-row" style="margin-bottom: 10px;">
+        <select id="model-thinking-select-id" class="model-thinking-select-dropdown" onchange="onModelThinkingSelectModel(this.value)">
+          <option value="">-- 选择已有模型 --</option>
+        </select>
+        <span class="model-thinking-add-or">或</span>
+        <input id="model-thinking-add-id" class="model-proxy-search-input" type="text" placeholder="输入模型 ID (如 gpt-5.6-sol, deepseek-r1)" />
+        <select id="model-thinking-add-preset" class="model-thinking-select-preset-add">
+          <option value="extended_5">预设: 扩展 5 级 [low~max] ★</option>
+          <option value="full_6">预设: 全量 6 级 [minimal~max]</option>
+          <option value="standard_3">预设: 标准 3 级 [low~high]</option>
+          <option value="none">预设: 核心默认</option>
+        </select>
+        <button type="button" class="secondary" onclick="addManualModelThinkingRow()">添加模型</button>
+      </div>
+
+      <!-- Summary Info Banner -->
+      <div id="model-thinking-summary" class="auth-chip" style="margin-bottom: 10px;">-</div>
+
+      <!-- Model Group Cards Container -->
+      <div id="model-thinking-list" class="provider-model-list"></div>
     </div>
-  </div>
-
-  <div class="model-thinking-toolbar">
-    <input id="model-thinking-search" class="model-proxy-search-input" type="search" placeholder="搜索已配置模型 ID" oninput="setModelThinkingSearch(this.value)" />
-  </div>
-
-  <div class="model-thinking-add-row">
-    <select id="model-thinking-select-id" class="model-thinking-select-dropdown" onchange="onModelThinkingSelectModel(this.value)">
-      <option value="">-- 选择已有模型 --</option>
-    </select>
-    <span class="model-thinking-add-or">或</span>
-    <input id="model-thinking-add-id" class="model-proxy-search-input" type="text" placeholder="输入模型 ID" />
-    <button type="button" class="secondary" onclick="addManualModelThinkingRow()">添加</button>
-  </div>
-
-  <div id="model-thinking-summary" class="auth-chip">-</div>
-
-  <div class="model-thinking-table-wrap">
-    <table class="model-thinking-table">
-      <thead>
-        <tr>
-          <th>模型 ID</th>
-          <th>Provider</th>
-          <th>上游模型</th>
-          <th>来源</th>
-          <th>模式</th>
-          <th>Reasoning Effort</th>
-          <th>Thinking Budget</th>
-          <th>操作</th>
-        </tr>
-      </thead>
-      <tbody id="model-thinking-body"></tbody>
-    </table>
   </div>
 </section>

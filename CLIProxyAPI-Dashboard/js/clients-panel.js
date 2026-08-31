@@ -228,7 +228,7 @@ function renderClientDetail(items) {
     <!-- Action -->
     <div class="detail-action-wrap">
       <button class="detail-jump-btn" type="button" onclick="jumpToClientRequests('${escapeHtml(clientKey)}')">
-        查看此客户端请求日志 →
+        查看此客户端日志 →
       </button>
     </div>
   `;

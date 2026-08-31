@@ -132,7 +132,8 @@ class LoopbackModelProxyTests(unittest.TestCase):
             self.assertEqual(saved['presets'][1]['proxy_url'], 'direct')
             self.assertEqual(saved['presets'][2]['proxy_url'], 'http://proxy.example:8080')
             self.assertEqual(saved['rules']['agnes']['proxy_url'], 'http://127.0.0.1:10090')
-            with patch.object(auth, '_detect_active_local_proxy', return_value={'ok': False}):
+            with patch.object(auth, 'MODEL_PROXY_SETTINGS_FILE', settings_file), \
+                 patch.object(auth, '_detect_active_local_proxy', return_value={'ok': False}):
                 self.assertEqual(auth.get_model_proxy_settings()['mixed_port'], 10090)
             remaining_cache = json.loads(cache_file.read_text(encoding='utf-8'))
             self.assertEqual(set(remaining_cache), {'remote|external'})

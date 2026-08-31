@@ -122,6 +122,7 @@ cd E:\U_App\CLIProxyAPI_work\CLIProxyAPI
 - [AGENTS.md](AGENTS.md) — 代码改动的行为准则（简洁优先、外科手术式改动、内核纯粹原则）
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 模块职责边界、请求生命周期、Git remote 策略
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — 配置文件字段参考、端口/路由/重试/冷却语义、常见报错排查
+- [docs/PROJECT_MEMORY.md](docs/PROJECT_MEMORY.md) — 可提交的项目维护记忆、推理强度能力声明和排查清单
 - [docs/CLAUDE_THIRD_PARTY_ADAPTER_PLAN.md](docs/CLAUDE_THIRD_PARTY_ADAPTER_PLAN.md) — Claude 第三方模型适配设计、边界、协议契约与分阶段实施计划
 - [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) — 提交规范、版本发布流程、测试要求
 - [CHANGELOG.md](CHANGELOG.md) — 版本历史（Keep a Changelog + SemVer）

@@ -12,6 +12,7 @@
 - [失败处理：重试、冷却与 fallback 的边界](#失败处理重试冷却与-fallback-的边界)
 - [Git remote 策略](#git-remote-策略)
 - [目录结构](#目录结构)
+- [项目维护记忆](PROJECT_MEMORY.md)
 
 ## 设计原则：内核纯粹
 

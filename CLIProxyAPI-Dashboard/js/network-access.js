@@ -419,7 +419,7 @@ function renderNetworkAccessPanel() {
         <div class="na-guide-card">
           <div class="na-guide-step">4</div>
           <div class="na-guide-title">连不上先查三件事</div>
-          <div class="na-guide-desc">确认同网络、校园网没隔离、防火墙放行 8317。再去<a href="#" onclick="showSection('requests'); return false;">请求</a>页看有没有进来。</div>
+          <div class="na-guide-desc">确认同网络、校园网没隔离、防火墙放行 8317。再去<a href="#" onclick="showSection('requests'); return false;">日志</a>页看有没有进来。</div>
         </div>
       </div>
     </div>

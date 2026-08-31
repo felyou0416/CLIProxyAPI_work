@@ -9,6 +9,7 @@
 - [三层配置文件](#三层配置文件)
 - [核心字段](#核心字段)
 - [模型别名映射](#模型别名映射)
+- [推理强度能力声明](#推理强度能力声明)
 - [多提供商同名模型（负载均衡场景）](#多提供商同名模型负载均衡场景)
 - [端口与网络](#端口与网络)
 - [常见报错排查](#常见报错排查)
@@ -80,6 +81,26 @@ openai-compatibility:
       - name: "<上游模型名>"
         alias: "<对外别名>"
 ```
+
+## 推理强度能力声明
+
+OpenAI-compatible 模型没有显式 `thinking` 节点时，内核会按保守默认值只允许 `low`、`medium`、`high`。如果上游确认支持 `xhigh` 或 `max`，必须在模型条目中声明完整能力：
+
+```yaml
+models:
+  - name: "gpt-5.6-sol"
+    alias: "ung-gpt-5.6-sol"
+    thinking:
+      levels: ["low", "medium", "high", "xhigh", "max"]
+```
+
+在工作区中，您可以通过以下两种方式管理能力声明：
+1. **面板可视化配置（推荐）**：在 Dashboard「系统中心 -> 模型思考/推理配置」中选择或输入目标模型，将其能力声明设为「扩展 5 级 [low~max]」或「全量 6 级」，点击保存即会自动更新运行态 YAML 并触发内核热加载。
+2. **代码级内置白名单**：由 [auth.py](../CLIProxyAPI-Dashboard/backend/auth.py) 中的 `_OPENAI_COMPAT_EXTENDED_THINKING_LEVELS` 为 `gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna` 默认兜底提供 5 级扩展声明。
+
+生成后的实际运行配置位于 `CLIProxyAPI/storage/runtime/cliproxyapi-active-config.yaml`，不建议直接手改，因为 Dashboard 下次保存或重建会覆盖它。
+
+完整的根因、执行链、维护步骤和测试清单见 [PROJECT_MEMORY.md](PROJECT_MEMORY.md)。
 
 ## 多提供商同名模型（负载均衡场景）
 

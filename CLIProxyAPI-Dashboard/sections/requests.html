@@ -1,9 +1,13 @@
 <section id="section-requests" class="panel panel-scroll section-view request-bubbles-panel" hidden>
   <div class="panel-head request-head">
     <div>
-      <h2 class="section-title" data-i18n="section.requestsTitle">请求记录</h2>
+      <h2 class="section-title" data-i18n="section.requestsTitle">日志</h2>
     </div>
     <div class="action-row toolbar-scroll">
+      <button class="secondary req-auto-refresh-btn is-active" id="req-auto-refresh-btn" type="button" onclick="toggleRequestEventsAutoRefresh()" title="每 5 秒自动轮询最新请求日志">
+        <span class="req-live-dot"></span>
+        <span id="req-auto-refresh-text">自动刷新 (5s)</span>
+      </button>
       <button class="secondary" type="button" onclick="loadRequestEventsPanel(true)" data-i18n="btn.refresh">刷新</button>
       <button class="secondary icon-btn" type="button" onclick="showRequestSettingsModal()" title="筛选与设置">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -25,6 +29,21 @@
       <button class="secondary req-pag-btn" type="button" id="req-pag-last" onclick="goToRequestPage(requestEventsTotalPages)" title="末页">»</button>
     </div>
     <div class="req-pag-options">
+      <button class="secondary req-filter-success-btn" id="req-filter-success-btn" type="button" onclick="toggleOnlySuccessRequests()" title="仅看调用成功的日志（状态 200~399）">
+        <svg class="req-success-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+          <polyline points="22 4 12 14.01 9 11.01"></polyline>
+        </svg>
+        <span id="req-filter-success-label">仅看成功</span>
+      </button>
+      <button class="secondary req-filter-failed-btn" id="req-filter-failed-btn" type="button" onclick="toggleOnlyFailedRequests()" title="过滤调用不成功的日志（非200且非调用中）">
+        <svg class="req-failed-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <span id="req-filter-failed-label">仅看失败</span>
+      </button>
       <label class="req-pag-size-label">
         <span>每页</span>
         <select id="request-page-size-select" class="form-input req-pag-select" onchange="onRequestPageSizeChange(this.value)">
@@ -111,6 +130,10 @@
               <div class="req-stat-item">
                 <span class="req-stat-label">服务商</span>
                 <span class="req-stat-val" id="rd-provider">-</span>
+              </div>
+              <div class="req-stat-item">
+                <span class="req-stat-label">模型推理强度</span>
+                <span class="req-stat-val mono" id="rd-reasoning-effort">-</span>
               </div>
               <div class="req-stat-item">
                 <span class="req-stat-label">上游 · 开始</span>
