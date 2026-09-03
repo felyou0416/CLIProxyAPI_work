@@ -245,6 +245,11 @@ def run_local_service_action(service_id: str, operation: str) -> dict:
     if operation not in _ALLOWED_OPERATIONS:
         raise ValueError(f"Unsupported operation: {operation}")
 
+    if service_id in _BUILTIN_SERVICE_OPERATIONS:
+        if operation not in _BUILTIN_SERVICE_OPERATIONS[service_id]:
+            raise ValueError(f"Operation '{operation}' is not configured for builtin service '{service_id}'.")
+        return _run_builtin_service_action(service_id, operation)
+
     config, error = load_local_workspace()
     if error:
         raise ValueError(f"Invalid local workspace config: {error}")

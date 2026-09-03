@@ -64,28 +64,19 @@
         } else if (op === 'write-config') {
           result = await api('/api/claude-adapter/config', 'POST', { force: false });
         } else if (op === 'start') {
-          result = await api('/api/local-workspace/action', 'POST', {
-            service_id: 'claude-adapter',
-            operation: 'start',
-          });
+          result = await api('/api/claude-adapter/start', 'POST');
           await waitUntil((s) => !!(s.claude_adapter?.listener_ready || s.claude_adapter?.running), {
             timeoutMs: 25000,
             intervalMs: 400,
           });
         } else if (op === 'restart') {
-          result = await api('/api/local-workspace/action', 'POST', {
-            service_id: 'claude-adapter',
-            operation: 'restart',
-          });
+          result = await api('/api/claude-adapter/restart', 'POST');
           await waitUntil((s) => !!(s.claude_adapter?.listener_ready || s.claude_adapter?.running), {
             timeoutMs: 25000,
             intervalMs: 400,
           });
         } else if (op === 'stop') {
-          result = await api('/api/local-workspace/action', 'POST', {
-            service_id: 'claude-adapter',
-            operation: 'stop',
-          });
+          result = await api('/api/claude-adapter/stop', 'POST');
           await waitUntil((s) => !s.claude_adapter?.listener_ready && !s.claude_adapter?.running, {
             timeoutMs: 6000,
             intervalMs: 300,

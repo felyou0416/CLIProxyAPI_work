@@ -1612,6 +1612,25 @@ def handle_post(handler, parsed, data):
             send_json(handler, {'ok': False, 'message': f'Config write failed: {e}'}, status=500)
         return True
 
+    if parsed.path in ('/api/claude-adapter/start', '/api/claude-adapter/restart', '/api/claude-adapter/stop', '/api/claude-adapter/status'):
+        try:
+            from backend import processes
+            op = parsed.path.rsplit('/', 1)[-1]
+            if op == 'start':
+                result = processes.start_claude_adapter()
+            elif op == 'restart':
+                result = processes.restart_claude_adapter()
+            elif op == 'stop':
+                result = processes.stop_claude_adapter()
+            elif op == 'status':
+                result = {'ok': True, **processes.claude_adapter_status()}
+            else:
+                result = {'ok': False, 'message': f'Unsupported operation: {op}'}
+            send_json(handler, result, status=200 if result.get('ok') else 500)
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': str(e)}, status=500)
+        return True
+
     if parsed.path == '/api/claude-code-settings':
         payload = data if isinstance(data, dict) else {}
         try:
