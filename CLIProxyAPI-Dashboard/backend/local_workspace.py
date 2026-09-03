@@ -32,6 +32,7 @@ _BUILTIN_SERVICE_OPERATIONS = {
     "grok2api": ("start", "restart", "stop"),
     "grok2api-frontend": ("start", "restart", "stop"),
     "grok2api-backend": ("start", "restart", "stop"),
+    "claude-adapter": ("start", "restart", "stop"),
 }
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _MAX_ITEMS = 64
@@ -228,6 +229,11 @@ def _run_builtin_service_action(builtin: str, operation: str) -> dict:
             "start": processes.start_grok2api_backend,
             "restart": processes.restart_grok2api_backend,
             "stop": processes.stop_grok2api_backend,
+        },
+        "claude-adapter": {
+            "start": processes.start_claude_adapter,
+            "restart": processes.restart_claude_adapter,
+            "stop": processes.stop_claude_adapter,
         },
     }
     return handlers[builtin][operation]()

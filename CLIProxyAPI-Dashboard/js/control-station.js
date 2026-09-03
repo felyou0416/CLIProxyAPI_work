@@ -261,6 +261,22 @@ async function dispatchControlStationClick(button) {
     const port = button.dataset.csPort ? Number(button.dataset.csPort) : undefined;
     return runSystemProxyAction(op, button, { port });
   }
+
+  if (action === 'claude-adapter') {
+    if (typeof window.runClaudeAdapterAction !== 'function') {
+      showMessage('ClaudeAdapter 控制脚本未加载。', true);
+      return;
+    }
+    return window.runClaudeAdapterAction(op, button);
+  }
+
+  if (action === 'claude-code') {
+    if (typeof window.runClaudeCodeAction !== 'function') {
+      showMessage('Claude Code 控制脚本未加载。', true);
+      return;
+    }
+    return window.runClaudeCodeAction(op, button);
+  }
 }
 
 function bindControlStation(root) {

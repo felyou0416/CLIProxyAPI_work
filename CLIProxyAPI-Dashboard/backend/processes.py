@@ -38,6 +38,10 @@ from backend.paths import (
     GROK2API_FRONTEND_STDERR,
     ACCESS_GATEWAY_STDOUT,
     ACCESS_GATEWAY_STDERR,
+    CLAUDE_ADAPTER_ROOT,
+    CLAUDE_ADAPTER_STDOUT,
+    CLAUDE_ADAPTER_STDERR,
+    CLAUDE_ADAPTER_CONFIG,
     RUNTIME_VARIANT,
     POOL_AUTH_DIR,
 )
@@ -3190,7 +3194,22 @@ def current_status(include_logs: bool = True):
         'runtime_config': str(RUNTIME_CONFIG),
         'active_auth_dir': str(POOL_AUTH_DIR),
         'auth_pool_dir': str(POOL_AUTH_DIR),
+        'claude_adapter': claude_adapter_status(),
     }
+    # 顺带把 Claude Code settings 状态塞给前端（脱敏），前端不需要再调第二个请求。
+    try:
+        from backend.settings import get_claude_code_settings
+        status['claude_code'] = get_claude_code_settings(mask_secrets=True)
+    except Exception as exc:
+        status['claude_code'] = {
+            'ok': False,
+            'message': f'Failed to read Claude Code settings: {exc}',
+            'via_adapter': False,
+            'via_core': False,
+            'path': '',
+            'exists': False,
+            'env': {},
+        }
     if include_logs:
         status.update({
             'oauth_manager_stdout': read_tail(OAUTH_MANAGER_STDOUT),
@@ -3207,6 +3226,8 @@ def current_status(include_logs: bool = True):
             'grok2api_stderr': read_tail(GROK2API_STDERR),
             'grok2api_frontend_stdout': read_tail(GROK2API_FRONTEND_STDOUT),
             'grok2api_frontend_stderr': read_tail(GROK2API_FRONTEND_STDERR),
+            'claude_adapter_stdout': read_tail(CLAUDE_ADAPTER_STDOUT),
+            'claude_adapter_stderr': read_tail(CLAUDE_ADAPTER_STDERR),
         })
     return status
 
@@ -3345,3 +3366,401 @@ def restart_cloudflared_tunnel():
         return stop_result
     time.sleep(0.6)
     return start_cloudflared_tunnel()
+
+
+# =====================================================================
+# ClaudeAdapter (CLIProxyAPI-ClaudeAdapter) — 轻量协议桥进程管理
+# =====================================================================
+
+CLAUDE_ADAPTER_DEFAULT_PORT = 8319
+CLAUDE_ADAPTER_DEFAULT_UPSTREAM_PORT = 8317
+
+
+def _claude_adapter_binary_path() -> Path:
+    suffix = '.exe' if is_windows() else ''
+    env_override = (os.environ.get('CLIPROXYAPI_CLAUDE_ADAPTER_BINARY') or '').strip()
+    if env_override:
+        return Path(env_override).expanduser()
+    return CLAUDE_ADAPTER_ROOT / f'cli-claude-adapter{suffix}'
+
+
+def _claude_adapter_port() -> int:
+    try:
+        if CLAUDE_ADAPTER_CONFIG.exists():
+            import yaml  # dashboard 依赖 PyYAML
+            raw = CLAUDE_ADAPTER_CONFIG.read_text(encoding='utf-8', errors='ignore')
+            data = yaml.safe_load(raw) or {}
+            listen = data.get('listen') or {}
+            port = int(listen.get('port') or 0)
+            if 1 <= port <= 65535:
+                return port
+    except Exception:
+        pass
+    return CLAUDE_ADAPTER_DEFAULT_PORT
+
+
+def _claude_adapter_url() -> str:
+    return f'http://127.0.0.1:{_claude_adapter_port()}'
+
+
+def _claude_adapter_listener_pid() -> int | None:
+    return find_proxy_listener_pid(_claude_adapter_port())
+
+
+def _find_claude_adapter_pid_uncached() -> int | None:
+    # 1) Tracked Popen
+    tracked = processes.get('claude_adapter')
+    if process_alive(tracked):
+        return int(tracked.pid)
+    # 2) Listener on port
+    pid = _claude_adapter_listener_pid()
+    if pid:
+        return int(pid)
+    # 3) psutil name/cmdline scan
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                name = (proc.info.get('name') or '').lower()
+                cmd = proc.info.get('cmdline') or []
+                joined = ' '.join(str(x) for x in cmd).lower()
+                if 'claude-adapter' in name or 'cli-claude-adapter' in name or 'claudeadapter' in name:
+                    return int(proc.info['pid'])
+                if 'claude-adapter.yaml' in joined:
+                    return int(proc.info['pid'])
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+    except Exception:
+        pass
+    return None
+
+
+_claude_adapter_pid_cache = {'value': None, 'time': 0.0}
+
+
+def find_claude_adapter_pid() -> int | None:
+    now = time.time()
+    if now - _claude_adapter_pid_cache['time'] < 3.0:
+        return _claude_adapter_pid_cache['value']
+    val = _find_claude_adapter_pid_uncached()
+    _claude_adapter_pid_cache['value'] = val
+    _claude_adapter_pid_cache['time'] = now
+    return val
+
+
+def ensure_claude_adapter_default_config(*, force: bool = False) -> dict:
+    """生成一份可直接启动的 claude-adapter.yaml（storage/config/ 下）。"""
+    try:
+        import yaml
+    except Exception as exc:
+        return {'ok': False, 'message': f'PyYAML is required to write adapter config: {exc}'}
+
+    path = CLAUDE_ADAPTER_CONFIG
+    if path.exists() and not force:
+        try:
+            data = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+            client_keys = (data.get('client_auth') or {}).get('api_keys') or []
+            return {
+                'ok': True,
+                'message': 'Default ClaudeAdapter config already exists.',
+                'path': str(path),
+                'port': int(((data.get('listen') or {}).get('port')) or CLAUDE_ADAPTER_DEFAULT_PORT),
+                'upstream': ((data.get('upstream') or {}).get('base_url') or '').strip(),
+                'has_client_keys': bool(client_keys),
+                'wrote': False,
+            }
+        except Exception:
+            pass
+
+    # 生成稳定 client_auth key（与 Claude Code 当前用的 token 一致）
+    from backend.state import get_proxy_api_key
+    auth_key = (get_proxy_api_key() or 'cliproxyapi').strip() or 'cliproxyapi'
+
+    payload = {
+        'enabled': True,
+        'listen': {'host': '127.0.0.1', 'port': CLAUDE_ADAPTER_DEFAULT_PORT},
+        'upstream': {
+            'base_url': f'http://127.0.0.1:{CLAUDE_ADAPTER_DEFAULT_UPSTREAM_PORT}',
+            'api_key': auth_key,  # 核心默认使用 Bearer token，与 client_auth key 一致即可
+            'connect_timeout_seconds': 10,
+            'request_timeout_seconds': 600,
+        },
+        'client_auth': {'api_keys': [auth_key]},
+        # 注意：Go 侧 config.Validate() 要求 routes 非空、且每项 alias/upstream_model 非空。
+        # 同时 translator.go 使用 route.Alias 作为发往核心的 model 名；若 alias 与
+        # upstream_model 均为传入 model 的「原样」，就等价于透明桥接（核心自身已支持
+        # 任意上游模型路由）。为避免白名单，这里放一个占位项；真正的匹配由 RunDefaultRoute
+        # 兜底（见下面对 config.go 的修改）。
+        'routes': [
+            {
+                'alias': 'passthrough-placeholder',
+                'upstream_model': 'passthrough-placeholder',
+                'upstream_format': 'openai-chat-completions',
+            }
+        ],
+        'features': {
+            'streaming': True,
+            'tools': True,
+            'images': True,
+            'documents': False,
+            'count_tokens': {'mode': 'local_estimate'},
+        },
+        'thinking': {'unsupported': 'reject'},
+        'max_body_bytes': 4 * 1024 * 1024,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding='utf-8')
+        return {
+            'ok': True,
+            'message': f'Wrote default ClaudeAdapter config to {path}.',
+            'path': str(path),
+            'port': CLAUDE_ADAPTER_DEFAULT_PORT,
+            'upstream': payload['upstream']['base_url'],
+            'has_client_keys': True,
+            'wrote': True,
+        }
+    except Exception as exc:
+        return {'ok': False, 'message': f'Failed to write ClaudeAdapter config: {exc}', 'path': str(path)}
+
+
+def build_claude_adapter(*, force: bool = False, timeout_seconds: int = 180) -> dict:
+    """执行 go build 生成 cli-claude-adapter 二进制。失败时返回 ok=False + stderr。"""
+    if not CLAUDE_ADAPTER_ROOT.exists():
+        return {'ok': False, 'message': f'ClaudeAdapter source not found at {CLAUDE_ADAPTER_ROOT}'}
+    binary = _claude_adapter_binary_path()
+    if binary.exists() and not force:
+        return {
+            'ok': True,
+            'message': f'ClaudeAdapter binary already exists ({binary}).',
+            'binary': str(binary),
+            'built': False,
+        }
+    # 如果是 PyInstaller 单文件场景，大概率找不到 go；保留清晰错误
+    go_exe = shutil.which('go') or shutil.which('go.exe')
+    if not go_exe:
+        return {
+            'ok': False,
+            'message': 'Go toolchain was not found. Install Go >= 1.21 and ensure it is on PATH, then retry.',
+            'binary': str(binary),
+        }
+    build_log = Path(LOGS_DIR) / 'claude-adapter-build.log'
+    build_log.parent.mkdir(parents=True, exist_ok=True)
+    out_name = binary.name
+    env = os.environ.copy()
+    if is_windows():
+        env.setdefault('GOOS', 'windows')
+        env.setdefault('GOARCH', 'amd64')
+    cmd = [go_exe, 'build', '-trimpath', '-o', out_name, '.']
+    try:
+        with open(build_log, 'w', encoding='utf-8', errors='ignore') as flog:
+            flog.write(f'$ cd {CLAUDE_ADAPTER_ROOT}\n')
+            flog.write(f'$ {" ".join(cmd)}\n')
+            flog.flush()
+            completed = subprocess.run(
+                cmd,
+                cwd=str(CLAUDE_ADAPTER_ROOT),
+                stdout=flog,
+                stderr=flog,
+                stdin=subprocess.DEVNULL,
+                env=env,
+                timeout=max(30, int(timeout_seconds)),
+                creationflags=_creationflags(),
+            )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            'ok': False,
+            'message': f'Build timed out after {timeout_seconds}s: {exc}',
+            'binary': str(binary),
+            'log': str(build_log),
+        }
+    except Exception as exc:
+        return {
+            'ok': False,
+            'message': f'Build command failed: {exc}',
+            'binary': str(binary),
+            'log': str(build_log),
+        }
+
+    if completed.returncode != 0 or not binary.exists():
+        tail = ''
+        try:
+            tail = build_log.read_text(encoding='utf-8', errors='ignore')[-600:]
+        except Exception:
+            pass
+        return {
+            'ok': False,
+            'message': f'Build failed (code {completed.returncode}). {tail.strip()}',
+            'binary': str(binary),
+            'log': str(build_log),
+        }
+    return {
+        'ok': True,
+        'message': f'Built ClaudeAdapter binary -> {binary}.',
+        'binary': str(binary),
+        'log': str(build_log),
+        'built': True,
+    }
+
+
+def _claude_adapter_health_check(timeout_seconds: float = 0.6) -> dict:
+    try:
+        with socket.create_connection(('127.0.0.1', _claude_adapter_port()), timeout=max(0.2, float(timeout_seconds))):
+            return {'ok': True, 'tcp_listener': True}
+    except OSError as exc:
+        return {'ok': False, 'tcp_listener': False, 'error': str(exc)}
+
+
+def claude_adapter_status() -> dict:
+    """给 /api/status 返回 ClaudeAdapter 的完整状态快照。"""
+    binary = _claude_adapter_binary_path()
+    pid = find_claude_adapter_pid()
+    health = _claude_adapter_health_check()
+    config_exists = bool(CLAUDE_ADAPTER_CONFIG.exists())
+    return {
+        'enabled_via_config': False,  # 状态字段在前端统一叫这个名字
+        'running': bool(pid),
+        'pid': pid,
+        'port': _claude_adapter_port(),
+        'url': _claude_adapter_url(),
+        'binary_present': bool(binary.exists()),
+        'binary_path': str(binary),
+        'config_path': str(CLAUDE_ADAPTER_CONFIG),
+        'config_present': config_exists,
+        'source_dir': str(CLAUDE_ADAPTER_ROOT),
+        'source_present': bool(CLAUDE_ADAPTER_ROOT.exists()),
+        'listener_ready': bool(health.get('tcp_listener')),
+        'stdout_log': str(CLAUDE_ADAPTER_STDOUT),
+        'stderr_log': str(CLAUDE_ADAPTER_STDERR),
+    }
+
+
+def start_claude_adapter() -> dict:
+    # 确保配置文件存在（首次启动自动生成）
+    cfg = ensure_claude_adapter_default_config(force=False)
+    if not cfg.get('ok'):
+        return cfg
+    # 若二进制缺失，尝试自动 build
+    binary = _claude_adapter_binary_path()
+    if not binary.exists():
+        built = build_claude_adapter(force=False)
+        if not built.get('ok'):
+            return {'ok': False, 'message': f'ClaudeAdapter binary is missing and automatic build failed: {built.get("message","")}', 'binary': str(binary)}
+
+    command = None
+    proc = None
+    with process_lock:
+        running_pid = None
+        tracked = processes.get('claude_adapter')
+        if process_alive(tracked):
+            running_pid = int(tracked.pid)
+        if not running_pid:
+            running_pid = find_claude_adapter_pid()
+        if running_pid:
+            _claude_adapter_pid_cache['value'] = running_pid
+            _claude_adapter_pid_cache['time'] = time.time()
+            return {
+                'ok': True,
+                'message': f'ClaudeAdapter is already running at {_claude_adapter_url()}.',
+                **claude_adapter_status(),
+            }
+
+        try:
+            Path(LOGS_DIR).mkdir(parents=True, exist_ok=True)
+            command = [str(binary), '-config', str(CLAUDE_ADAPTER_CONFIG)]
+            fout = open(CLAUDE_ADAPTER_STDOUT, 'w', encoding='utf-8', errors='ignore')
+            ferr = open(CLAUDE_ADAPTER_STDERR, 'w', encoding='utf-8', errors='ignore')
+            creationflags = 0
+            if is_windows():
+                creationflags = getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+            proc = subprocess.Popen(
+                command,
+                cwd=str(CLAUDE_ADAPTER_ROOT),
+                stdout=fout,
+                stderr=ferr,
+                stdin=subprocess.DEVNULL,
+                env=os.environ.copy(),
+                creationflags=creationflags,
+                close_fds=False if is_windows() else True,
+            )
+            processes['claude_adapter'] = proc
+        except Exception as exc:
+            processes['claude_adapter'] = None
+            return {
+                'ok': False,
+                'message': f'Failed to launch ClaudeAdapter: {exc}',
+                **claude_adapter_status(),
+            }
+
+    # 等端口 listen 就绪（在 process_lock 外面做）
+    deadline = time.time() + 18.0
+    while time.time() < deadline:
+        if not process_alive(proc) and not _claude_adapter_listener_pid():
+            break
+        if _claude_adapter_listener_pid():
+            break
+        time.sleep(0.2)
+
+    listener_pid = _claude_adapter_listener_pid()
+    if not listener_pid and not process_alive(proc):
+        err_tail = ''
+        try:
+            err_tail = CLAUDE_ADAPTER_STDERR.read_text(encoding='utf-8', errors='ignore')[-500:]
+        except Exception:
+            pass
+        with process_lock:
+            processes['claude_adapter'] = None
+        message = 'Failed to start ClaudeAdapter.'
+        if err_tail.strip():
+            message = f'{message} {err_tail.strip()}'
+        return {'ok': False, 'message': message, 'command': command, **claude_adapter_status()}
+
+    ready_pid = listener_pid or (proc.pid if process_alive(proc) else None)
+    _claude_adapter_pid_cache['value'] = ready_pid
+    _claude_adapter_pid_cache['time'] = time.time()
+    return {
+        'ok': True,
+        'message': f'Started ClaudeAdapter -> {_claude_adapter_url()}.',
+        'command': command,
+        'pid': ready_pid,
+        **claude_adapter_status(),
+    }
+
+
+def stop_claude_adapter():
+    _claude_adapter_pid_cache['time'] = 0
+    stopped = False
+    with process_lock:
+        tracked = processes.get('claude_adapter')
+        if process_alive(tracked):
+            stopped = _kill_pid_tree(int(tracked.pid)) or kill_process(tracked) or stopped
+            processes['claude_adapter'] = None
+
+    pid = find_claude_adapter_pid()
+    if pid:
+        stopped = _kill_pid_tree(int(pid)) or stopped
+
+    # 兜底：再等 2s 让端口释放
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        if not _claude_adapter_listener_pid():
+            break
+        time.sleep(0.1)
+
+    _claude_adapter_pid_cache['value'] = None
+    _claude_adapter_pid_cache['time'] = time.time()
+    return {
+        'ok': True,
+        'message': 'Stopped ClaudeAdapter.' if stopped else 'ClaudeAdapter was not running.',
+        **claude_adapter_status(),
+    }
+
+
+def restart_claude_adapter():
+    stop_result = stop_claude_adapter()
+    time.sleep(0.5)
+    start_result = start_claude_adapter()
+    # 合并返回：保留启动结果为主，叠加 stop 信息以便诊断
+    merged = dict(start_result)
+    merged.setdefault('stop_ok', bool(stop_result.get('ok')))
+    merged.setdefault('stop_message', stop_result.get('message', ''))
+    return merged

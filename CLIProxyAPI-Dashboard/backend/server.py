@@ -5,7 +5,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 from backend.paths import CLI_EXE, BASE_CONFIG, SOURCE_AUTH_DIR, RUNTIME_DIR, PROXY_ROOT, DASHBOARD_ROOT, STORAGE_DIR, RUNTIME_VARIANT
-from backend.processes import shutdown_all, start_proxy
+from backend.processes import shutdown_all, start_proxy, find_proxy_listener_pid
 from backend.routes.get_routes import handle_get
 from backend.routes.post_routes import handle_post
 from backend.routes.helpers import send_json
@@ -204,6 +204,31 @@ def _auto_start_proxy_async():
         print(f'Auto start RelayX failed: {exc}')
 
 
+def _auto_start_claude_adapter_async():
+    """在核心代理就绪后，自动拉起 ClaudeAdapter（:8319）。
+
+    仅在二进制已存在或 go 工具链可用时启动；失败不阻塞面板。
+    """
+    import time
+    from backend.processes import start_claude_adapter, find_claude_adapter_pid
+    # 等核心代理先起来（最多等 30s），否则 Adapter 转发上游会连不上
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        pid = find_proxy_listener_pid(8317)
+        if pid:
+            break
+        time.sleep(1)
+    # 已在跑就不重复启动
+    if find_claude_adapter_pid():
+        print('Auto start ClaudeAdapter: already running, skipped.')
+        return
+    try:
+        result = start_claude_adapter()
+        print(f'Auto start ClaudeAdapter: {result.get("message", "")}')
+    except Exception as exc:
+        print(f'Auto start ClaudeAdapter failed: {exc}')
+
+
 def main():
     host = (os.environ.get('CLIPROXYAPI_DASHBOARD_HOST', DEFAULT_DASHBOARD_HOST) or DEFAULT_DASHBOARD_HOST).strip() or DEFAULT_DASHBOARD_HOST
     port = int((os.environ.get('CLIPROXYAPI_DASHBOARD_PORT', '8765') or '8765').strip() or '8765')
@@ -227,6 +252,11 @@ def main():
     if dashboard_auto_start_enabled():
         print('Auto start RelayX scheduled in background')
         threading.Thread(target=_auto_start_proxy_async, name='auto-start-proxy', daemon=True).start()
+        # ClaudeAdapter 跟在核心代理后面启动（延迟 3s 让核心先就绪）
+        t = threading.Timer(3.0, _auto_start_claude_adapter_async)
+        t.name = 'auto-start-claude-adapter'
+        t.daemon = True
+        t.start()
     else:
         print('Auto start RelayX skipped because CLIPROXYAPI_AUTO_START is disabled.')
     try:

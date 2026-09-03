@@ -42,10 +42,15 @@ func (t *Transport) endpoint() string {
 }
 
 func (t *Transport) Do(ctx context.Context, request ChatRequest, timeout time.Duration) (*http.Response, error) {
-	return t.do(ctx, request, timeout)
+	return t.do(ctx, request, timeout, "")
 }
 
-func (t *Transport) do(ctx context.Context, request ChatRequest, timeout time.Duration) (*http.Response, error) {
+// DoWithID forwards an idempotency / correlation id to the upstream via X-Request-ID.
+func (t *Transport) DoWithID(ctx context.Context, request ChatRequest, timeout time.Duration, requestID string) (*http.Response, error) {
+	return t.do(ctx, request, timeout, requestID)
+}
+
+func (t *Transport) do(ctx context.Context, request ChatRequest, timeout time.Duration, requestID string) (*http.Response, error) {
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("encode upstream request: %w", err)
@@ -62,7 +67,14 @@ func (t *Transport) do(ctx context.Context, request ChatRequest, timeout time.Du
 		return nil, fmt.Errorf("create upstream request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
+	if request.Stream {
+		req.Header.Set("Accept", "text/event-stream")
+	} else {
+		req.Header.Set("Accept", "application/json")
+	}
+	if requestID != "" {
+		req.Header.Set("X-Request-ID", requestID)
+	}
 	if t.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+t.apiKey)
 	}

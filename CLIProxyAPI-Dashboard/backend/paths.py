@@ -50,6 +50,7 @@ APP_DIR = PROXY_ROOT
 MEDIA_PROXY_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI-MediaProxy'
 ACCESS_GATEWAY_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI-AccessGateway'
 LOCAL_PLUGIN_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI-LocalPlugin'
+CLAUDE_ADAPTER_ROOT = DASHBOARD_ROOT.parent / 'CLIProxyAPI-ClaudeAdapter'
 
 
 def _resolve_grok2api_root() -> Path:
@@ -155,6 +156,9 @@ GROK2API_FRONTEND_STDOUT = LOGS_DIR / 'grok2api-frontend.stdout.log'
 GROK2API_FRONTEND_STDERR = LOGS_DIR / 'grok2api-frontend.stderr.log'
 ACCESS_GATEWAY_STDOUT = LOGS_DIR / 'access-gateway.stdout.log'
 ACCESS_GATEWAY_STDERR = LOGS_DIR / 'access-gateway.stderr.log'
+CLAUDE_ADAPTER_STDOUT = LOGS_DIR / 'claude-adapter.stdout.log'
+CLAUDE_ADAPTER_STDERR = LOGS_DIR / 'claude-adapter.stderr.log'
+CLAUDE_ADAPTER_CONFIG = CONFIG_DIR / 'claude-adapter.yaml'
 RUNTIME_CONFIG = RUNTIME_DIR / 'cliproxyapi-active-config.yaml'
 REQUEST_LOG_DIR = LOGS_DIR / 'request_logs'
 REQUEST_ARCHIVE_DIR = LOGS_DIR / 'request_archive'

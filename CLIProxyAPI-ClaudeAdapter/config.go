@@ -179,7 +179,18 @@ func (c Config) RouteFor(model string) (Route, bool) {
 			return route, true
 		}
 	}
-	return Route{}, false
+	// 默认兜底：允许任意未显式在 routes 白名单里的模型「透明转发」，
+	// 即 alias = 上游 model = 客户端请求的 model。核心本身会做真正的
+	// 上游认证/模型路由，Adapter 只做协议桥接与去重。
+	clean := strings.TrimSpace(strings.TrimPrefix(model, "models/"))
+	if clean == "" {
+		return Route{}, false
+	}
+	return Route{
+		Alias:          clean,
+		UpstreamModel:  clean,
+		UpstreamFormat: "openai-chat-completions",
+	}, true
 }
 
 func normalizeModel(value string) string {

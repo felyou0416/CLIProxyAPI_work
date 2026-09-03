@@ -101,6 +101,34 @@ window.CONTROL_STATION_LAYERS = [
             },
           ],
         },
+        {
+          kind: 'service',
+          id: 'claude-adapter',
+          icon: 'A',
+          title: {
+            text: 'ClaudeAdapter',
+            href: 'http://127.0.0.1:8319/health',
+          },
+          indicator: {
+            id: 'claude-adapter-status-indicator',
+            color: 'red',
+            title: 'ClaudeAdapter 未运行',
+          },
+          buttons: [
+            {
+              action: 'claude-adapter', op: 'start',
+              id: 'claude-adapter-start-btn', label: '启动',
+            },
+            {
+              action: 'claude-adapter', op: 'restart',
+              id: 'claude-adapter-restart-btn', label: '重启', className: 'secondary',
+            },
+            {
+              action: 'claude-adapter', op: 'stop',
+              id: 'claude-adapter-stop-btn', label: '停止', className: 'danger',
+            },
+          ],
+        },
       ],
     }],
   },

@@ -22,6 +22,8 @@ type SSEConverter struct {
 	stopReason     string
 	outputSeen     int
 	secrets        []string
+	lastStreamErr  error // non-nil for errors that should be memoized by dedup layer
+	lastStreamStatus int
 }
 
 type streamToolBlock struct {

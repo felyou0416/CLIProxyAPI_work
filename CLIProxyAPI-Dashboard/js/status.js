@@ -21,6 +21,8 @@ window['create-grokActionBusy'] = false;
 window['77chatActionBusy'] = false;
 // 前后端共用一把锁，避免并发改灯互相覆盖
 window.grok2apiActionBusy = false;
+window.claudeAdapterActionBusy = false;
+window.claudeCodeActionBusy = false;
 
 // 指示灯逻辑名列表（含拆分后的 grok2api-frontend/backend + 系统代理）
 // DOM id 默认 `${type}-status-indicator`，例外见 INDICATOR_ELEMENT_IDS
@@ -42,6 +44,9 @@ const INDICATOR_TYPES = [
   'grok2api-sys-proxy',
   // 旧版合并键：只读迁移用，不再写入缓存
   'grok2api',
+  // ClaudeAdapter 新指示灯
+  'claude-adapter',
+  'claude-code',
 ];
 const GROK2API_DEFAULT_URL = 'http://127.0.0.1:5173/';
 const INDICATOR_CACHE_KEY = 'cli-indicator-states';
@@ -391,6 +396,36 @@ async function refreshStatus() {
     }
     setRuntimeIndicator('grok2api-frontend', s.grok2api_frontend_running, window.grok2apiActionBusy);
     setRuntimeIndicator('grok2api-backend', s.grok2api_backend_running, window.grok2apiActionBusy);
+
+    // ---- ClaudeAdapter & Claude Code client 状态 & 灯色 ----
+    const ca = s.claude_adapter || {};
+    const cc = s.claude_code || {};
+    const caRunning = !!(ca.listener_ready || ca.running);
+    const ccGreen = !!cc.exists && (!!cc.via_adapter || !!cc.via_core);
+    const ccYellow = !(cc.ok === false && cc.exists === false) && !ccGreen;
+    setRuntimeIndicator('claude-adapter', caRunning, window.claudeAdapterActionBusy);
+    if (!window.claudeCodeActionBusy && typeof window.updateIndicator === 'function') {
+      window.updateIndicator(
+        'claude-code',
+        ccGreen ? 'green' : (ccYellow ? 'yellow' : 'red'),
+        { persist: false }
+      );
+    }
+    // 按钮 + 指示灯文案
+    const viaAdapterBtn = document.getElementById('claude-code-via-adapter-btn');
+    if (viaAdapterBtn) {
+      viaAdapterBtn.textContent = (cc.via_adapter ? '切回核心' : '接入 Adapter');
+      viaAdapterBtn.dataset.currentMode = cc.via_adapter ? 'adapter' : 'core';
+    }
+    const ccIndicator = document.getElementById('claude-code-status-indicator');
+    if (ccIndicator) {
+      const mode = cc.via_adapter ? '经 Adapter' : (cc.via_core ? '直连核心' : (cc.exists ? '未配置 URL' : '未安装 Claude Code'));
+      ccIndicator.title = `Claude Code：${mode} · ${cc.path || 'path unknown'}`;
+    }
+    const ccInfoBtn = document.getElementById('claude-code-info-btn');
+    if (ccInfoBtn && cc.base_url) {
+      ccInfoBtn.title = `当前 ANTHROPIC_BASE_URL: ${cc.base_url}`;
+    }
 
     // 仅状态真变时写 localStorage
     if (_indicatorCacheDirty) saveIndicatorStates();

@@ -238,3 +238,173 @@ def download_update():
     except Exception as e:
         return {'ok': False, 'message': f'Failed to initiate download: {e}'}
 
+
+# =====================================================================
+# Claude Code settings.json 集成（切换 ANTHROPIC_BASE_URL = 核心 / Adapter）
+# =====================================================================
+
+_CLAUDE_CODE_SETTINGS_KEYS = (
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_MODEL',
+)
+
+
+def claude_code_settings_path() -> Path:
+    return Path.home() / '.claude' / 'settings.json'
+
+
+def read_claude_code_settings() -> dict:
+    """读取 ~/.claude/settings.json，返回原始对象 + 便捷字段。"""
+    path = claude_code_settings_path()
+    data = {}
+    raw = None
+    load_error = None
+    if path.exists():
+        try:
+            raw = path.read_text(encoding='utf-8', errors='ignore') or ''
+            parsed = json.loads(raw) if raw.strip() else {}
+            if isinstance(parsed, dict):
+                data = parsed
+        except Exception as exc:
+            load_error = str(exc)
+    env_block = data.get('env') if isinstance(data.get('env'), dict) else {}
+    base_url = str(env_block.get('ANTHROPIC_BASE_URL') or '').strip()
+    auth_token = str(env_block.get('ANTHROPIC_AUTH_TOKEN') or '').strip()
+    api_key = str(env_block.get('ANTHROPIC_API_KEY') or '').strip()
+    # 判断当前是否「通过 Adapter」：host 末尾为 :8319 或路径中包含 adapter 关键字
+    via_adapter = False
+    adapter_host_suffix = ':8319'
+    via_core = False
+    core_host_suffixes = (':8317', ':8318')
+    try:
+        from urllib.parse import urlparse
+        if base_url:
+            p = urlparse(base_url)
+            host_port = p.netloc.lower() or ''
+            if host_port.endswith(adapter_host_suffix):
+                via_adapter = True
+            elif any(host_port.endswith(s) for s in core_host_suffixes):
+                via_core = True
+    except Exception:
+        via_adapter = base_url.endswith(':8319') or ':8319/' in base_url
+        via_core = any(base_url.endswith(s) for s in (':8317', ':8318')) or any(f'{s}/' in base_url for s in (':8317', ':8318'))
+    return {
+        'ok': True,
+        'path': str(path),
+        'exists': bool(path.exists()),
+        'item': data,
+        'env': env_block,
+        'base_url': base_url,
+        'auth_token': auth_token,
+        'api_key': api_key,
+        'via_adapter': bool(via_adapter),
+        'via_core': bool(via_core),
+        'load_error': load_error,
+    }
+
+
+def _mask_claims_settings_for_external(summary: dict) -> dict:
+    """避免把明文 token 透出给前端；保留提示性长度字段。"""
+    result = dict(summary)
+    env = dict(result.get('env') or {})
+    for key in _CLAUDE_CODE_SETTINGS_KEYS:
+        if key in env and isinstance(env.get(key), str):
+            value = env[key]
+            env[key] = f'***{len(value)}' if value else ''
+    result['env'] = env
+    for secret in ('auth_token', 'api_key'):
+        val = result.get(secret) or ''
+        result[secret] = f'***{len(val)}' if isinstance(val, str) and val else ''
+    return result
+
+
+def get_claude_code_settings(*, mask_secrets: bool = True) -> dict:
+    summary = read_claude_code_settings()
+    if mask_secrets:
+        return _mask_claims_settings_for_external(summary)
+    return summary
+
+
+def set_claude_code_via_adapter(*, enable: bool, adapter_port: int | None = None, core_port: int | None = None, auth_token: str | None = None) -> dict:
+    """
+    切换 Claude Code 客户端流量是否经过 Adapter。
+    - enable=True  → ANTHROPIC_BASE_URL=http://127.0.0.1:<adapter_port>
+    - enable=False → ANTHROPIC_BASE_URL=http://127.0.0.1:<core_port>（直连核心管理面）
+    若当前 settings.json 不存在则创建最小结构；若已存在 env.ANTHROPIC_AUTH_TOKEN，则保持不变，除非调用方显式传入新的 auth_token。
+    """
+    # 默认端口来自 processes 模块（集中单一数据源）
+    default_adapter = 8319
+    default_core = 8317
+    try:
+        from backend.processes import _claude_adapter_port
+        default_adapter = int(_claude_adapter_port()) or default_adapter
+    except Exception:
+        pass
+    try:
+        from backend.processes import core_proxy_port
+    except Exception:
+        pass
+
+    adapter_port = int(adapter_port or default_adapter)
+    core_port = int(core_port or default_core)
+    if not (1 <= adapter_port <= 65535):
+        return {'ok': False, 'message': f'Invalid adapter_port: {adapter_port}'}
+    if not (1 <= core_port <= 65535):
+        return {'ok': False, 'message': f'Invalid core_port: {core_port}'}
+
+    path = claude_code_settings_path()
+    data = {}
+    backup = None
+    if path.exists():
+        try:
+            raw = path.read_text(encoding='utf-8', errors='ignore') or ''
+            backup = raw
+            parsed = json.loads(raw) if raw.strip() else {}
+            if isinstance(parsed, dict):
+                data = parsed
+        except Exception as exc:
+            return {
+                'ok': False,
+                'message': f'Failed to read {path}: {exc}',
+                'path': str(path),
+            }
+    if not isinstance(data.get('env'), dict):
+        data['env'] = {}
+
+    target_base_url = f'http://127.0.0.1:{adapter_port}' if enable else f'http://127.0.0.1:{core_port}'
+
+    data['env']['ANTHROPIC_BASE_URL'] = target_base_url
+    if auth_token is not None:
+        stripped = str(auth_token)
+        data['env']['ANTHROPIC_AUTH_TOKEN'] = stripped
+    elif not str(data['env'].get('ANTHROPIC_AUTH_TOKEN') or '').strip():
+        # 缺失时用 dashboard 状态里约定的 token 兜底（与核心管理面 / adapter 的 client_auth key 一致）
+        try:
+            from backend.state import get_proxy_api_key
+            fallback = (get_proxy_api_key() or 'cliproxyapi').strip() or 'cliproxyapi'
+            data['env']['ANTHROPIC_AUTH_TOKEN'] = fallback
+        except Exception:
+            data['env']['ANTHROPIC_AUTH_TOKEN'] = 'cliproxyapi'
+
+    # 安全备份：失败了可手滚
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if backup:
+            backup_path = path.parent / f'settings.json.bak-{int(datetime.now().timestamp())}'
+            backup_path.write_text(backup, encoding='utf-8')
+    except Exception:
+        pass
+
+    try:
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    except Exception as exc:
+        return {'ok': False, 'message': f'Failed to write {path}: {exc}', 'path': str(path)}
+
+    summary = get_claude_code_settings(mask_secrets=True)
+    summary['ok'] = True
+    summary['message'] = f'Claude Code ANTHROPIC_BASE_URL updated -> {target_base_url}.'
+    summary['backup_exists'] = bool(backup)
+    return summary
+

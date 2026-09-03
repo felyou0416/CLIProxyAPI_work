@@ -772,3 +772,261 @@ func TestSSEConverterRedactsUpstreamSecrets(t *testing.T) {
 		t.Fatalf("unexpected stream error events: %v", names)
 	}
 }
+
+// ===== Tests targeting the "duplicate upstream calls" root causes =====
+
+// TestDuplicateXRequestIDDedupesUpstreamCall simulates the exact failure mode:
+// Claude Code retries the same x-request-id after a partial stream / timeout.
+// The adapter MUST collapse concurrent retries into exactly ONE upstream call.
+func TestDuplicateXRequestIDDedupesUpstreamCall(t *testing.T) {
+	var upstreamCalls atomic.Int32
+	// Make upstream slow enough that both requests arrive while it's in-flight.
+	upstreamStarted := make(chan struct{}, 1)
+	releaseUpstream := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		select {
+		case upstreamStarted <- struct{}{}:
+		default:
+		}
+		<-releaseUpstream
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"chat-1","model":"claude-test","choices":[{"index":0,"message":{"role":"assistant","content":"deduped"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}`)
+	}))
+	defer upstream.Close()
+
+	adapter := newTestServer(t, upstream.URL)
+	defer adapter.Close()
+
+	body := messageRequestJSON(t, basicMessageRequest())
+	const sharedRID = "dedup-key-0001"
+
+	makeReq := func() *http.Request {
+		req, err := http.NewRequest(http.MethodPost, adapter.URL+"/v1/messages", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("x-api-key", "client-key")
+		req.Header.Set("x-request-id", sharedRID)
+		return req
+	}
+
+	results := make(chan error, 2)
+	sendOne := func() {
+		resp, err := http.DefaultClient.Do(makeReq())
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		results <- err
+	}
+
+	// Launch request A; wait until upstream has definitely begun.
+	go sendOne()
+	select {
+	case <-upstreamStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("first request did not reach upstream in time")
+	}
+	// Now launch request B with the SAME x-request-id while A is still in-flight.
+	go sendOne()
+	// Give B enough time to register as a waiter.
+	time.Sleep(100 * time.Millisecond)
+	// Release the upstream response; both goroutines will then finish.
+	close(releaseUpstream)
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-results:
+			if err != nil {
+				t.Fatalf("request %d failed: %v", i+1, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("request %d never completed", i+1)
+		}
+	}
+
+	if n := upstreamCalls.Load(); n != 1 {
+		t.Fatalf("duplicate x-request-id produced %d upstream calls, want exactly 1 (dedup broken)", n)
+	}
+}
+
+// TestStreamRequestUsesTextEventStreamAcceptHeader verifies root-cause fix:
+// stream=true requests must send Accept: text/event-stream upstream, otherwise
+// many providers return a non-SSE payload and Claude Code retries indefinitely.
+func TestStreamRequestUsesTextEventStreamAcceptHeader(t *testing.T) {
+	var gotAccept atomic.Value
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept.Store(r.Header.Get("Accept"))
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		events := []string{
+			`{"id":"s-1","model":"claude-test","choices":[{"delta":{"content":"ok"}}]}`,
+		}
+		for _, e := range events {
+			_, _ = io.WriteString(w, "data: "+e+"\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}))
+	defer upstream.Close()
+
+	adapter := newTestServer(t, upstream.URL)
+	defer adapter.Close()
+	req := basicMessageRequest()
+	req.Stream = true
+	httpReq := httpRequestWithKey(t, adapter.URL+"/v1/messages", messageRequestJSON(t, req))
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	accept, _ := gotAccept.Load().(string)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status %d", resp.StatusCode)
+	}
+	if !strings.Contains(accept, "text/event-stream") {
+		t.Fatalf("stream request sent Accept=%q upstream, want text/event-stream (root-cause-1 unfixed)", accept)
+	}
+}
+
+// TestRecentCacheReplaysNonStreamResult verifies the 30s TTL replay cache:
+// a second request with the same id after the first has fully completed
+// does NOT hit upstream again.
+func TestRecentCacheReplaysNonStreamResult(t *testing.T) {
+	var upstreamCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"chat-recent","model":"claude-test","choices":[{"index":0,"message":{"role":"assistant","content":"cached"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}`)
+	}))
+	defer upstream.Close()
+
+	adapter := newTestServer(t, upstream.URL)
+	defer adapter.Close()
+
+	body := messageRequestJSON(t, basicMessageRequest())
+	const rid = "recent-cache-1"
+	send := func() string {
+		req, err := http.NewRequest(http.MethodPost, adapter.URL+"/v1/messages", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("x-api-key", "client-key")
+		req.Header.Set("x-request-id", rid)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d payload=%s", resp.StatusCode, payload)
+		}
+		return string(payload)
+	}
+
+	first := send()
+	second := send()
+	if upstreamCalls.Load() != 1 {
+		t.Fatalf("same x-request-id sent twice produced %d upstream calls, want 1 (recent-cache dedup broken)", upstreamCalls.Load())
+	}
+	if first != second {
+		t.Fatalf("replayed cached result differs: first=%q second=%q", first, second)
+	}
+	if !strings.Contains(second, `"text":"cached"`) {
+		t.Fatalf("replay payload missing translated content: %s", second)
+	}
+}
+
+// TestCountTokensRealisticClaudeCodeProbes ensures that Claude Code's exact real-world
+// token counting requests (e.g. without max_tokens, with tools schema, with "foo", with CJK)
+// succeed locally without reaching upstream and return reasonable token estimates.
+func TestCountTokensRealisticClaudeCodeProbes(t *testing.T) {
+	var upstreamCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		t.Error("upstream should NEVER be called for count_tokens")
+	}))
+	defer upstream.Close()
+
+	adapter := newTestServer(t, upstream.URL)
+	defer adapter.Close()
+
+	cases := []struct {
+		name    string
+		body    string
+		minWant int
+	}{
+		{
+			name: "real Claude Code tool counting with foo and without max_tokens",
+			body: `{"model":"claude-test","messages":[{"role":"user","content":"foo"}],"tools":[{"name":"test_tool","description":"does something useful","input_schema":{"type":"object","properties":{"arg":{"type":"string"}}}}]}`,
+			minWant: 15,
+		},
+		{
+			name: "real Claude Code prompt fragment without max_tokens",
+			body: `{"model":"claude-test","messages":[{"role":"user","content":"When referencing files in your responses, format them as markdown links so the user can click to open them."}]}`,
+			minWant: 20,
+		},
+		{
+			name: "real Claude Code Chinese prompt fragment",
+			body: `{"model":"claude-test","messages":[{"role":"user","content":"你好世界，这是一个测试文本，用于验证中文分词 Token 估算是否合理准确。"}]}`,
+			minWant: 25,
+		},
+		{
+			name: "tools only without messages",
+			body: `{"model":"claude-test","tools":[{"name":"SendMessage","description":"Send a message to another agent","input_schema":{"type":"object","properties":{"to":{"type":"string"},"message":{"type":"string"}},"required":["to","message"]}}]}`,
+			minWant: 30,
+		},
+		{
+			name: "system prompt only",
+			body: `{"model":"claude-test","system":"You are a helpful programming assistant that follows strict coding guidelines."}`,
+			minWant: 15,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, adapter.URL+"/v1/messages/count_tokens", strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", "Bearer client-key")
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+
+			payload, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("expected 200 OK, got %d: %s", resp.StatusCode, payload)
+			}
+
+			var result struct {
+				InputTokens int `json:"input_tokens"`
+			}
+			if err := json.Unmarshal(payload, &result); err != nil {
+				t.Fatalf("decode json: %v", err)
+			}
+			if result.InputTokens < tc.minWant {
+				t.Fatalf("got %d input_tokens, want at least %d", result.InputTokens, tc.minWant)
+			}
+		})
+	}
+
+	if upstreamCalls.Load() != 0 {
+		t.Fatalf("count_tokens hit upstream %d times, want 0", upstreamCalls.Load())
+	}
+}
+

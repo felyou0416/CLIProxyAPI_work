@@ -71,8 +71,9 @@ _FINISH_REASON_RE = re.compile(r'"(?:finish_reason|stop_reason)"\s*:\s*"([^"]+)"
 _AUTH_ID_INDEX_LOCK = threading.Lock()
 _AUTH_ID_INDEX: dict[str, dict] = {}          # auth_id → {label, base_url, api_key_masked, desc}
 _AUTH_ID_INDEX_MTIME: float = 0.0             # RUNTIME_CONFIG 的 mtime，用于检测变动
-_AUTH_ID_INDEX_STAT_CHECKED_AT: float = 0.0    # 上次真正做 RUNTIME_CONFIG.stat() 检查的时间
-_AUTH_ID_INDEX_STAT_THROTTLE_SECONDS = 5.0     # 节流窗口：这段时间内不重复 stat()
+_AUTH_ID_INDEX_AUTH_SIGNATURE = None          # auth 文件身份签名，用于检测文件变化
+_AUTH_ID_INDEX_STAT_CHECKED_AT: float = 0.0    # 上次真正做缓存检查的时间
+_AUTH_ID_INDEX_STAT_THROTTLE_SECONDS = 5.0     # 节流窗口：这段时间内不重复检查
 
 
 def _stable_id_hash(kind: str, *parts: str) -> str:
@@ -93,15 +94,38 @@ def _mask_api_key(key: str) -> str:
     return key[:3] + '***' + key[-4:]
 
 
+def _auth_file_api_identity(data: dict) -> tuple[str, str]:
+    """Extract the API-key identity from the auth-file schemas accepted by the dashboard."""
+    if not isinstance(data, dict):
+        return '', ''
+    content = data.get('content') if isinstance(data.get('content'), dict) else {}
+    metadata = data.get('metadata') if isinstance(data.get('metadata'), dict) else {}
+    tokens = data.get('tokens') if isinstance(data.get('tokens'), dict) else {}
+
+    key = (
+        content.get('api_key') or content.get('key')
+        or data.get('api_key') or data.get('key')
+        or metadata.get('api_key') or tokens.get('api_key')
+    )
+    base = (
+        content.get('base_url') or content.get('BaseURL') or content.get('url')
+        or data.get('base_url') or data.get('base-url') or data.get('BaseURL') or data.get('url')
+        or metadata.get('base_url')
+    )
+    return str(key or '').strip(), str(base or '').strip().rstrip('/')
+
+
 def _build_api_key_to_filename_map() -> dict[tuple[str, str], str]:
     """
-    扫描 storage/auth 下的账号 JSON 文件，建立 (api_key, base_url) -> 相对文件名 映射，
-    用于把 config 里的 api-key-entries 精确对应回具体的 auth 文件。
-    使用联合键以区分 api_key 相同但 base_url 不同的条目（如多 IP 同密钥的 zzzz 节点）。
+    Scan storage/auth and map an exact (api_key, base_url) identity to its file.
+
+    A key-only fallback is intentionally not supported: the same key can be used by
+    multiple files or endpoints, and choosing the first filesystem result creates a
+    convincing but false account-file label in historical logs.
     """
-    mapping: dict[tuple[str, str], str] = {}
+    candidates: dict[tuple[str, str], list[str]] = {}
     if not AUTH_DIR.exists():
-        return mapping
+        return {}
     skip_dirs = {'archive', 'backups', 'logs', 'sources', 'model_pools'}
     for root, dirs, files in os.walk(AUTH_DIR):
         dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith('.')]
@@ -113,23 +137,21 @@ def _build_api_key_to_filename_map() -> dict[tuple[str, str], str]:
                 data = json.loads(fp.read_text(encoding='utf-8'))
             except Exception:
                 continue
-            content = data.get('content') if isinstance(data, dict) else None
-            if not isinstance(content, dict):
-                continue
-            key = str(content.get('api_key') or '').strip()
-            base = str(content.get('base_url') or '').strip()
-            if not key:
+            key, base = _auth_file_api_identity(data)
+            if not key or not base:
                 continue
             try:
-                rel = fp.relative_to(AUTH_DIR)
+                rel = fp.relative_to(AUTH_DIR).as_posix()
             except Exception:
                 rel = fp.name
-            # 优先精确联合键，也保留仅 key 的回退键（用 base='' 标记）
-            composite = (key, base)
-            mapping.setdefault(composite, str(rel))
-            # 回退：仅 key（base 为空串）——若已有记录则跳过，避免覆盖
-            mapping.setdefault((key, ''), str(rel))
-    return mapping
+            candidates.setdefault((key, base), []).append(rel)
+
+    # Only a unique exact identity is safe to expose as the originating file.
+    return {
+        identity: names[0]
+        for identity, names in candidates.items()
+        if len(set(names)) == 1
+    }
 
 
 def _build_auth_id_index() -> dict[str, dict]:
@@ -185,16 +207,13 @@ def _build_auth_id_index() -> dict[str, dict]:
                 block_key_idx += 1
                 key = str(entry.get('api-key') or '').strip()
                 proxy = str(entry.get('proxy-url') or '').strip()
+                auth_file = key_to_file.get((key, base.rstrip('/')), '') if key else ''
                 raw_hash = _stable_id_hash(kind, key, base, proxy)
                 cnt = seen_hashes.get(raw_hash, 0)
                 seen_hashes[raw_hash] = cnt + 1
                 short = raw_hash if cnt == 0 else f'{raw_hash}-{cnt}'
                 auth_id = f'{kind}:{short}'
-                # 优先用 (key, base) 联合键精确匹配文件名（避免同 key 不同 IP 混淆）
-                auth_file = (
-                    key_to_file.get((key, base)) or
-                    key_to_file.get((key, ''), '')
-                ) if key else ''
+                # 只有 key 与 endpoint 同时精确命中时才展示文件名。
                 # auth_label 只放服务商+host+key尾号，不含文件名（文件名单独放 auth_file 字段）
                 desc = f'{display_name} [{host}]'
                 if key:
@@ -247,15 +266,13 @@ def _build_auth_id_index() -> dict[str, dict]:
             base = str(entry.get('base-url') or '').strip()
             if not key:
                 continue
+            auth_file = key_to_file.get((key, base.rstrip('/')), '')
             raw_hash = _stable_id_hash(kind, key, base)
             cnt = seen_hashes_c.get(raw_hash, 0)
             seen_hashes_c[raw_hash] = cnt + 1
             short = raw_hash if cnt == 0 else f'{raw_hash}-{cnt}'
             auth_id = f'{kind}:{short}'
-            auth_file = (
-                key_to_file.get((key, base)) or
-                key_to_file.get((key, ''), '')
-            )
+            # key-only fallback is deliberately omitted; it is not an identity.
             index[auth_id] = {
                 'label': provider_name,
                 'base_url': base,
@@ -268,30 +285,52 @@ def _build_auth_id_index() -> dict[str, dict]:
     return index
 
 
+def _auth_files_signature():
+    """Return a cheap signature for auth files used by the runtime config."""
+    signature = []
+    if not AUTH_DIR.exists():
+        return ()
+    skip_dirs = {'archive', 'backups', 'logs', 'sources', 'model_pools'}
+    for root, dirs, files in os.walk(AUTH_DIR):
+        dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith('.')]
+        for fn in files:
+            if not fn.endswith('.json'):
+                continue
+            path = Path(root) / fn
+            try:
+                stat = path.stat()
+                signature.append((str(path.relative_to(AUTH_DIR)), stat.st_mtime_ns, stat.st_size))
+            except (OSError, ValueError):
+                continue
+    return tuple(sorted(signature))
+
+
 def _get_auth_id_index() -> dict[str, dict]:
     """
-    返回 auth_id 反查索引（懒加载 + mtime 缓存 + stat 节流）。
+    Return the auth-id lookup index with runtime-config and auth-file invalidation.
 
-    这个函数会被 _parse_request_log_file 在批量解析上百个日志文件的循环里
-    逐文件调用一次（通过 resolve_auth_id_desc）。即使 YAML 解析结果有 mtime
-    缓存，每次调用仍然会触发一次 RUNTIME_CONFIG.stat() 系统调用去判断缓存是否
-    过期——在这个环境下单次 stat() 实测约 5-7ms，文件一多，累计开销不可忽略。
-    这里加一层节流：短时间窗口内（默认 5 秒）重复调用直接复用已缓存的索引，
-    完全跳过 stat()，配置变更最多延迟一个窗口才会被感知到，可接受。
+    The runtime YAML alone is insufficient: a source auth file can be edited or
+    replaced while the generated YAML keeps the same mtime.
     """
-    global _AUTH_ID_INDEX, _AUTH_ID_INDEX_MTIME, _AUTH_ID_INDEX_STAT_CHECKED_AT
+    global _AUTH_ID_INDEX, _AUTH_ID_INDEX_MTIME, _AUTH_ID_INDEX_AUTH_SIGNATURE, _AUTH_ID_INDEX_STAT_CHECKED_AT
     now = time.time()
     with _AUTH_ID_INDEX_LOCK:
         if _AUTH_ID_INDEX and (now - _AUTH_ID_INDEX_STAT_CHECKED_AT) < _AUTH_ID_INDEX_STAT_THROTTLE_SECONDS:
             return _AUTH_ID_INDEX
         try:
-            mtime = RUNTIME_CONFIG.stat().st_mtime if RUNTIME_CONFIG.exists() else 0.0
-        except Exception:
-            mtime = 0.0
+            mtime = RUNTIME_CONFIG.stat().st_mtime_ns if RUNTIME_CONFIG.exists() else 0
+        except OSError:
+            mtime = 0
+        auth_signature = _auth_files_signature()
         _AUTH_ID_INDEX_STAT_CHECKED_AT = now
-        if mtime != _AUTH_ID_INDEX_MTIME or not _AUTH_ID_INDEX:
+        if (
+            mtime != _AUTH_ID_INDEX_MTIME
+            or auth_signature != _AUTH_ID_INDEX_AUTH_SIGNATURE
+            or not _AUTH_ID_INDEX
+        ):
             _AUTH_ID_INDEX = _build_auth_id_index()
             _AUTH_ID_INDEX_MTIME = mtime
+            _AUTH_ID_INDEX_AUTH_SIGNATURE = auth_signature
         return _AUTH_ID_INDEX
 
 

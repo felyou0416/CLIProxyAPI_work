@@ -1589,4 +1589,47 @@ def handle_post(handler, parsed, data):
         except Exception as e:
             send_json(handler, {'ok': False, 'message': str(e)}, status=500)
         return True
+
+    if parsed.path == '/api/claude-adapter/build':
+        payload = data if isinstance(data, dict) else {}
+        try:
+            from backend.processes import build_claude_adapter
+            force = str((payload.get('force') or '')).strip().lower() in ('1', 'true', 'yes')
+            result = build_claude_adapter(force=force)
+            send_json(handler, result, status=200 if result.get('ok') else 500)
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': f'Build command failed: {e}'}, status=500)
+        return True
+
+    if parsed.path == '/api/claude-adapter/config':
+        payload = data if isinstance(data, dict) else {}
+        try:
+            from backend.processes import ensure_claude_adapter_default_config
+            force = str((payload.get('force') or '')).strip().lower() in ('1', 'true', 'yes')
+            result = ensure_claude_adapter_default_config(force=force)
+            send_json(handler, result, status=200 if result.get('ok') else 500)
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': f'Config write failed: {e}'}, status=500)
+        return True
+
+    if parsed.path == '/api/claude-code-settings':
+        payload = data if isinstance(data, dict) else {}
+        try:
+            from backend.settings import get_claude_code_settings, set_claude_code_via_adapter
+            action = str((payload.get('action') or 'read')).strip().lower()
+            if action in ('read', 'status', 'get', ''):
+                result = dict(get_claude_code_settings(mask_secrets=True))
+                result.setdefault('ok', True)
+                send_json(handler, result)
+                return True
+            if action == 'use_adapter':
+                enable = str((payload.get('enable') or 'true')).strip().lower() in ('1', 'true', 'yes', 'on')
+                result = set_claude_code_via_adapter(enable=enable)
+                send_json(handler, result, status=200 if result.get('ok') else 500)
+                return True
+            send_json(handler, {'ok': False, 'message': f'Unsupported action: {action}'}, status=400)
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': f'Claude Code settings action failed: {e}'}, status=500)
+        return True
+
     return False

@@ -1,7 +1,7 @@
 {
   "name": "cliproxyapi-tauri-gui",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.5.1",
   "scripts": {
     "tauri": "tauri",
     "build": "tauri build",
