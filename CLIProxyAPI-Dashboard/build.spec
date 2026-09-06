@@ -45,6 +45,7 @@ a = Analysis(
         'backend.settings',
         'backend.access_auth',
         'winpty',
+        'yaml',
     ],
     hookspath=[],
     hooksconfig={},

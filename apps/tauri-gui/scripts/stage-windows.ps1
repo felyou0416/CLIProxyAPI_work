@@ -13,6 +13,8 @@ $required = @(
     @{ Source = Join-Path $WorkspaceRoot 'CLIProxyAPI-AccessGateway\cli-access-gateway.exe'; Target = 'CLIProxyAPI-AccessGateway\cli-access-gateway.exe' },
     @{ Source = Join-Path $WorkspaceRoot 'CLIProxyAPI-MediaProxy\cli-media-proxy.exe'; Target = 'CLIProxyAPI-MediaProxy\cli-media-proxy.exe' },
     @{ Source = Join-Path $WorkspaceRoot 'CLIProxyAPI-MediaProxy\config.example.json'; Target = 'CLIProxyAPI-MediaProxy\config.example.json' },
+    @{ Source = Join-Path $WorkspaceRoot 'CLIProxyAPI-ClaudeAdapter\cli-claude-adapter.exe'; Target = 'CLIProxyAPI-ClaudeAdapter\cli-claude-adapter.exe' },
+    @{ Source = Join-Path $WorkspaceRoot 'CLIProxyAPI-ClaudeAdapter\config.example.yaml'; Target = 'CLIProxyAPI-ClaudeAdapter\config.example.yaml' },
     @{ Source = Join-Path $WorkspaceRoot 'CLIProxyAPI-LocalPlugin\dist\windows-amd64\cliproxy-local.dll'; Target = 'plugins\cliproxy-local.dll' }
 )
 

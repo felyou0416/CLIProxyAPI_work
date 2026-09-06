@@ -118,6 +118,14 @@ fn start_dashboard(app: &AppHandle) -> Result<bool, String> {
             } else {
                 "cli-media-proxy"
             });
+    let claude_binary =
+        resource_dir
+            .join("CLIProxyAPI-ClaudeAdapter")
+            .join(if cfg!(target_os = "windows") {
+                "cli-claude-adapter.exe"
+            } else {
+                "cli-claude-adapter"
+            });
     let child = Command::new(binary)
         .current_dir(resource_dir.join("dashboard"))
         .env("CLIPROXYAPI_ROOT", &resource_dir)
@@ -125,6 +133,7 @@ fn start_dashboard(app: &AppHandle) -> Result<bool, String> {
         .env("RELAYX_CLI_BINARY", cli_binary)
         .env("CLIPROXYAPI_ACCESS_GATEWAY_BINARY", gateway_binary)
         .env("CLIPROXYAPI_MEDIA_PROXY_BINARY", media_binary)
+        .env("CLIPROXYAPI_CLAUDE_ADAPTER_BINARY", claude_binary)
         .env("CLIPROXYAPI_PLUGIN_DIR", resource_dir.join("plugins"))
         .env("RELAYX_DASHBOARD_ROOT", resource_dir.join("dashboard"))
         .env("CLIPROXYAPI_DASHBOARD_HOST", "127.0.0.1")

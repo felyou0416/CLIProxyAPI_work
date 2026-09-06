@@ -22,6 +22,7 @@
       "resources/cli-proxy-api*",
       "resources/CLIProxyAPI-AccessGateway/**/*",
       "resources/CLIProxyAPI-MediaProxy/**/*",
+      "resources/CLIProxyAPI-ClaudeAdapter/**/*",
       "resources/plugins/**/*"
     ],
     "windows": {
