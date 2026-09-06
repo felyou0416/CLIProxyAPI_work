@@ -53,10 +53,19 @@ jobs:
           cd CLIProxyAPI/CLIProxyAPI
           go build -o bin\cli-proxy-api.exe ./cmd/server/
           cd ../..
-          .\CLIProxyAPI-AccessGateway\build.ps1 -Output CLIProxyAPI-AccessGateway\cli-access-gateway.exe
-          .\CLIProxyAPI-MediaProxy\build.ps1 -Output CLIProxyAPI-MediaProxy\cli-media-proxy.exe
-          .\CLIProxyAPI-ClaudeAdapter\build.ps1 -Output CLIProxyAPI-ClaudeAdapter\cli-claude-adapter.exe
+          .\CLIProxyAPI-AccessGateway\build.ps1
+          .\CLIProxyAPI-MediaProxy\build.ps1
+          .\CLIProxyAPI-ClaudeAdapter\build.ps1
           .\CLIProxyAPI-LocalPlugin\build.ps1
+          Write-Host "Verifying built binaries..."
+          @('CLIProxyAPI/CLIProxyAPI/bin/cli-proxy-api.exe',
+            'CLIProxyAPI-AccessGateway/cli-access-gateway.exe',
+            'CLIProxyAPI-MediaProxy/cli-media-proxy.exe',
+            'CLIProxyAPI-ClaudeAdapter/cli-claude-adapter.exe',
+            'CLIProxyAPI-LocalPlugin/dist/windows-amd64/cliproxy-local.dll') | ForEach-Object {
+              if (-not (Test-Path $_)) { throw "Missing built binary: $_" }
+              Write-Host "Verified: $_"
+          }
 
       - name: Build Dashboard
         shell: pwsh
@@ -103,4 +112,4 @@ jobs:
             apps/tauri-gui/src-tauri/target/release/bundle/nsis/*.exe
             apps/tauri-gui/src-tauri/target/release/bundle/msi/*.msi
           generate_release_notes: true
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false

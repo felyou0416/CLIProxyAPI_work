@@ -4,6 +4,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$resolvedOutput = [System.IO.Path]::GetFullPath($Output)
 
 Push-Location $PSScriptRoot
 try {
@@ -11,10 +12,10 @@ try {
         go test ./...
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
-    go build -o $Output .
+    go build -o $resolvedOutput .
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
     Pop-Location
 }
 
-Write-Host "Built: $Output"
+Write-Host "Built: $resolvedOutput"
