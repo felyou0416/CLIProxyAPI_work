@@ -381,12 +381,13 @@ function bindMobileNavChrome() {
 
 function getNavGroups() {
   return {
-    runtime: ['account', 'chat', 'requests', 'token-usage', 'clients', 'settings'],
+    runtime: ['account', 'chat', 'requests', 'token-usage', 'settings'],
     config: ['providers', 'media-models', 'aggregates', 'model-map', 'api-key-intake', 'auths'],
     access: ['virtual-keys', 'tools', 'doc'],
     // 低频页不进侧栏，统一归系统中心入口
     system: [
       'system',
+      'clients',
       'models',
       'network-access',
       'firewall-access',
