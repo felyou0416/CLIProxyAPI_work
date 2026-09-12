@@ -16,7 +16,7 @@
 }
 .request-bubbles-panel {
   padding: 10px 14px 12px;
-  gap: 8px;
+  gap: 4px;
   background:
     radial-gradient(circle at 8% 10%, color-mix(in srgb, #7dd3fc 13%, transparent) 0 118px, transparent 119px),
     radial-gradient(circle at 92% 2%, color-mix(in srgb, #f0abfc 11%, transparent) 0 140px, transparent 141px),
@@ -253,30 +253,16 @@
   overflow-x: auto;
   width: 100%;
 }
-.request-table-wrap.is-refreshing::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-  border-radius: 18px;
-  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--accent) 65%, transparent);
-  animation: request-table-refresh-pulse 1.2s ease-in-out infinite;
-}
 .request-events-meta.is-refreshing {
   color: var(--accent);
 }
 .request-events-meta.has-error {
   color: #b91c1c;
 }
-@keyframes request-table-refresh-pulse {
-  0%, 100% { opacity: 0.45; }
-  50% { opacity: 1; }
-}
 .request-table {
   min-width: 980px;
   border-collapse: separate;
-  border-spacing: 0 5px;
+  border-spacing: 0 3px;
 }
 .request-table thead th {
   position: sticky;
@@ -288,7 +274,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
-  padding: 8px 12px;
+  padding: 4px 12px;
 }
 .request-table th,
 .request-table td {
@@ -901,13 +887,13 @@ tr.req-group-child td:last-child {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 14px;
-  margin-top: 2px;
-  margin-bottom: 8px;
-  border-radius: 12px;
+  padding: 5px 12px;
+  margin-top: 0;
+  margin-bottom: 2px;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--panel) 88%, #f8fbff);
   border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border));
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
   flex-wrap: nowrap;
   overflow-x: auto;
 }

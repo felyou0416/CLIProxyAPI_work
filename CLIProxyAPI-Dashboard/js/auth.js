@@ -1,8 +1,59 @@
 let loadAuthFilesPending = false;
 let loadAuthFilesQueued = false;
+let authDefaultExpanded = true;
+try {
+  const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_expand_all') : null;
+  if (saved !== null) {
+    authDefaultExpanded = saved === 'true';
+  }
+} catch {}
+
+const collapsedAuthCards = new Set();
 const expandedAuthCards = new Set();
+
+try {
+  if (typeof localStorage !== 'undefined') {
+    const savedCollapsed = localStorage.getItem('auth_collapsed_cards');
+    if (savedCollapsed) {
+      JSON.parse(savedCollapsed).forEach(id => collapsedAuthCards.add(id));
+    }
+    const savedExpanded = localStorage.getItem('auth_expanded_cards');
+    if (savedExpanded) {
+      JSON.parse(savedExpanded).forEach(id => expandedAuthCards.add(id));
+    }
+  }
+} catch {}
+
+function saveAuthExpandState() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('auth_expand_all', String(authDefaultExpanded));
+      localStorage.setItem('auth_collapsed_cards', JSON.stringify([...collapsedAuthCards]));
+      localStorage.setItem('auth_expanded_cards', JSON.stringify([...expandedAuthCards]));
+    }
+  } catch {}
+}
+
 const selectedAuthCards = new Set();
-let selectedAuthProviderFilter = 'codex';
+function getPersistedAuthProviderFilter() {
+  try {
+    return (typeof localStorage !== 'undefined' && localStorage.getItem('auth_provider_filter')) || '';
+  } catch {
+    return '';
+  }
+}
+
+function setPersistedAuthProviderFilter(value) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const val = String(value || '').trim();
+      if (val) localStorage.setItem('auth_provider_filter', val);
+      else localStorage.removeItem('auth_provider_filter');
+    }
+  } catch {}
+}
+
+let selectedAuthProviderFilter = getPersistedAuthProviderFilter() || 'codex';
 let availableAuthProviderFilter = 'codex';
 let authSearchQuery = '';
 let authEntryStatuses = {};
@@ -37,13 +88,32 @@ function escapeHtml(value) {
 }
 
 function isAuthExpanded(id) {
-  return expandedAuthCards.has(id);
+  const authId = String(id || '').trim();
+  if (!authId) return false;
+  if (authDefaultExpanded) {
+    return !collapsedAuthCards.has(authId);
+  }
+  return expandedAuthCards.has(authId);
 }
 
 function toggleAuthExpanded(id) {
-  if (!id) return;
-  if (expandedAuthCards.has(id)) expandedAuthCards.delete(id);
-  else expandedAuthCards.add(id);
+  const authId = String(id || '').trim();
+  if (!authId) return;
+  const currentlyExpanded = isAuthExpanded(authId);
+  if (currentlyExpanded) {
+    if (authDefaultExpanded) {
+      collapsedAuthCards.add(authId);
+    } else {
+      expandedAuthCards.delete(authId);
+    }
+  } else {
+    if (authDefaultExpanded) {
+      collapsedAuthCards.delete(authId);
+    } else {
+      expandedAuthCards.add(authId);
+    }
+  }
+  saveAuthExpandState();
 }
 
 function updateToggleAllExpandButtonText() {
@@ -54,14 +124,14 @@ function updateToggleAllExpandButtonText() {
   if (!visibleCards.length) {
     const textEl = btn.querySelector('.auth-toggle-expand-text');
     const iconEl = btn.querySelector('.auth-toggle-expand-icon');
-    if (textEl) textEl.textContent = isZh ? '展开全部' : 'Expand All';
-    if (iconEl) iconEl.textContent = '⤢';
+    if (textEl) textEl.textContent = authDefaultExpanded ? (isZh ? '收起全部' : 'Collapse All') : (isZh ? '展开全部' : 'Expand All');
+    if (iconEl) iconEl.textContent = authDefaultExpanded ? '⤡' : '⤢';
     return;
   }
   let allExpanded = true;
   visibleCards.forEach(strip => {
     const id = strip.getAttribute('data-auth-id');
-    if (id && !expandedAuthCards.has(id)) {
+    if (id && !isAuthExpanded(id)) {
       allExpanded = false;
     }
   });
@@ -78,28 +148,62 @@ function toggleAllAuthExpanded() {
   let allExpanded = true;
   visibleCards.forEach(strip => {
     const id = strip.getAttribute('data-auth-id');
-    if (id && !expandedAuthCards.has(id)) {
+    if (id && !isAuthExpanded(id)) {
       allExpanded = false;
     }
   });
 
   const shouldExpand = !allExpanded;
+  authDefaultExpanded = shouldExpand;
+  collapsedAuthCards.clear();
+  expandedAuthCards.clear();
+
   visibleCards.forEach(strip => {
     const id = strip.getAttribute('data-auth-id');
     if (!id) return;
-    if (shouldExpand) {
-      expandedAuthCards.add(id);
-      strip.classList.add('is-expanded');
-      const chevron = strip.querySelector('.auth-strip-chevron');
-      if (chevron) chevron.textContent = '▲';
-    } else {
-      expandedAuthCards.delete(id);
-      strip.classList.remove('is-expanded');
-      const chevron = strip.querySelector('.auth-strip-chevron');
-      if (chevron) chevron.textContent = '▼';
-    }
+    strip.classList.toggle('is-expanded', shouldExpand);
+    const chevron = strip.querySelector('.auth-strip-chevron');
+    if (chevron) chevron.textContent = shouldExpand ? '▲' : '▼';
   });
+
+  saveAuthExpandState();
   updateToggleAllExpandButtonText();
+}
+
+let currentAuthViewMode = (typeof localStorage !== 'undefined' && localStorage.getItem('auth_view_mode')) || 'strip';
+
+function updateAuthViewModeUI() {
+  const container = document.getElementById('auth-selected-list');
+  const btn = document.getElementById('auth-view-mode-btn');
+  const icon = document.getElementById('auth-view-mode-icon');
+  const text = document.getElementById('auth-view-mode-text');
+  const isZh = getLanguage() === 'zh';
+  const isCard = currentAuthViewMode === 'card';
+
+  if (container) {
+    container.classList.toggle('is-card-view', isCard);
+  }
+  if (icon) {
+    icon.textContent = isCard ? '☰' : '⊞';
+  }
+  if (text) {
+    text.textContent = isCard
+      ? (isZh ? '列表视图' : 'List view')
+      : (isZh ? '卡片视图' : 'Card view');
+  }
+  if (btn) {
+    btn.title = isCard
+      ? (isZh ? '切换为列表视图' : 'Switch to list view')
+      : (isZh ? '切换为卡片视图' : 'Switch to card view');
+  }
+}
+
+function toggleAuthViewMode() {
+  currentAuthViewMode = currentAuthViewMode === 'card' ? 'strip' : 'card';
+  try {
+    localStorage.setItem('auth_view_mode', currentAuthViewMode);
+  } catch {}
+  updateAuthViewModeUI();
 }
 
 function authStatusLabel(status, meta = {}) {
@@ -184,7 +288,8 @@ function toggleAuthCardSelection(id) {
 
 function clearAuthCardSelection() {
   selectedAuthCards.clear();
-  loadAuthFiles();
+  updateAuthBulkToolbar(authItemsById);
+  renderAuthUI();
 }
 
 function getSelectedAuthCardIds() {
@@ -284,6 +389,11 @@ async function deleteSelectedAuthCards() {
   try {
     const result = await api('/api/delete-auths', 'POST', { ids });
     selectedAuthCards.clear();
+    ids.forEach(id => {
+      collapsedAuthCards.delete(id);
+      expandedAuthCards.delete(id);
+    });
+    saveAuthExpandState();
     showMessage(result.message || (getLanguage() === 'zh' ? '已删除选中账号文件。' : 'Deleted selected auth files.'));
     await loadAuthFiles(true);
     await refreshStatus();
@@ -305,7 +415,9 @@ async function deleteSingleAuthCard(id) {
   try {
     const result = await api('/api/delete-auths', 'POST', { ids: [id] });
     if (selectedAuthCards.has(id)) selectedAuthCards.delete(id);
+    if (collapsedAuthCards.has(id)) collapsedAuthCards.delete(id);
     if (expandedAuthCards.has(id)) expandedAuthCards.delete(id);
+    saveAuthExpandState();
     showMessage(result.message || (getLanguage() === 'zh' ? '已删除账号文件。' : 'Deleted auth file.'));
     await loadAuthFiles(true);
     await refreshStatus();
@@ -315,9 +427,12 @@ async function deleteSingleAuthCard(id) {
 }
 
 function updateAuthBulkToolbar(items, selectedPoolIds = []) {
-  const countEl = document.getElementById('auth-bulk-selection-count');
   const ids = getSelectedAuthCardIds();
-  const allInPool = ids.length > 0 && ids.every((id) => selectedPoolIds.includes(id));
+  const toolbar = document.getElementById('auth-bulk-toolbar') || document.querySelector('.auth-bulk-toolbar');
+  if (toolbar) {
+    toolbar.hidden = ids.length === 0;
+  }
+  const countEl = document.getElementById('auth-bulk-selection-count');
   if (countEl) {
     countEl.textContent = ids.length
       ? `${getLanguage() === 'zh' ? '已选' : 'Selected'} ${ids.length}`
@@ -530,7 +645,7 @@ function wireAuthPanelActions(root, selectedIds) {
         toggleAuthExpanded(id);
         const strip = el.closest('.auth-strip');
         if (strip) {
-           const isExpanded = expandedAuthCards.has(id);
+           const isExpanded = isAuthExpanded(id);
            strip.classList.toggle('is-expanded', isExpanded);
            const chevron = strip.querySelector('.auth-strip-chevron');
            if (chevron) chevron.textContent = isExpanded ? '▲' : '▼';
@@ -594,10 +709,13 @@ function setAuthSearch(value) {
   renderAuthUI();
 }
 
-function preferredAuthProviderFilter(items, activeFilter) {
+function preferredAuthProviderFilter(items, activeFilter, usePersistence = true) {
   const providers = [...new Set(items.map(item => String(item.provider || '').trim()).filter(Boolean))];
-  if (!providers.length) return '';
-  if (providers.includes(activeFilter)) return activeFilter;
+  const persisted = usePersistence ? getPersistedAuthProviderFilter() : '';
+  const candidate = activeFilter || persisted;
+  if (!providers.length) return candidate || '';
+  if (candidate && providers.includes(candidate)) return candidate;
+  if (persisted && providers.includes(persisted)) return persisted;
   if (providers.includes('codex')) return 'codex';
   return providers[0];
 }
@@ -606,7 +724,7 @@ function renderAuthProviderFilters(root, items, activeFilter, onSelect, activeCl
   if (!root) return activeFilter;
   const providers = [...new Set(items.map(item => String(item.provider || '').trim()).filter(Boolean))];
   const options = providers;
-  const normalizedFilter = preferredAuthProviderFilter(items, activeFilter);
+  const normalizedFilter = preferredAuthProviderFilter(items, activeFilter, true);
   root.innerHTML = options.map(value => {
     const classes = ['auth-provider-filter-btn'];
     if (value === normalizedFilter) {
@@ -619,7 +737,9 @@ function renderAuthProviderFilters(root, items, activeFilter, onSelect, activeCl
   root.querySelectorAll('[data-auth-provider-filter]').forEach(btn => {
     btn.onclick = () => {
       authVisibleLimit = AUTH_VISIBLE_STEP;
-      onSelect(btn.getAttribute('data-auth-provider-filter') || '');
+      const val = btn.getAttribute('data-auth-provider-filter') || '';
+      setPersistedAuthProviderFilter(val);
+      onSelect(val);
     };
   });
   return normalizedFilter;
@@ -637,7 +757,7 @@ function _extractHostFromUrl(urlStr) {
 }
 
 function authCardHtml(item, options = {}) {
-  const { selected = false, applied = false, orderIndex = -1, totalSelected = 0 } = options;
+  const { selected = false } = options;
   const authId = item.id || '';
   const id = escapeHtml(authId);
   const name = escapeHtml(item.name || '-');
@@ -660,7 +780,7 @@ function authCardHtml(item, options = {}) {
   const detectStatus = authEntryStatuses[authId] || '';
   const detectMeta = authEntryStatusMeta[authId] || {};
   const isZh = getLanguage() === 'zh';
-  const isExpanded = expandedAuthCards.has(authId);
+  const isExpanded = isAuthExpanded(authId);
   const cardPicked = selectedAuthCards.has(authId);
 
   const statusText = authStatusLabel(detectStatus, detectMeta);
@@ -670,7 +790,6 @@ function authCardHtml(item, options = {}) {
   const poolLabel = isDisabled
     ? (isZh ? '已停用' : 'Disabled')
     : (isZh ? '已启用' : 'Enabled');
-  const appliedLabel = applied ? (isZh ? '已应用' : 'Applied') : '';
 
   // Secondary chip in top row
   let headerMetaChip = '';
@@ -796,29 +915,29 @@ function authCardHtml(item, options = {}) {
   return `
     <article class="auth-strip ${selected ? 'is-selected' : ''} ${cardPicked ? 'is-picked' : ''} ${isExpanded ? 'is-expanded' : ''}" data-auth-id="${id}">
       <div class="auth-strip-summary" data-auth-expand="${id}">
-        <div class="auth-strip-toggle ${cardPicked ? 'is-checked' : ''}" data-auth-check="${id}">
-          <span class="auth-toggle-indicator"></span>
+        <div class="auth-strip-top">
+          <div class="auth-strip-toggle ${cardPicked ? 'is-checked' : ''}" data-auth-check="${id}">
+            <span class="auth-toggle-indicator"></span>
+          </div>
+          <span class="auth-status-light ${lightClass}" title="${escapeHtml(statusTitle)}" aria-label="${escapeHtml(statusText)}"></span>
+          <span class="auth-strip-name" title="${name}">${name}</span>
         </div>
-        <span class="auth-status-light ${lightClass}" title="${escapeHtml(statusTitle)}" aria-label="${escapeHtml(statusText)}"></span>
-        <div class="auth-strip-main">
-          <span class="auth-strip-name">${name}</span>
+
+        <div class="auth-strip-meta">
           <span class="auth-inline-chip provider">${provider}</span>
           ${headerMetaChip}
+          <div class="auth-strip-status">
+            <span class="auth-inline-chip ${poolChipClass}" style="${poolChipStyle}">${poolLabel}</span>
+          </div>
         </div>
+
         <div class="auth-strip-actions">
           <button class="secondary" type="button" data-auth-test="${id}">${isZh ? '检测' : 'Test'}</button>
           <span class="auth-save-status" data-auth-save="${id}" data-auth-save-state="saved" role="status">${isZh ? '自动保存' : 'Auto-save'}</span>
           <button class="secondary" type="button" data-auth-copy="${escapeHtml(item.path || '')}">${isZh ? '复制路径' : 'Copy path'}</button>
           <button class="danger" type="button" data-auth-delete="${id}">${isZh ? '删除' : 'Delete'}</button>
         </div>
-        <div class="auth-strip-status">
-          <span class="auth-inline-chip ${poolChipClass}" style="${poolChipStyle}">${poolLabel}</span>
-          ${applied ? `<span class="auth-inline-chip applied active-chip">${appliedLabel}</span>` : ''}
-        </div>
-        <div class="auth-order-actions-inline">
-          ${selected && totalSelected > 1 && orderIndex > 0 ? `<button class="auth-order-btn" data-auth-move="up" data-auth-id="${id}" aria-label="${isZh ? '上移' : 'Move up'}">↑</button>` : ''}
-          ${selected && totalSelected > 1 && orderIndex >= 0 && orderIndex < totalSelected - 1 ? `<button class="auth-order-btn" data-auth-move="down" data-auth-id="${id}" aria-label="${isZh ? '下移' : 'Move down'}">↓</button>` : ''}
-        </div>
+
         <div class="auth-strip-chevron">
           ${isExpanded ? '▲' : '▼'}
         </div>
@@ -870,8 +989,6 @@ async function moveAuthInPool(id, selectedIds, direction) {
 function renderAuthUI() {
   const items = _cachedAuthItems;
   const selectedIds = _cachedSelectedIds;
-  const appliedIds = _cachedAppliedIds;
-  const appliedSet = new Set(appliedIds);
 
   const selectedList = document.getElementById('auth-selected-list');
   const availableList = document.getElementById('auth-available-list');
@@ -884,11 +1001,15 @@ function renderAuthUI() {
   const selectedItems = items;
   const availableItems = [];
 
-  selectedAuthProviderFilter = preferredAuthProviderFilter(selectedItems, selectedAuthProviderFilter);
-  availableAuthProviderFilter = preferredAuthProviderFilter(availableItems, availableAuthProviderFilter);
+  selectedAuthProviderFilter = preferredAuthProviderFilter(selectedItems, selectedAuthProviderFilter, true);
+  if (selectedAuthProviderFilter && !getPersistedAuthProviderFilter()) {
+    setPersistedAuthProviderFilter(selectedAuthProviderFilter);
+  }
+  availableAuthProviderFilter = preferredAuthProviderFilter(availableItems, availableAuthProviderFilter, false);
 
   selectedAuthProviderFilter = renderAuthProviderFilters(selectedFilters, selectedItems, selectedAuthProviderFilter, (value) => {
     selectedAuthProviderFilter = value;
+    setPersistedAuthProviderFilter(value);
     renderAuthUI();
   }, 'active-chip');
   availableAuthProviderFilter = renderAuthProviderFilters(availableFilters, availableItems, availableAuthProviderFilter, (value) => {
@@ -917,12 +1038,7 @@ function renderAuthUI() {
       ? `<button class="secondary auth-load-more-btn" type="button" data-auth-load-more="1">${getLanguage() === 'zh' ? `加载更多 ${remainingSelectedCount}` : `Load ${remainingSelectedCount} more`}</button>`
       : '';
     selectedList.innerHTML = visibleSelectedItems.length
-      ? visibleSelectedItems.map(item => authCardHtml(item, {
-        selected: true,
-        applied: appliedSet.has(item.id),
-        orderIndex: selectedIds.indexOf(item.id),
-        totalSelected: selectedIds.length,
-      })).join('') + loadMoreHtml
+      ? visibleSelectedItems.map(item => authCardHtml(item, { selected: true })).join('') + loadMoreHtml
       : `<div class="auth-empty">${t('common.noSelectedAccounts', 'No selected accounts yet.')}</div>`;
     wireAuthPanelActions(selectedList, selectedIds);
   }
@@ -931,7 +1047,7 @@ function renderAuthUI() {
     const wrap = availableList.closest('.auth-group-wrap');
     if (wrap) wrap.hidden = true;
     availableList.innerHTML = filteredAvailableItems.length
-      ? filteredAvailableItems.map(item => authCardHtml(item, { selected: false, applied: appliedSet.has(item.id) })).join('')
+      ? filteredAvailableItems.map(item => authCardHtml(item, { selected: false })).join('')
       : `<div class="auth-empty">${t('common.noAvailableAccounts', 'No available accounts.')}</div>`;
     wireAuthPanelActions(availableList, selectedIds);
   }
@@ -943,6 +1059,7 @@ function renderAuthUI() {
   }
 
   updateToggleAllExpandButtonText();
+  updateAuthViewModeUI();
 }
 
 async function loadAuthFiles(force = false) {
@@ -982,6 +1099,20 @@ async function loadAuthFiles(force = false) {
         delete authEntryStatusMeta[id];
       }
     }
+    let expandStateChanged = false;
+    for (const id of collapsedAuthCards) {
+      if (!liveIds.has(id)) {
+        collapsedAuthCards.delete(id);
+        expandStateChanged = true;
+      }
+    }
+    for (const id of expandedAuthCards) {
+      if (!liveIds.has(id)) {
+        expandedAuthCards.delete(id);
+        expandStateChanged = true;
+      }
+    }
+    if (expandStateChanged) saveAuthExpandState();
 
     // 恢复后端持久化的检测缓存
     if (authData.test_cache && typeof authData.test_cache === 'object') {

@@ -15,11 +15,19 @@
 
       <button class="chat-new-session-btn" onclick="createNewSession()" type="button">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-        <span>新建会话</span>
+        <span id="chat-new-session-label">新建会话</span>
       </button>
 
       <div class="chat-sidebar-meta" id="chat-mode-status"></div>
       <div class="chat-session-list" id="chat-session-list"></div>
+
+      <div class="chat-sidebar-footer">
+        <div class="chat-mode-pills" role="tablist" aria-label="模式切换">
+          <button type="button" class="chat-mode-pill active" data-chat-mode="chat" onclick="setChatMode('chat')">对话</button>
+          <button type="button" class="chat-mode-pill" data-chat-mode="image" onclick="setChatMode('image')">图片</button>
+          <button type="button" class="chat-mode-pill" data-chat-mode="video" onclick="setChatMode('video')">视频</button>
+        </div>
+      </div>
     </aside>
 
     <div class="chat-main">
@@ -29,16 +37,24 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
           </button>
           <div class="chat-main-head-text">
-            <span id="chat-active-title">New Chat</span>
-            <small id="chat-active-subtitle">CHAT · No model selected</small>
+            <div class="chat-head-title-row">
+              <span id="chat-active-title">New Chat</span>
+              <span class="chat-model-badge" id="chat-active-badge" title="当前模型">
+                <span class="chat-model-dot"></span>
+                <span id="chat-active-subtitle">CHAT · No model selected</span>
+              </span>
+            </div>
           </div>
         </div>
         <div class="chat-main-head-actions">
+          <button class="chat-icon-btn" onclick="clearChat()" type="button" title="清空对话记录">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          </button>
+          <button class="chat-icon-btn" id="chat-system-toggle" type="button" onclick="toggleChatSystemPrompt()" title="系统提示词 (System Prompt)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          </button>
           <button class="chat-icon-btn" id="chat-options-toggle" type="button" onclick="toggleChatOptions()" title="参数设置" hidden>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"></path><path d="M4 10V3"></path><path d="M12 21v-9"></path><path d="M12 8V3"></path><path d="M20 21v-5"></path><path d="M20 12V3"></path><path d="M1 14h6"></path><path d="M9 8h6"></path><path d="M17 16h6"></path></svg>
-          </button>
-          <button class="chat-icon-btn" id="chat-system-toggle" type="button" onclick="toggleChatSystemPrompt()" title="系统提示词">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
           </button>
         </div>
       </header>
@@ -52,46 +68,65 @@
       <div class="chat-container">
         <div id="chat-history" class="chat-history">
           <div class="chat-welcome">
-            <div class="chat-welcome-icon">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+            <div class="chat-welcome-avatar">
+              <span class="chat-welcome-sparkle">✨</span>
             </div>
-            <div class="chat-welcome-text">选择模型，开始对话</div>
-            <div class="chat-welcome-hint">Enter 发送 · Shift+Enter 换行</div>
+            <div class="chat-welcome-text">欢迎使用 AI 操练场</div>
+            <div class="chat-welcome-sub">选择模型开启对话，或尝试下方快捷建议</div>
+            <div class="chat-starters-grid">
+              <button type="button" class="chat-starter-card" onclick="setChatInputPrompt('请帮我解释这段代码的工作原理，并分析潜在的性能与安全问题：\n\n')">
+                <span class="chat-starter-icon">💻</span>
+                <span class="chat-starter-title">解释代码原理</span>
+                <span class="chat-starter-desc">深入分析逻辑与边界条件</span>
+              </button>
+              <button type="button" class="chat-starter-card" onclick="setChatInputPrompt('请帮我优化以下 SQL 查询，提供索引策略与执行分析：\n\n')">
+                <span class="chat-starter-icon">⚡</span>
+                <span class="chat-starter-title">优化 SQL 性能</span>
+                <span class="chat-starter-desc">慢查询诊断与优化建议</span>
+              </button>
+              <button type="button" class="chat-starter-card" onclick="setChatInputPrompt('请将以下技术文案精准翻译为地道的英文（保持专业技术术语）：\n\n')">
+                <span class="chat-starter-icon">🌐</span>
+                <span class="chat-starter-title">专业技术翻译</span>
+                <span class="chat-starter-desc">地道双语技术文档本地化</span>
+              </button>
+              <button type="button" class="chat-starter-card" onclick="setChatInputPrompt('为全新的现代化开发工具构思 5 个极具吸引力的核心功能：\n\n')">
+                <span class="chat-starter-icon">💡</span>
+                <span class="chat-starter-title">产品头脑风暴</span>
+                <span class="chat-starter-desc">架构设想与产品功能规划</span>
+              </button>
+            </div>
           </div>
         </div>
 
         <div class="chat-input-area">
           <div class="chat-input-wrap">
             <div id="chat-attached-files-container" class="chat-attached-files-container" style="display:none"></div>
-            <textarea id="chat-input" class="chat-input" placeholder="发送消息..." rows="1" onkeydown="handleChatInputKeydown(event)"></textarea>
+            <textarea id="chat-input" class="chat-input" placeholder="发送消息给模型... (Enter 发送, Shift+Enter 换行)" rows="1" onkeydown="handleChatInputKeydown(event)"></textarea>
             <div class="chat-input-footer">
-              <div class="chat-plus-menu-container">
-                <button type="button" class="chat-plus-btn" onclick="toggleChatPlusMenu(event)" title="更多">+</button>
-                <div id="chat-plus-menu" class="chat-plus-menu" style="display:none">
-                  <button type="button" class="chat-menu-item" onclick="triggerChatFileUpload(); closeChatPlusMenu()">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                    <span>上传文件</span>
-                  </button>
-                  <button type="button" class="chat-menu-item" onclick="openChatSkillModal(); closeChatPlusMenu()">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg>
-                    <span>使用 Skill</span>
-                  </button>
+              <div class="chat-input-left">
+                <div class="chat-plus-menu-container">
+                  <button type="button" class="chat-plus-btn" onclick="toggleChatPlusMenu(event)" title="更多功能 (上传/Skill)">+</button>
+                  <div id="chat-plus-menu" class="chat-plus-menu" style="display:none">
+                    <button type="button" class="chat-menu-item" onclick="triggerChatFileUpload(); closeChatPlusMenu()">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                      <span>上传文件</span>
+                    </button>
+                    <button type="button" class="chat-menu-item" onclick="openChatSkillModal(); closeChatPlusMenu()">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg>
+                      <span>使用 Skill</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
               <div class="chat-input-controls">
-                <div class="chat-mode-pills" role="tablist" aria-label="Chat mode">
-                  <button type="button" class="chat-mode-pill active" data-chat-mode="chat" onclick="setChatMode('chat')">Chat</button>
-                  <button type="button" class="chat-mode-pill" data-chat-mode="image" onclick="setChatMode('image')">Image</button>
-                  <button type="button" class="chat-mode-pill" data-chat-mode="video" onclick="setChatMode('video')">Video</button>
-                </div>
                 <label class="chat-model-inline" for="chat-model-select">
                   <select id="chat-model-select" class="chat-model-select">
                     <option value="">Loading models...</option>
                   </select>
                 </label>
-                <button class="chat-send-btn" onclick="sendChatMessage()" title="发送 (Enter)" disabled>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5l7 7-7 7"></path></svg>
+                <button class="chat-send-btn" id="chat-send-btn" onclick="sendChatMessage()" title="发送 (Enter)" disabled>
+                  <svg class="chat-send-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
                 </button>
               </div>
             </div>

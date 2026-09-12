@@ -946,10 +946,13 @@ function renderPendingSessionState(session, quiet = false) {
   if (welcome) welcome.remove();
   const requestId = session.pendingRequestId || `error_${session.id}`;
   const msgDiv = document.createElement('div');
-  msgDiv.className = `chat-message ${session.status === 'error' ? 'error' : 'assistant'}`;
+  const isErr = session.status === 'error';
+  msgDiv.className = `chat-message ${isErr ? 'error' : 'assistant'}`;
   const metaDiv = document.createElement('div');
   metaDiv.className = 'chat-message-meta';
-  metaDiv.innerHTML = `${session.status === 'error' ? ICON.error : ICON.assistant}<span>${session.status === 'error' ? 'Error' : getSessionModeLabel(session.pendingMode || session.mode)}</span>`;
+  const roleIcon = isErr ? ICON.error : ICON.assistant;
+  const roleLabel = isErr ? 'Error' : getSessionModeLabel(session.pendingMode || session.mode);
+  metaDiv.innerHTML = `<div class="chat-msg-avatar ${isErr ? 'error' : 'assistant'}">${roleIcon}</div><span class="chat-msg-sender">${roleLabel}</span>`;
   const contentDiv = document.createElement('div');
   contentDiv.className = 'chat-message-content markdown-body';
   if (session.status === 'error') {
@@ -1045,6 +1048,10 @@ function renderChatHistoryList() {
       ? `当前模式 ${modeSessions.length} ${unit} · ${running} 运行中`
       : `当前模式 ${modeSessions.length} ${unit}`;
   }
+  const newSessionLabel = document.getElementById('chat-new-session-label');
+  if (newSessionLabel) {
+    newSessionLabel.textContent = isImageMode() ? '新建图片任务' : isVideoMode() ? '新建视频任务' : '新建会话';
+  }
 
   if (modeSessions.length === 0) {
     const label = isImageMode() ? '图片任务' : isVideoMode() ? '视频任务' : '会话';
@@ -1052,16 +1059,26 @@ function renderChatHistoryList() {
     return;
   }
 
-  // 主行标题 · 次行模型/时间 · 操作收进 ⋯ 菜单
+  // 主行标题及状态 · 次行模型/时间 · 操作收进 ⋯ 菜单
   container.innerHTML = modeSessions.map(s => {
     const active = s.id === activeSessionId ? 'active' : '';
     const timeStr = new Date(s.ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
     const modelLabel = s.model ? escapeHtml(s.model).split('-').slice(0, 3).join('-') : 'No model';
     const running = isSessionRunning(s);
+    const modeIcon = s.mode === 'image' ? '🎨' : s.mode === 'video' ? '🎬' : '💬';
+    const runningPill = running ? `<span class="chat-status-pill running">运行中</span>` : '';
     return `<div class="chat-session-item ${active}" data-id="${s.id}" onclick="switchToSession('${s.id}'); closeChatDrawers()">
+      <div class="chat-session-item-icon">${modeIcon}</div>
       <div class="chat-session-info">
-        <div class="chat-session-title">${escapeHtml(s.title)}${running ? ' · …' : ''}</div>
-        <div class="chat-session-meta">${modelLabel}${running ? ' · running' : ''} · ${timeStr}</div>
+        <div class="chat-session-title">
+          <span>${escapeHtml(s.title || (s.mode === 'image' ? '图片生成' : s.mode === 'video' ? '视频生成' : '新对话'))}</span>
+          ${runningPill}
+        </div>
+        <div class="chat-session-meta">
+          <span class="chat-session-model">${modelLabel}</span>
+          <span class="chat-session-dot">•</span>
+          <span class="chat-session-time">${timeStr}</span>
+        </div>
       </div>
       <div class="chat-session-menu-wrap" data-session-id="${s.id}">
         <button class="chat-icon-btn chat-session-more" type="button" title="更多" aria-label="更多" onclick="toggleChatSessionMenu(event, '${s.id}')">⋯</button>
@@ -1148,6 +1165,16 @@ async function loadChatPanel() {
   updateChatSendState();
 }
 
+function setChatInputPrompt(promptText) {
+  const input = document.getElementById('chat-input');
+  if (!input) return;
+  input.value = promptText;
+  input.focus();
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+  updateChatSendState();
+}
+
 // ─── Chat View ───
 function renderChatWelcome() {
   const hist = document.getElementById('chat-history');
@@ -1156,14 +1183,34 @@ function renderChatWelcome() {
     renderMediaWorkspace(getActiveSession());
     return;
   }
-  const welcomeText = '选择模型，开始对话';
-  const welcomeHint = 'Enter 发送 · Shift+Enter 换行';
   hist.innerHTML = `<div class="chat-welcome">
-    <div class="chat-welcome-icon">
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+    <div class="chat-welcome-avatar">
+      <span class="chat-welcome-sparkle">✨</span>
     </div>
-    <div class="chat-welcome-text">${welcomeText}</div>
-    <div class="chat-welcome-hint">${welcomeHint}</div>
+    <div class="chat-welcome-text">欢迎使用 AI 操练场</div>
+    <div class="chat-welcome-sub">选择模型开启对话，或尝试下方快捷建议</div>
+    <div class="chat-starters-grid">
+      <button type="button" class="chat-starter-card" onclick="setChatInputPrompt('请帮我解释这段代码的工作原理，并分析潜在的性能与安全问题：\\n\\n')">
+        <span class="chat-starter-icon">💻</span>
+        <span class="chat-starter-title">解释代码原理</span>
+        <span class="chat-starter-desc">深入分析逻辑与边界条件</span>
+      </button>
+      <button type="button" class="chat-starter-card" onclick="setChatInputPrompt('请帮我优化以下 SQL 查询，提供索引策略与执行分析：\\n\\n')">
+        <span class="chat-starter-icon">⚡</span>
+        <span class="chat-starter-title">优化 SQL 性能</span>
+        <span class="chat-starter-desc">慢查询诊断与优化建议</span>
+      </button>
+      <button type="button" class="chat-starter-card" onclick="setChatInputPrompt('请将以下技术文案精准翻译为地道的英文（保持专业技术术语）：\\n\\n')">
+        <span class="chat-starter-icon">🌐</span>
+        <span class="chat-starter-title">专业技术翻译</span>
+        <span class="chat-starter-desc">地道双语技术文档本地化</span>
+      </button>
+      <button type="button" class="chat-starter-card" onclick="setChatInputPrompt('为全新的现代化开发工具构思 5 个极具吸引力的核心功能：\\n\\n')">
+        <span class="chat-starter-icon">💡</span>
+        <span class="chat-starter-title">产品头脑风暴</span>
+        <span class="chat-starter-desc">架构设想与产品功能规划</span>
+      </button>
+    </div>
   </div>`;
 }
 
@@ -1991,7 +2038,7 @@ function appendMessage(role, content, quiet) {
   let icon = ICON.assistant, label = 'Assistant';
   if (role === 'user') { icon = ICON.user; label = 'You'; }
   else if (role === 'error') { icon = ICON.error; label = 'Error'; }
-  metaDiv.innerHTML = `${icon}<span>${label}</span>`;
+  metaDiv.innerHTML = `<div class="chat-msg-avatar ${role}">${icon}</div><span class="chat-msg-sender">${label}</span>`;
 
   const contentDiv = document.createElement('div');
   contentDiv.className = 'chat-message-content markdown-body';
@@ -2005,21 +2052,39 @@ function appendMessage(role, content, quiet) {
   msgDiv.appendChild(metaDiv);
   msgDiv.appendChild(contentDiv);
 
-  // Copy action
+  // Message Actions
+  const actionsDiv = document.createElement('div');
+  actionsDiv.className = 'message-actions';
   if (role !== 'error') {
-    const actionsDiv = document.createElement('div');
-    actionsDiv.className = 'message-actions';
     const copyBtn = document.createElement('button');
     copyBtn.className = 'msg-action-btn';
-    copyBtn.innerHTML = `${ICON.copy} Copy`;
+    copyBtn.innerHTML = `${ICON.copy} 复制`;
     copyBtn.onclick = () => {
       navigator.clipboard.writeText(content);
-      copyBtn.textContent = '✓ Copied';
-      setTimeout(() => { copyBtn.innerHTML = `${ICON.copy} Copy`; }, 1500);
+      copyBtn.textContent = '✓ 已复制';
+      setTimeout(() => { copyBtn.innerHTML = `${ICON.copy} 复制`; }, 1500);
     };
     actionsDiv.appendChild(copyBtn);
-    msgDiv.appendChild(actionsDiv);
+  } else {
+    const retryBtn = document.createElement('button');
+    retryBtn.className = 'msg-action-btn retry-btn';
+    retryBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg> 重试`;
+    retryBtn.onclick = () => {
+      const session = getActiveSession();
+      if (session && session.messages && session.messages.length > 0) {
+        const lastUserMsg = [...session.messages].reverse().find(m => m.role === 'user');
+        if (lastUserMsg) {
+          const chatInput = document.getElementById('chat-input');
+          if (chatInput) {
+            chatInput.value = lastUserMsg.content;
+            sendChatMessage();
+          }
+        }
+      }
+    };
+    actionsDiv.appendChild(retryBtn);
   }
+  msgDiv.appendChild(actionsDiv);
 
   history.appendChild(msgDiv);
   if (!quiet) {
@@ -2117,7 +2182,7 @@ function handleChatInputKeydown(e) {
 function updateChatSendState() {
   const inputEl = document.getElementById('chat-input');
   const selectEl = document.getElementById('chat-model-select');
-  const sendBtn = document.querySelector('.chat-send-btn');
+  const sendBtn = document.querySelector('.chat-send-btn') || document.getElementById('chat-send-btn');
   if (!sendBtn) return;
   const hasContent = !!inputEl?.value.trim();
   const hasModel = !!selectEl?.value;
@@ -2207,7 +2272,7 @@ async function sendChatMessage() {
     botMsgDiv.id = `chat-bot-reply-${requestId}`;
     const botMetaDiv = document.createElement('div');
     botMetaDiv.className = 'chat-message-meta';
-    botMetaDiv.innerHTML = `${ICON.assistant}<span>${getSessionModeLabel(requestMode)}</span>`;
+    botMetaDiv.innerHTML = `<div class="chat-msg-avatar assistant">${ICON.assistant}</div><span class="chat-msg-sender">${getSessionModeLabel(requestMode)}</span>`;
     const botContentDiv = document.createElement('div');
     botContentDiv.className = 'chat-message-content markdown-body';
     botMsgDiv.appendChild(botMetaDiv);

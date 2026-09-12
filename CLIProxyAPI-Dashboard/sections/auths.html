@@ -1,75 +1,67 @@
 <section id="section-auths" class="panel panel-scroll panel-auths section-view">
-  <div class="panel-head">
-    <div>
-      <h2 class="section-title" data-i18n="section.authFilesTitle">OAuth 账号面板</h2>
-    </div>
-    <div class="action-row toolbar-scroll">
-      <button class="primary" onclick="showManualAuthModal()" data-i18n="btn.addManualAuth">添加 API Key</button>
-      <button class="secondary" onclick="loadAuthFiles()" data-i18n="btn.refreshAccounts">刷新</button>
-    </div>
-  </div>
-
   <div class="auth-hero">
-    <div class="auth-bulk-toolbar">
+    <!-- Row 1: Unified Top Bar (Search + Count + Global Actions) -->
+    <div class="auth-top-bar">
+      <div class="auth-search-wrap">
+        <input
+          id="auth-search-input"
+          class="auth-search-input"
+          type="search"
+          placeholder="搜索文件名 / 邮箱 / Provider / 路径"
+          data-i18n-placeholder="manual.placeholder.searchAuth"
+          oninput="setAuthSearch(this.value)"
+        />
+      </div>
+
+      <div class="auth-stats-meta">
+        <span class="auth-chip active-chip" title="当前显示 / 全部账号">
+          <span data-i18n="common.enabled">已启用</span>: <strong id="auth-selected-count">0</strong>
+        </span>
+      </div>
+
+      <div class="action-row auth-top-actions">
+        <button type="button" class="secondary auth-btn-sm" id="auth-view-mode-btn" onclick="toggleAuthViewMode()" title="切换展示模式（列表 / 卡片）">
+          <span id="auth-view-mode-icon">⊞</span>
+          <span id="auth-view-mode-text">卡片视图</span>
+        </button>
+        <button type="button" class="secondary auth-btn-sm auth-toggle-expand-all-btn" id="auth-toggle-all-expand-btn" onclick="toggleAllAuthExpanded()">
+          <span class="auth-toggle-expand-icon">⤡</span>
+          <span class="auth-toggle-expand-text">收起全部</span>
+        </button>
+        <button type="button" class="secondary auth-btn-sm" onclick="loadAuthFiles()" data-i18n="btn.refreshAccounts">刷新</button>
+        <button type="button" class="primary auth-btn-sm" onclick="showManualAuthModal()" data-i18n="btn.addManualAuth">+ 添加 API Key</button>
+      </div>
+    </div>
+
+    <!-- Row 2: Compact Provider Filter Strip -->
+    <div class="auth-filter-strip filter-rail" data-filter-rail="auth-selected">
+      <div id="auth-selected-filters" class="auth-provider-filters filter-rail-body"></div>
+    </div>
+
+    <!-- Contextual Bulk Toolbar (Hidden when 0 selected, appears on selection) -->
+    <div class="auth-bulk-toolbar" id="auth-bulk-toolbar" hidden>
       <div class="auth-bulk-meta">
-        <span class="auth-chip" id="auth-bulk-selection-count">未选择</span>
+        <span class="auth-chip active-chip" id="auth-bulk-selection-count">已选 0 项</span>
       </div>
       <div class="action-row">
-        <button class="secondary" type="button" id="auth-bulk-clear-btn" onclick="clearAuthCardSelection()">清空选择</button>
-        <button class="secondary" type="button" id="auth-bulk-delete-btn" onclick="deleteSelectedAuthCards()" data-i18n="btn.deleteSelected">删除选中</button>
-        <button class="secondary" type="button" id="auth-bulk-pool-btn" onclick="applySelectedAuthPoolAction()" hidden>目录直管</button>
-        <button class="secondary" type="button" id="auth-bulk-test-btn" onclick="testSelectedAuthCards()">检测选中</button>
-        <button class="secondary" type="button" id="auth-bulk-copy-btn" onclick="copySelectedAuthPaths()">复制路径</button>
+        <button class="secondary auth-btn-sm" type="button" id="auth-bulk-test-btn" onclick="testSelectedAuthCards()">检测选中</button>
+        <button class="secondary auth-btn-sm" type="button" id="auth-bulk-copy-btn" onclick="copySelectedAuthPaths()">复制路径</button>
+        <button class="danger auth-btn-sm" type="button" id="auth-bulk-delete-btn" onclick="deleteSelectedAuthCards()" data-i18n="btn.deleteSelected">删除选中</button>
+        <button class="secondary auth-btn-sm" type="button" id="auth-bulk-clear-btn" onclick="clearAuthCardSelection()">清空选择</button>
+        <button class="secondary auth-btn-sm" type="button" id="auth-bulk-pool-btn" onclick="applySelectedAuthPoolAction()" hidden>目录直管</button>
       </div>
-    </div>
-    <div class="auth-search-row">
-      <input
-        id="auth-search-input"
-        class="auth-search-input"
-        type="search"
-        placeholder="搜索文件名 / 邮箱 / Provider / 路径"
-        data-i18n-placeholder="manual.placeholder.searchAuth"
-        oninput="setAuthSearch(this.value)"
-      />
     </div>
 
-    <div class="auth-groups">
-      <div class="auth-group-wrap">
-        <div class="auth-group-head">
-          <h3 data-i18n="summary.activeAccount">Enabled Auth Files</h3>
-          <div class="auth-group-meta">
-            <span class="auth-chip active-chip" data-i18n="common.enabled">Enabled</span>
-            <span class="auth-group-count" id="auth-selected-count">0</span>
-          </div>
-        </div>
-        <div class="filter-rail auth-filter-rail" data-filter-rail="auth-selected">
-          <div class="filter-rail-head auth-filter-rail-head" data-filter-rail-head>
-            <span class="filter-rail-title">提供方筛选</span>
-            <button type="button" class="auth-toggle-expand-all-btn" id="auth-toggle-all-expand-btn" onclick="toggleAllAuthExpanded()">
-              <span class="auth-toggle-expand-icon">⤢</span>
-              <span class="auth-toggle-expand-text">展开全部</span>
-            </button>
-          </div>
-          <div id="auth-selected-filters" class="auth-provider-filters filter-rail-body"></div>
-        </div>
-        <div id="auth-selected-list" class="auth-list-container"></div>
+    <!-- Accounts List Container -->
+    <div id="auth-selected-list" class="auth-list-container"></div>
+
+    <!-- Hidden elements for JS compatibility -->
+    <div id="auth-available-wrap" class="auth-group-wrap" hidden>
+      <span id="auth-available-count">0</span>
+      <div class="filter-rail" data-filter-rail="auth-available">
+        <div id="auth-available-filters"></div>
       </div>
-      <div class="auth-group-wrap">
-        <div class="auth-group-head">
-          <h3 data-i18n="common.available">Available Accounts</h3>
-          <div class="auth-group-meta">
-            <span class="auth-chip" data-i18n="common.available">Available</span>
-            <span class="auth-group-count" id="auth-available-count">0</span>
-          </div>
-        </div>
-        <div class="filter-rail auth-filter-rail" data-filter-rail="auth-available">
-          <div class="filter-rail-head auth-filter-rail-head" data-filter-rail-head>
-            <span class="filter-rail-title">提供方筛选</span>
-          </div>
-          <div id="auth-available-filters" class="auth-provider-filters filter-rail-body"></div>
-        </div>
-        <div id="auth-available-list" class="auth-list-container"></div>
-      </div>
+      <div id="auth-available-list"></div>
     </div>
   </div>
 
