@@ -96,6 +96,8 @@ def default_state():
         'route_strategy': default_route_strategy(),
         'notes': 'Select an auth file, then start RelayX for CC-switch / Claude.',
         'disable_cooling': False,
+        'proxy_auto_detect': True,
+        'fixed_proxy_url': '',
         'core_routing_strategy': 'round-robin',
         'model_pool_archived': True,
         'force_model_prefix': False,

@@ -5446,18 +5446,29 @@ def build_runtime_config(
         if stripped.startswith('proxy-url:'):
             previous_proxy_url = stripped.split(':', 1)[1].strip().strip('"').strip("'")
             break
-    prefer_port = None
-    try:
-        from backend.local_proxy import is_local_proxy_url
-        if is_local_proxy_url(previous_proxy_url):
-            prefer_port = urlparse(previous_proxy_url if '://' in previous_proxy_url else f'http://{previous_proxy_url}').port
-    except Exception:
+    # Fixed-proxy mode (Advanced Config): with auto-detect off, only an explicit
+    # fixed proxy-url is written; an empty fixed value leaves base-config's own
+    # proxy-url untouched (removing that key in base-config means direct).
+    proxy_auto_detect = bool(current_state.get('proxy_auto_detect', True))
+    fixed_proxy_url = str(current_state.get('fixed_proxy_url') or '').strip()
+    if fixed_proxy_url and re.fullmatch(r'\d{1,5}', fixed_proxy_url):
+        fixed_proxy_url = f'http://127.0.0.1:{int(fixed_proxy_url)}'
+    if not proxy_auto_detect:
+        if fixed_proxy_url:
+            runtime_text = rewrite_proxy_url(runtime_text, fixed_proxy_url)
+    else:
         prefer_port = None
-    detected_proxy = _detect_active_local_proxy(prefer_port=prefer_port)
-    if detected_proxy.get('ok') and detected_proxy.get('proxy_url'):
-        runtime_text = rewrite_proxy_url(runtime_text, detected_proxy['proxy_url'])
-    elif previous_proxy_url and not is_local_proxy_url(previous_proxy_url):
-        runtime_text = rewrite_proxy_url(runtime_text, previous_proxy_url)
+        try:
+            from backend.local_proxy import is_local_proxy_url
+            if is_local_proxy_url(previous_proxy_url):
+                prefer_port = urlparse(previous_proxy_url if '://' in previous_proxy_url else f'http://{previous_proxy_url}').port
+        except Exception:
+            prefer_port = None
+        detected_proxy = _detect_active_local_proxy(prefer_port=prefer_port)
+        if detected_proxy.get('ok') and detected_proxy.get('proxy_url'):
+            runtime_text = rewrite_proxy_url(runtime_text, detected_proxy['proxy_url'])
+        elif previous_proxy_url and not is_local_proxy_url(previous_proxy_url):
+            runtime_text = rewrite_proxy_url(runtime_text, previous_proxy_url)
 
     # Merge admin access keys with all active virtual API keys
     all_api_keys = list(access_api_keys or ['cliproxyapi'])

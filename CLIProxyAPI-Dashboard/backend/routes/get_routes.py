@@ -807,6 +807,8 @@ def handle_get(handler, parsed):
         state = load_state()
         send_json(handler, {'ok': True, 'item': {
             'disable_cooling': state.get('disable_cooling', False),
+            'proxy_auto_detect': state.get('proxy_auto_detect', True),
+            'fixed_proxy_url': state.get('fixed_proxy_url', ''),
             'core_routing_strategy': state.get('core_routing_strategy', 'round-robin'),
             'force_model_prefix': state.get('force_model_prefix', False),
             'passthrough_headers': state.get('passthrough_headers', False),

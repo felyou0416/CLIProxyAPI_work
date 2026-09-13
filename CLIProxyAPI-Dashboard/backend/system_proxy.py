@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import threading
 from typing import Any
+from urllib.parse import urlparse
 
 from backend.local_proxy import _port_is_listening, _probe_http_proxy, collect_candidate_ports, detect_local_http_proxy
+from backend.state import load_state
 
 _PROXY_SYNC_LOCK = threading.RLock()
 
@@ -126,6 +129,39 @@ def pick_best_port(available_ports: list[int] | None = None) -> int | None:
     return None
 
 
+def _resolve_fixed_proxy(state: dict | None = None) -> dict:
+    """Resolve the fixed-proxy mode from state (auto detect disabled)."""
+    current = state or load_state()
+    if current.get('proxy_auto_detect', True):
+        return {'mode': 'auto'}
+    fixed = str(current.get('fixed_proxy_url') or '').strip()
+    if not fixed:
+        return {'mode': 'none', 'message': '已关闭自动探测，但未设置固定代理地址。'}
+    if fixed.lower() == 'direct':
+        return {'mode': 'direct', 'proxy_url': 'direct'}
+    if re.fullmatch(r'\d{1,5}', fixed):
+        port = int(fixed)
+        if 1 <= port <= 65535:
+            return {'mode': 'port', 'port': port, 'proxy_url': f'http://127.0.0.1:{port}'}
+        return {'mode': 'none', 'message': f'固定端口无效: {fixed}'}
+    text = fixed if '://' in fixed else f'http://{fixed}'
+    try:
+        port = urlparse(text).port
+    except Exception:
+        port = None
+    if port:
+        return {'mode': 'port', 'port': port, 'proxy_url': fixed}
+    return {'mode': 'none', 'message': f'无法从固定代理地址解析端口: {fixed}'}
+
+
+def _rebuild_runtime_config() -> dict:
+    try:
+        from backend.auth import rebuild_runtime_config_from_state
+        return rebuild_runtime_config_from_state()
+    except Exception as exc:
+        return {'rebuilt': False, 'reason': 'rebuild failed', 'error': str(exc)}
+
+
 def get_system_proxy_status() -> dict[str, Any]:
     enabled, server = get_system_proxy()
     current_port = _port_from_server(server) if enabled else None
@@ -203,6 +239,29 @@ def _configure_selected_port(port: int) -> dict[str, Any]:
 
 
 def configure_system_proxy() -> dict[str, Any]:
+    fixed = _resolve_fixed_proxy()
+    if fixed.get('mode') == 'direct':
+        restore_system_proxy_default()
+        rebuilt = _rebuild_runtime_config()
+        return {
+            'ok': True,
+            'message': '已切换为直连（direct）：系统代理已停用，内核 proxy-url 已固定为 direct。',
+            'proxy_enabled': False,
+            'port': None,
+            'mode': 'direct',
+            'runtime_rebuilt': bool(rebuilt.get('rebuilt')),
+        }
+    if fixed.get('mode') == 'port':
+        port = int(fixed['port'])
+        if not _port_is_listening(port):
+            return {
+                'ok': False,
+                'message': f'固定端口 {port} 未在监听，请先启动对应代理软件。',
+                'fixed': fixed,
+            }
+        return _configure_selected_port(port)
+    if fixed.get('mode') == 'none':
+        return {'ok': False, 'message': fixed.get('message') or '已关闭自动探测，但未设置固定代理地址。'}
     available_ports = list_available_ports()
     if not available_ports:
         return {
@@ -230,21 +289,7 @@ def toggle_system_proxy() -> dict[str, Any]:
             'proxy_enabled': False,
             'port': None,
         }
-
-    available_ports = list_available_ports()
-    if not available_ports:
-        return {
-            'ok': False,
-            'message': '未检测到可用端口，请先启动代理软件！',
-        }
-    best_port = pick_best_port(available_ports)
-    if not best_port:
-        return {
-            'ok': False,
-            'message': '没有可用的代理端口，无法启动代理。',
-            'available_ports': available_ports,
-        }
-    return _configure_selected_port(best_port)
+    return configure_system_proxy()
 
 
 def restore_system_proxy_default() -> dict[str, Any]:

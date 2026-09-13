@@ -167,10 +167,18 @@ func TestGetRequestDetails_ImageModelReturns503(t *testing.T) {
 		"gpt-image-1.5",
 		"gpt-image-2",
 		"codex/gpt-image-2",
+		"gpt-image-2.5-flare",
+		"codex/gpt-image-2.5-flare",
+		"gpt-image-2.5-sunburst",
+		"codex/gpt-image-2.5-sunburst",
+		"gpt-image-2.5",
+		"codex/gpt-image-2.5",
 		"grok-imagine-image",
 		"xai/grok-imagine-image",
 		"grok-imagine-image-quality",
 		"xai/grok-imagine-image-quality",
+		"grok-imagine-image-2.0",
+		"xai/grok-imagine-image-2.0",
 	}
 	for _, model := range imageOnlyModels {
 		t.Run(model, func(t *testing.T) {
@@ -199,10 +207,18 @@ func TestValidateImageOnlyModel_AllowsImageEndpoints(t *testing.T) {
 		"gpt-image-1.5",
 		"gpt-image-2",
 		"codex/gpt-image-2",
+		"gpt-image-2.5-flare",
+		"codex/gpt-image-2.5-flare",
+		"gpt-image-2.5-sunburst",
+		"codex/gpt-image-2.5-sunburst",
+		"gpt-image-2.5",
+		"codex/gpt-image-2.5",
 		"grok-imagine-image",
 		"xai/grok-imagine-image",
 		"grok-imagine-image-quality",
 		"xai/grok-imagine-image-quality",
+		"grok-imagine-image-2.0",
+		"xai/grok-imagine-image-2.0",
 	}
 	for _, model := range imageOnlyModels {
 		t.Run(model, func(t *testing.T) {
@@ -226,10 +242,18 @@ func TestIsOpenAIImageOnlyModel(t *testing.T) {
 		{model: "gpt-image-1.5", want: true},
 		{model: "gpt-image-2", want: true},
 		{model: "codex/gpt-image-1.5", want: true},
+		{model: "gpt-image-2.5-flare", want: true},
+		{model: "codex/gpt-image-2.5-flare", want: true},
+		{model: "gpt-image-2.5-sunburst", want: true},
+		{model: "codex/gpt-image-2.5-sunburst", want: true},
+		{model: "gpt-image-2.5", want: true},
+		{model: "codex/gpt-image-2.5", want: true},
 		{model: "grok-imagine-image", want: true},
 		{model: "xai/grok-imagine-image", want: true},
 		{model: "XAI/Grok-Imagine-Image-Quality", want: true},
 		{model: "grok-imagine-image-quality", want: true},
+		{model: "grok-imagine-image-2.0", want: true},
+		{model: "xai/grok-imagine-image-2.0", want: true},
 		{model: "grok-3", want: false},
 		{model: "gpt-5.2", want: false},
 		{model: "grok-imagine-video", want: false},
@@ -249,9 +273,14 @@ func TestExecuteImageWithAuthManager_AllowsImageOnlyModels(t *testing.T) {
 	imageOnlyModels := []string{
 		"gpt-image-1.5",
 		"gpt-image-2",
+		"gpt-image-2.5-flare",
+		"gpt-image-2.5-sunburst",
+		"gpt-image-2.5",
 		"grok-imagine-image",
 		"grok-imagine-image-quality",
 		"xai/grok-imagine-image-quality",
+		"grok-imagine-image-2.0",
+		"xai/grok-imagine-image-2.0",
 	}
 	for _, model := range imageOnlyModels {
 		t.Run(model, func(t *testing.T) {

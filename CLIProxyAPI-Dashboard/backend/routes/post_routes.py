@@ -20,6 +20,23 @@ def _validated_duration(value, default, field_name):
     return normalized
 
 
+def _validated_fixed_proxy_url(value):
+    """Validate a fixed proxy-url. Empty (keep base-config) or 'direct' are valid; otherwise require scheme://host."""
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    if text.lower() == 'direct':
+        return text.lower()
+    if re.fullmatch(r'\d{1,5}', text):
+        port = int(text)
+        if 1 <= port <= 65535:
+            return str(port)
+        raise ValueError('fixed_proxy_url 端口必须在 1-65535 之间')
+    if not re.match(r'^(https?|socks5h?)://[^\s]+$', text, re.IGNORECASE):
+        raise ValueError('fixed_proxy_url 必须是空、端口、direct 或 scheme://host:port 形式，例如 http://127.0.0.1:7897 或 7897')
+    return text
+
+
 def _bounded_int(data, key, default, minimum, maximum):
     value = int(data.get(key, default))
     if value < minimum or value > maximum:
@@ -1070,12 +1087,14 @@ def handle_post(handler, parsed, data):
                 'request_monitoring_enabled',
                 'codex_identity_confuse', 'codex_disable_cloaking',
                 'codex_optimize_multi_agent_v2', 'claude_code_disable_cloaking_model_list',
-                'xai_inject_x_search',
+                'xai_inject_x_search', 'proxy_auto_detect',
             ):
                 if key in data:
                     state[key] = bool(data[key])
             if 'session_affinity_ttl' in data:
                 state['session_affinity_ttl'] = _validated_duration(data['session_affinity_ttl'], '1h', 'session_affinity_ttl')
+            if 'fixed_proxy_url' in data:
+                state['fixed_proxy_url'] = _validated_fixed_proxy_url(data['fixed_proxy_url'])
             if 'video_result_auth_cache_ttl' in data:
                 state['video_result_auth_cache_ttl'] = _validated_duration(data['video_result_auth_cache_ttl'], '3h', 'video_result_auth_cache_ttl')
             if 'auth_auto_refresh_workers' in data:
