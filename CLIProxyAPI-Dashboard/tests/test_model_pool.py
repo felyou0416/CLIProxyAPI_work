@@ -201,7 +201,8 @@ class TestModelPoolStorage(unittest.TestCase):
             'models': ['gpt-5.5', 'custom-reasoning-model'],
         }]
 
-        with patch('backend.auth._load_model_mapping_overrides', return_value={}):
+        with patch('backend.auth._load_model_mapping_overrides', return_value={}), \
+             patch('backend.model_thinking.load_model_thinking_configs', return_value={}):
             rendered = build_openai_compatibility_block(entries)
 
         self.assertNotIn('thinking:', rendered)

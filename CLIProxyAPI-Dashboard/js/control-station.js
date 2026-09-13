@@ -259,7 +259,8 @@ async function dispatchControlStationClick(button) {
       return;
     }
     const port = button.dataset.csPort ? Number(button.dataset.csPort) : undefined;
-    return runSystemProxyAction(op, button, { port });
+    const mode = button.dataset.csMode || undefined;
+    return runSystemProxyAction(op, button, { port, mode });
   }
 
   if (action === 'claude-adapter') {

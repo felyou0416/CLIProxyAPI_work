@@ -1607,6 +1607,16 @@ def _detect_active_local_proxy(prefer_port: int | None = None) -> dict:
         }
 
 
+def _detect_smart_egress_proxy(prefer_port: int | None = None) -> dict:
+    """Detect optimal egress proxy mode (TUN direct, system proxy tunnel, or local mixed-port)."""
+    try:
+        from backend.local_proxy import detect_smart_egress_proxy
+        return detect_smart_egress_proxy(prefer_port=prefer_port)
+    except Exception as exc:
+        log_warn(f'Smart egress proxy detection failed: {exc}')
+        return {'ok': False, 'proxy_url': 'direct'}
+
+
 def _parse_clash_proxy_names(profile_path: Path | None, detect_active: bool = False):
     """Parse a Clash profile file. Network detect is opt-in to avoid UI lag."""
     if not profile_path or not profile_path.exists():
@@ -5464,8 +5474,8 @@ def build_runtime_config(
                 prefer_port = urlparse(previous_proxy_url if '://' in previous_proxy_url else f'http://{previous_proxy_url}').port
         except Exception:
             prefer_port = None
-        detected_proxy = _detect_active_local_proxy(prefer_port=prefer_port)
-        if detected_proxy.get('ok') and detected_proxy.get('proxy_url'):
+        detected_proxy = _detect_smart_egress_proxy(prefer_port=prefer_port)
+        if detected_proxy.get('proxy_url'):
             runtime_text = rewrite_proxy_url(runtime_text, detected_proxy['proxy_url'])
         elif previous_proxy_url and not is_local_proxy_url(previous_proxy_url):
             runtime_text = rewrite_proxy_url(runtime_text, previous_proxy_url)

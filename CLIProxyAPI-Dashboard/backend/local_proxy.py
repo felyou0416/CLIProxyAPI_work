@@ -109,6 +109,129 @@ def _ports_from_system_proxy() -> list[int]:
     return _unique_ports(ports)
 
 
+def get_active_tun_interface() -> dict | None:
+    """Detect if a TUN virtual network interface (e.g. Clash Verge / Mihomo / WinTun) is active."""
+    try:
+        import psutil
+        stats = psutil.net_if_stats()
+        addrs = psutil.net_if_addrs()
+    except Exception:
+        return None
+
+    tun_keywords = ('mihomo', 'clash', 'wintun', 'meta tunnel', 'sing-box', 'tun')
+    for name, stat in stats.items():
+        if not stat.isup:
+            continue
+        lower = name.lower()
+        if any(k in lower for k in tun_keywords):
+            ips = [
+                a.address
+                for a in addrs.get(name, [])
+                if getattr(a, 'family', None) in (socket.AF_INET, 2)
+            ]
+            return {'name': name, 'ips': ips}
+        for a in addrs.get(name, []):
+            addr = str(getattr(a, 'address', '') or '')
+            if addr.startswith('198.18.'):
+                return {'name': name, 'ips': [addr]}
+    return None
+
+
+def get_active_system_proxy() -> dict | None:
+    """Read Windows system proxy registry and return dict if enabled and listening."""
+    if os.name != 'nt':
+        return None
+    try:
+        import winreg  # type: ignore
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r'Software\Microsoft\Windows\CurrentVersion\Internet Settings',
+        ) as key:
+            try:
+                enable, _ = winreg.QueryValueEx(key, 'ProxyEnable')
+                if not enable:
+                    return None
+            except Exception:
+                return None
+            server, _ = winreg.QueryValueEx(key, 'ProxyServer')
+        text = str(server or '').strip()
+        if not text:
+            return None
+        for part in re.split(r'[;\s]+', text):
+            part = part.strip()
+            if not part:
+                continue
+            if '=' in part:
+                part = part.split('=', 1)[1].strip()
+            host_port = part
+            if '://' in host_port:
+                host_port = urlparse(host_port).netloc or host_port
+            if ':' not in host_port:
+                continue
+            host, port_text = host_port.rsplit(':', 1)
+            host = host.strip().strip('[]')
+            if host not in {'127.0.0.1', 'localhost', '::1', ''}:
+                continue
+            try:
+                port = int(port_text)
+                if 1 <= port <= 65535 and _port_is_listening(port):
+                    return {'port': port, 'proxy_url': f'http://127.0.0.1:{port}', 'server': text}
+            except Exception:
+                continue
+    except Exception:
+        return None
+    return None
+
+
+def detect_smart_egress_proxy(prefer_port: int | None = None) -> dict:
+    """Intelligently determine the optimal egress proxy based on live network state.
+
+    Priority 1: Active TUN virtual network card -> 'direct' (bypasses local mixed-port
+                to avoid loopback conflicts; traffic is transparently routed at L3).
+    Priority 2: Windows System Proxy enabled & port listening -> 'http://127.0.0.1:{port}'
+                (explicitly forwards requests via proxy tunnel because Go kernel ignores registry).
+    Priority 3: Active local proxy port detected -> 'http://127.0.0.1:{port}'.
+    Priority 4: None -> 'direct'.
+    """
+    tun = get_active_tun_interface()
+    if tun:
+        return {
+            'ok': True,
+            'mode': 'tun',
+            'proxy_url': 'direct',
+            'tun_info': tun,
+            'reason': f"TUN adapter active ({tun.get('name')})",
+        }
+
+    sys_proxy = get_active_system_proxy()
+    if sys_proxy:
+        return {
+            'ok': True,
+            'mode': 'system_proxy',
+            'port': sys_proxy['port'],
+            'proxy_url': sys_proxy['proxy_url'],
+            'reason': f"System proxy active on port {sys_proxy['port']}",
+        }
+
+    detected = detect_local_http_proxy(prefer_port=prefer_port)
+    if detected.get('ok') and detected.get('proxy_url'):
+        return {
+            'ok': True,
+            'mode': 'local_port',
+            'port': detected.get('port'),
+            'proxy_url': detected['proxy_url'],
+            'reason': f"Local proxy port detected ({detected.get('port')})",
+        }
+
+    return {
+        'ok': False,
+        'mode': 'direct',
+        'proxy_url': 'direct',
+        'reason': 'No active proxy or TUN detected',
+    }
+
+
 def _ports_from_app_configs() -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
     home = Path.home()

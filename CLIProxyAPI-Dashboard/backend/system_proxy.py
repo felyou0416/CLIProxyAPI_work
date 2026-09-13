@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from backend.local_proxy import _port_is_listening, _probe_http_proxy, collect_candidate_ports, detect_local_http_proxy
-from backend.state import load_state
+from backend.state import load_state, save_state
 
 _PROXY_SYNC_LOCK = threading.RLock()
 
@@ -166,12 +166,38 @@ def get_system_proxy_status() -> dict[str, Any]:
     enabled, server = get_system_proxy()
     current_port = _port_from_server(server) if enabled else None
     available_ports = list_available_ports()
+    try:
+        from backend.local_proxy import detect_smart_egress_proxy
+        smart = detect_smart_egress_proxy()
+    except Exception:
+        smart = {'mode': 'unknown', 'proxy_url': 'direct'}
+
+    st = load_state()
+    auto_detect = bool(st.get('proxy_auto_detect', True))
+    fixed_url = str(st.get('fixed_proxy_url') or '').strip()
+    stored_mode = st.get('egress_mode')
+
+    if stored_mode in ('auto', 'tun', 'system', 'off'):
+        mode = stored_mode
+    elif auto_detect:
+        mode = 'auto'
+    elif fixed_url.lower() == 'direct':
+        mode = 'tun' if smart.get('mode') == 'tun' else 'off'
+    elif fixed_url or enabled:
+        mode = 'system'
+    else:
+        mode = 'off'
+
     item = {
         'proxy_enabled': bool(enabled),
         'proxy_server': server if enabled else '',
         'current_port': current_port,
         'env_vars': get_env_vars(),
         'available_ports': available_ports,
+        'smart_egress': smart,
+        'mode': mode,
+        'proxy_auto_detect': auto_detect,
+        'fixed_proxy_url': fixed_url,
     }
     return {
         'ok': True,
@@ -328,3 +354,127 @@ def set_system_proxy_port(port: int, require_listening: bool = True) -> dict[str
     except Exception:
         result['works'] = False
     return result
+
+
+def switch_egress_mode(mode: str, port: int | None = None) -> dict[str, Any]:
+    """Switch egress proxy mode between 'auto', 'tun', 'system', and 'off'."""
+    mode_clean = str(mode or '').strip().lower()
+    if mode_clean not in ('auto', 'tun', 'system', 'off', 'direct'):
+        return {'ok': False, 'message': f'未知代理模式: {mode}'}
+    if mode_clean == 'direct':
+        mode_clean = 'off'
+
+    if mode_clean == 'auto':
+        st = load_state()
+        st['egress_mode'] = 'auto'
+        st['proxy_auto_detect'] = True
+        st['fixed_proxy_url'] = ''
+        save_state(st)
+
+        rebuilt = _rebuild_runtime_config()
+        try:
+            from backend.local_proxy import detect_smart_egress_proxy
+            smart = detect_smart_egress_proxy()
+        except Exception:
+            smart = {'mode': 'unknown', 'proxy_url': 'direct'}
+
+        smart_mode = smart.get('mode')
+        if smart_mode == 'tun':
+            tun_name = (smart.get('tun_info') or {}).get('name') or '虚拟网卡'
+            msg = f'已切换为【自动感知】模式：检测到 {tun_name} 已接管，内核已启用直连分流。'
+        elif smart_mode in ('system_proxy', 'local_port'):
+            detected_port = smart.get('port')
+            msg = f'已切换为【自动感知】模式：检测到本地代理端口 {detected_port}，内核已同步绑定。'
+        else:
+            msg = '已切换为【自动感知】模式：当前无活动代理，内核保持直连。'
+
+        return {
+            'ok': True,
+            'mode': 'auto',
+            'smart': smart,
+            'message': msg,
+            'runtime_rebuilt': bool(rebuilt.get('rebuilt')),
+        }
+
+    if mode_clean == 'tun':
+        st = load_state()
+        st['egress_mode'] = 'tun'
+        st['proxy_auto_detect'] = False
+        st['fixed_proxy_url'] = 'direct'
+        save_state(st)
+
+        set_system_proxy(False)
+        clear_env_vars()
+        rebuilt = _rebuild_runtime_config()
+
+        return {
+            'ok': True,
+            'mode': 'tun',
+            'proxy_enabled': False,
+            'port': None,
+            'message': '已切换为【TUN直连】模式：Windows 系统代理已停用，由 Clash 虚拟网卡接管分流。',
+            'runtime_rebuilt': bool(rebuilt.get('rebuilt')),
+        }
+
+    if mode_clean == 'system':
+        target_port = None
+        if port is not None:
+            try:
+                p = int(port)
+                if 1 <= p <= 65535:
+                    target_port = p
+            except Exception:
+                pass
+
+        if target_port is None:
+            target_port = pick_best_port()
+            if not target_port:
+                for p in (7897, 7890, 10090):
+                    if _port_is_listening(p):
+                        target_port = p
+                        break
+
+        if not target_port:
+            return {
+                'ok': False,
+                'message': '未检测到正在监听的代理端口 (如 7897/7890/10090)，请确保 Clash 等代理软件已开启。',
+            }
+
+        st = load_state()
+        st['egress_mode'] = 'system'
+        st['proxy_auto_detect'] = False
+        st['fixed_proxy_url'] = f'http://127.0.0.1:{target_port}'
+        save_state(st)
+
+        res = _configure_selected_port(target_port)
+        if not res.get('ok'):
+            return res
+        return {
+            'ok': True,
+            'mode': 'system',
+            'port': target_port,
+            'proxy_enabled': True,
+            'message': f'已切换为【系统代理】模式 (127.0.0.1:{target_port})，内核与系统代理已同步。',
+            'runtime_rebuilt': res.get('runtime_rebuilt', True),
+        }
+
+    # mode_clean == 'off'
+    st = load_state()
+    st['egress_mode'] = 'off'
+    st['proxy_auto_detect'] = False
+    st['fixed_proxy_url'] = 'direct'
+    save_state(st)
+
+    set_system_proxy(False)
+    clear_env_vars()
+    rebuilt = _rebuild_runtime_config()
+
+    return {
+        'ok': True,
+        'mode': 'off',
+        'proxy_enabled': False,
+        'port': None,
+        'message': '已停用代理：系统代理已关闭，内核已恢复纯直连。',
+        'runtime_rebuilt': bool(rebuilt.get('rebuilt')),
+    }
+

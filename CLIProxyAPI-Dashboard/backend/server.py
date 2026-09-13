@@ -249,6 +249,12 @@ def main():
     print('Observability cache refresher started')
     start_auth_pool_sync_thread()
     print('Auth pool hot-sync started')
+    try:
+        from backend.egress_watcher import start_egress_watcher
+        start_egress_watcher(interval_seconds=3.0)
+        print('Egress proxy auto-adaptation watcher started')
+    except Exception as exc:
+        print(f'Failed to start egress watcher: {exc}')
     if dashboard_auto_start_enabled():
         print('Auto start RelayX scheduled in background')
         threading.Thread(target=_auto_start_proxy_async, name='auto-start-proxy', daemon=True).start()
@@ -264,5 +270,10 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        try:
+            from backend.egress_watcher import stop_egress_watcher
+            stop_egress_watcher()
+        except Exception:
+            pass
         server.server_close()
         shutdown_all()

@@ -160,21 +160,17 @@ window.CONTROL_STATION_LAYERS = [
           kind: 'system-proxy',
           id: 'system-proxy',
           icon: 'S',
-          title: { text: '系统代理' },
+          title: { text: '出口代理' },
           indicator: {
             id: 'system-proxy-status-indicator',
             color: 'red',
-            title: '系统代理未读取',
+            title: '出口代理未读取',
           },
-          ports: [
-            { port: 7890, id: 'proxy-port-7890-btn', title: '切换到 127.0.0.1:7890' },
-            { port: 10090, id: 'proxy-port-10090-btn', title: '切换到 127.0.0.1:10090' },
-            { port: 7897, id: 'proxy-port-7897-btn', title: '切换到 127.0.0.1:7897' },
-          ],
           buttons: [
-            { action: 'sys-proxy', op: 'configure', id: 'proxy-configure-btn', label: '检测' },
-            { action: 'sys-proxy', op: 'toggle', id: 'proxy-toggle-btn', label: '停用', className: 'secondary' },
-            { action: 'sys-proxy', op: 'default', id: 'proxy-default-btn', label: '恢复', className: 'secondary' },
+            { action: 'sys-proxy', op: 'switch-mode', mode: 'auto', id: 'proxy-mode-auto-btn', label: '自动感知', title: '智能感知 TUN 网卡与系统代理，自适应热切换' },
+            { action: 'sys-proxy', op: 'switch-mode', mode: 'tun', id: 'proxy-mode-tun-btn', label: 'TUN直连', className: 'secondary', title: 'Clash 虚拟网卡模式，内核直连由网卡分流' },
+            { action: 'sys-proxy', op: 'switch-mode', mode: 'system', id: 'proxy-mode-system-btn', label: '系统代理', className: 'secondary', title: '传统端口模式，自动绑定活动代理端口' },
+            { action: 'sys-proxy', op: 'switch-mode', mode: 'off', id: 'proxy-mode-off-btn', label: '停用', className: 'secondary', title: '关闭系统代理，内核恢复纯直连' },
           ],
         },
         {

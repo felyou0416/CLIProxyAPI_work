@@ -103,6 +103,13 @@ def validate_token(token: str) -> bool:
     _lock.acquire()
     try:
         _load_tokens()
+        if token not in _token_store and _ACTIVE_TOKENS_FILE.exists():
+            try:
+                data = json.loads(_ACTIVE_TOKENS_FILE.read_text(encoding='utf-8'))
+                if isinstance(data, dict):
+                    _token_store.update(data)
+            except Exception:
+                pass
         now = int(time.time())
         info = _token_store.get(token)
         if not info:

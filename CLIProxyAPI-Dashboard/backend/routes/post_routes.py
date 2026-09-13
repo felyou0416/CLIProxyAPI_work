@@ -6,7 +6,7 @@ from backend.processes import start_device_login, stop_device_login, start_proxy
 from backend.tools import run_tool, stop_tool, test_provider_models, test_image_models, test_auth_entry, clear_auth_test_cache, queue_provider_model_tests, clear_provider_model_test_state, stop_provider_model_tests, run_storage_cleanup, _proxy_request, reveal_generated_media
 from backend.terminals import open_terminal, open_desktop_terminal, close_terminal, list_terminals, write_terminal, resize_terminal
 from backend.routes.helpers import send_json
-from backend.system_proxy import configure_system_proxy, toggle_system_proxy, restore_system_proxy_default, set_system_proxy_port
+from backend.system_proxy import configure_system_proxy, toggle_system_proxy, restore_system_proxy_default, set_system_proxy_port, switch_egress_mode
 import re
 
 
@@ -1594,6 +1594,14 @@ def handle_post(handler, parsed, data):
         try:
             port = (data or {}).get('port') if isinstance(data, dict) else None
             send_json(handler, set_system_proxy_port(port))
+        except Exception as e:
+            send_json(handler, {'ok': False, 'message': str(e)}, status=500)
+        return True
+    if parsed.path == '/api/system-proxy/mode':
+        try:
+            mode = (data or {}).get('mode', '') if isinstance(data, dict) else ''
+            port = (data or {}).get('port') if isinstance(data, dict) else None
+            send_json(handler, switch_egress_mode(mode, port=port))
         except Exception as e:
             send_json(handler, {'ok': False, 'message': str(e)}, status=500)
         return True

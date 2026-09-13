@@ -1,4 +1,12 @@
-let proxyStatus = { enabled: false, port: null, availablePorts: [] };
+let proxyStatus = {
+  enabled: false,
+  port: null,
+  availablePorts: [],
+  smartEgress: null,
+  mode: 'auto',
+  proxyAutoDetect: true,
+  fixedProxyUrl: '',
+};
 // Process-local status reported by grok2api itself (NOT the OS system-proxy panel).
 let grok2apiSysProxy = { reachable: false, enabled: false, port: null, proxyUrl: '', message: '' };
 
@@ -6,10 +14,13 @@ function applyProxyStatus(item = {}) {
   proxyStatus.enabled = !!(item.proxy_enabled);
   proxyStatus.port = item.current_port || item.port || null;
   proxyStatus.availablePorts = Array.isArray(item.available_ports) ? item.available_ports : [];
+  proxyStatus.smartEgress = item.smart_egress || null;
+  proxyStatus.mode = item.mode || 'auto';
+  proxyStatus.proxyAutoDetect = item.proxy_auto_detect !== false;
+  proxyStatus.fixedProxyUrl = item.fixed_proxy_url || '';
   updateProxyStatusDisplay();
 }
 
-const SYSTEM_PROXY_PORT_BUTTONS = [7890, 10090, 7897];
 
 function updateGrok2ApiSysProxyDisplay() {
   const portEl = document.getElementById('grok2api-sys-proxy-port');
@@ -84,37 +95,61 @@ function updateProxyStatusDisplay() {
   const indicator = document.getElementById('system-proxy-status-indicator');
   const currentPort = Number(proxyStatus.port || 0) || null;
   const available = new Set((proxyStatus.availablePorts || []).map((p) => Number(p)));
+  const smart = proxyStatus.smartEgress || {};
+  const isTun = smart.mode === 'tun';
+  const tunName = (smart.tun_info && smart.tun_info.name) || 'Mihomo';
+  const currentMode = proxyStatus.mode || (proxyStatus.proxyAutoDetect ? 'auto' : 'system');
 
-  if (toggleBtn) {
-    if (proxyStatus.enabled) {
-      toggleBtn.textContent = '停用';
-      toggleBtn.title = '停止系统代理并清除代理环境变量';
-      toggleBtn.classList.remove('primary');
-      toggleBtn.classList.add('secondary');
-    } else {
-      toggleBtn.textContent = '启动';
-      toggleBtn.title = '检测可用端口并启动系统代理';
-      toggleBtn.classList.remove('secondary');
-      toggleBtn.classList.add('primary');
-    }
-  }
-
-  for (const port of SYSTEM_PROXY_PORT_BUTTONS) {
-    const btn = document.getElementById(`proxy-port-${port}-btn`);
-    if (!btn) continue;
-    const isActive = !!(proxyStatus.enabled && currentPort === port);
-    const isLive = available.has(port);
+  // Highlight 4 mode buttons
+  const modeButtons = {
+    auto: document.getElementById('proxy-mode-auto-btn'),
+    tun: document.getElementById('proxy-mode-tun-btn'),
+    system: document.getElementById('proxy-mode-system-btn'),
+    off: document.getElementById('proxy-mode-off-btn'),
+  };
+  Object.entries(modeButtons).forEach(([m, btn]) => {
+    if (!btn) return;
+    const isActive = (m === currentMode);
     btn.classList.toggle('primary', isActive);
+    btn.classList.toggle('is-active', isActive);
     btn.classList.toggle('secondary', !isActive);
-    btn.title = isActive
-      ? `当前系统代理: 127.0.0.1:${port}`
-      : `切换系统代理到 127.0.0.1:${port}${isLive ? '（端口在线）' : '（端口未监听）'}`;
+  });
+
+
+  let systemColor = 'red';
+  let systemTitle = '出口代理未启用';
+  let statusHtml = '';
+
+  if (currentMode === 'auto') {
+    systemColor = (isTun || proxyStatus.enabled) ? 'green' : 'yellow';
+    if (isTun) {
+      systemTitle = `【自动感知】TUN 虚拟网卡已接管 (${tunName}) · 内核直连分流`;
+      statusHtml = `<span style="color: var(--success, #00aa00); font-weight: 700;">自动感知</span> · TUN (${tunName})`;
+    } else if (proxyStatus.enabled && currentPort) {
+      systemTitle = `【自动感知】系统代理已启用 (端口 ${currentPort}) · 内核已同步`;
+      statusHtml = `<span style="color: var(--success, #00aa00); font-weight: 700;">自动感知</span> · 代理 (${currentPort})`;
+    } else if (smart.mode === 'local_port' && smart.port) {
+      systemTitle = `【自动感知】检测到活动代理端口 ${smart.port} · 内核已同步`;
+      statusHtml = `<span style="color: var(--success, #00aa00); font-weight: 700;">自动感知</span> · 端口 (${smart.port})`;
+    } else {
+      systemTitle = `【自动感知】未检测到活动代理，内核保持直连`;
+      statusHtml = `<span style="color: var(--text-muted, #888888);">自动感知 · 直连</span>`;
+    }
+  } else if (currentMode === 'tun') {
+    systemColor = isTun ? 'green' : 'yellow';
+    systemTitle = `【TUN 直连】内核直连分流${isTun ? ` (${tunName})` : '（等待 TUN 启动）'}`;
+    statusHtml = `<span style="color: var(--success, #00aa00); font-weight: 700;">TUN 直连</span> · ${tunName}`;
+  } else if (currentMode === 'system') {
+    systemColor = proxyStatus.enabled ? 'green' : 'yellow';
+    const portShow = currentPort || (proxyStatus.fixedProxyUrl ? proxyStatus.fixedProxyUrl.split(':').pop() : '');
+    systemTitle = `【系统代理】127.0.0.1:${portShow || '已启用'}`;
+    statusHtml = `<span style="color: var(--success, #00aa00); font-weight: 700;">系统代理</span> · ${portShow || '已启用'}`;
+  } else {
+    systemColor = 'red';
+    systemTitle = '代理已停用 · 内核原生直连';
+    statusHtml = `<span style="color: var(--text-muted, #888888);">未启用代理</span>`;
   }
 
-  const systemColor = proxyStatus.enabled ? 'green' : 'red';
-  const systemTitle = proxyStatus.enabled
-    ? `系统代理已启用${currentPort ? ` (端口 ${currentPort})` : ''}`
-    : '系统代理未启用';
   if (typeof window.updateIndicator === 'function') {
     window.updateIndicator('system-proxy', systemColor);
   }
@@ -123,18 +158,8 @@ function updateProxyStatusDisplay() {
   }
 
   if (!statusDiv) return;
-
-  // Compact one-line status (shown in the system-proxy heading).
-  let html = proxyStatus.enabled
-    ? `<span style="color: var(--success, #00aa00);">已启用</span>${currentPort ? ` · ${currentPort}` : ''}`
-    : `<span style="color: var(--danger, #aa0000);">未启用</span>`;
-  if (proxyStatus.availablePorts && proxyStatus.availablePorts.length > 0) {
-    html += ` · 可用: ${proxyStatus.availablePorts.join('/')}`;
-  }
-  statusDiv.innerHTML = html;
-  statusDiv.title = proxyStatus.enabled
-    ? `系统代理已启用${currentPort ? ` (端口 ${currentPort})` : ''}${proxyStatus.availablePorts?.length ? ` · 可用端口: ${proxyStatus.availablePorts.join(', ')}` : ''}`
-    : '系统代理未启用';
+  statusDiv.innerHTML = statusHtml;
+  statusDiv.title = systemTitle;
 }
 
 async function loadProxyStatus() {
@@ -152,13 +177,16 @@ async function loadProxyStatus() {
   await loadGrok2ApiSysProxyStatus();
 }
 
-// 系统代理组按钮整体禁用（端口 + 检测/停用/恢复），避免并发切换
+// 系统代理组按钮整体禁用（模式按钮 + 端口 + 检测/停用/恢复），避免并发切换
 function setProxyButtonsBusy(busy, activeBtn) {
   const ids = [
+    'proxy-mode-auto-btn',
+    'proxy-mode-tun-btn',
+    'proxy-mode-system-btn',
+    'proxy-mode-off-btn',
     'proxy-configure-btn',
     'proxy-toggle-btn',
     'proxy-default-btn',
-    ...SYSTEM_PROXY_PORT_BUTTONS.map((port) => `proxy-port-${port}-btn`),
   ];
   ids.forEach((id) => {
     const btn = document.getElementById(id);
@@ -186,6 +214,19 @@ function formatProxySynchronizationMessage(resp, fallback) {
 
 // 系统代理动作表：控制台 sys-proxy 分发与旧 proxySetPort 等 shim 共用
 const SYSTEM_PROXY_ACTIONS = {
+  'switch-mode': {
+    label: '切换模式',
+    path: '/api/system-proxy/mode',
+    body: ({ mode, port }) => ({ mode, port }),
+    onOk: (resp, { mode }) => {
+      if (resp.mode) proxyStatus.mode = resp.mode;
+      if (resp.proxy_enabled !== undefined) proxyStatus.enabled = !!resp.proxy_enabled;
+      if (resp.port !== undefined) proxyStatus.port = resp.port;
+      updateProxyStatusDisplay();
+      return resp.message || '出口代理模式切换成功';
+    },
+    fail: '模式切换失败',
+  },
   'set-port': {
     label: '切换',
     path: '/api/system-proxy/set-port',

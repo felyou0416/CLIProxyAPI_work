@@ -331,14 +331,15 @@ async function refreshStatus() {
   if (refreshStatusPending) return;
   refreshStatusPending = true;
   try {
-    // 系统代理侧只在账号页需要时刷新，且节流到 20s，避免每 8s 额外 1~2 个请求
+    // 系统代理与出口状态只在账号页需要时刷新
     if (shouldRefreshSysProxySide()) {
       const now = Date.now();
-      if (now - _lastSysProxyPollAt > 20000) {
+      if (now - _lastSysProxyPollAt > 8000) {
         _lastSysProxyPollAt = now;
         if (typeof loadGrok2ApiSysProxyStatus === 'function') {
           loadGrok2ApiSysProxyStatus().catch(() => {});
-        } else if (typeof loadProxyStatus === 'function') {
+        }
+        if (typeof loadProxyStatus === 'function') {
           loadProxyStatus().catch(() => {});
         }
       }

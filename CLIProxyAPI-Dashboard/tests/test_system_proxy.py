@@ -106,3 +106,44 @@ def test_configure_and_enable_share_synchronization_path(monkeypatch):
     monkeypatch.setattr(system_proxy, 'get_system_proxy', lambda: (False, ''))
     assert system_proxy.toggle_system_proxy()['ok'] is True
     assert calls == ['http://127.0.0.1:10090', 'http://127.0.0.1:10090']
+
+
+def test_switch_egress_mode(monkeypatch):
+    saved_states = []
+    monkeypatch.setattr(system_proxy, 'load_state', lambda: {'proxy_auto_detect': True})
+    monkeypatch.setattr(system_proxy, 'save_state', lambda st: saved_states.append(dict(st)))
+    monkeypatch.setattr(system_proxy, '_rebuild_runtime_config', lambda: {'rebuilt': True})
+    monkeypatch.setattr(system_proxy, 'set_system_proxy', lambda *a: None)
+    monkeypatch.setattr(system_proxy, 'clear_env_vars', lambda: None)
+    monkeypatch.setattr(system_proxy, '_configure_selected_port', lambda p: {'ok': True, 'port': p, 'runtime_rebuilt': True})
+
+    # Test auto
+    res_auto = system_proxy.switch_egress_mode('auto')
+    assert res_auto['ok'] is True
+    assert res_auto['mode'] == 'auto'
+    assert saved_states[-1]['egress_mode'] == 'auto'
+    assert saved_states[-1]['proxy_auto_detect'] is True
+
+    # Test tun
+    res_tun = system_proxy.switch_egress_mode('tun')
+    assert res_tun['ok'] is True
+    assert res_tun['mode'] == 'tun'
+    assert saved_states[-1]['egress_mode'] == 'tun'
+    assert saved_states[-1]['proxy_auto_detect'] is False
+    assert saved_states[-1]['fixed_proxy_url'] == 'direct'
+
+    # Test system with port
+    res_sys = system_proxy.switch_egress_mode('system', port=7897)
+    assert res_sys['ok'] is True
+    assert res_sys['mode'] == 'system'
+    assert res_sys['port'] == 7897
+    assert saved_states[-1]['egress_mode'] == 'system'
+    assert saved_states[-1]['fixed_proxy_url'] == 'http://127.0.0.1:7897'
+
+    # Test off
+    res_off = system_proxy.switch_egress_mode('off')
+    assert res_off['ok'] is True
+    assert res_off['mode'] == 'off'
+    assert saved_states[-1]['egress_mode'] == 'off'
+    assert saved_states[-1]['fixed_proxy_url'] == 'direct'
+
