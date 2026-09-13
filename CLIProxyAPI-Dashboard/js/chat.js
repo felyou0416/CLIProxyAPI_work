@@ -2336,20 +2336,48 @@ async function sendChatMessage() {
         const proto = window.location.protocol;
         const host = window.location.hostname;
         const streamUrl = `${proto}//${host}:8317/v1/chat/completions`;
-        const apiKeys = await fetch('/api/virtual-keys').then(r => r.json()).catch(() => ({}));
-        const api_key = Array.isArray(apiKeys.keys) && apiKeys.keys.length > 0 ? apiKeys.keys[0].key : '';
+        let api_key = 'cliproxyapi';
+        try {
+          const statusRes = typeof api === 'function' ? await api('/api/status').catch(() => null) : null;
+          if (statusRes?.api_key) {
+            api_key = statusRes.api_key;
+          } else {
+            const vkRes = typeof api === 'function' ? await api('/api/virtual-keys').catch(() => null) : null;
+            const items = vkRes?.items || vkRes?.keys;
+            if (Array.isArray(items) && items.length > 0 && items[0]?.key) {
+              api_key = items[0].key;
+            }
+          }
+        } catch (_) {}
 
-        const response = await fetch(streamUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${api_key || 'dummy-key'}`
-          },
-          body: JSON.stringify(payload)
-        });
+        let response = null;
+        try {
+          response = await fetch(streamUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${api_key || 'cliproxyapi'}`
+            },
+            body: JSON.stringify(payload)
+          });
+        } catch (directErr) {
+          console.warn('Direct stream to 8317 failed, attempting stream via /api/chat', directErr);
+        }
+
+        // If direct stream to 8317 failed or was blocked, stream via /api/chat SSE
+        if (!response || !response.ok) {
+          const headers = { 'Content-Type': 'application/json' };
+          const token = typeof getAuthToken === 'function' ? getAuthToken() : '';
+          if (token) headers['Authorization'] = 'Bearer ' + token;
+          response = await fetch('/api/chat', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ ...payload, stream: true })
+          });
+        }
 
         if (!response.ok) {
-          throw new Error(`Direct stream request returned status ${response.status}`);
+          throw new Error(`Stream request returned status ${response.status}`);
         }
 
         const reader = response.body.getReader();
@@ -2372,7 +2400,7 @@ async function sendChatMessage() {
             if (cleaned.startsWith('data: ')) {
               try {
                 const chunkJson = JSON.parse(cleaned.slice(6));
-                const delta = chunkJson.choices?.[0]?.delta?.content || '';
+                const delta = chunkJson.choices?.[0]?.delta?.content || chunkJson.choices?.[0]?.delta?.reasoning_content || '';
                 if (delta) {
                   replyText += delta;
                   markSessionDraft(session, requestId, replyText);
@@ -2384,9 +2412,11 @@ async function sendChatMessage() {
           }
         }
 
-        markSessionDraft(session, requestId, replyText, true);
-        finalizeSessionReply(session, requestId, replyText);
-        streamSucceeded = true;
+        if (replyText) {
+          markSessionDraft(session, requestId, replyText, true);
+          finalizeSessionReply(session, requestId, replyText);
+          streamSucceeded = true;
+        }
       } catch (streamErr) {
         console.warn('Streaming failed, falling back to standard API', streamErr);
       }

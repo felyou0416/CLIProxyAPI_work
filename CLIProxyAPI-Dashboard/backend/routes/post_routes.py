@@ -1,7 +1,7 @@
 from backend.auth import create_manual_auth_entry, create_manual_auth_bundle_entry, list_auth_files, build_auth_ref, set_provider_model_override, delete_provider_model_override, create_custom_aggregate_alias, add_custom_aggregate_alias_members, set_custom_aggregate_alias_members, delete_custom_aggregate_alias, move_custom_aggregate_alias, rename_custom_aggregate_alias, copy_custom_aggregate_alias, set_custom_aggregate_alias_enabled, delete_auth_entries, save_model_proxy_rules, rebuild_runtime_config_from_state, get_configured_provider_models, reorder_custom_aggregate_aliases, set_custom_aggregate_alias_version
 from backend.model_thinking import save_model_thinking_configs
 from backend.api_keys import create_api_key, update_api_key, delete_api_key, reset_api_key_usage, reveal_api_key
-from backend.state import load_state, save_state, normalize_route_strategy
+from backend.state import load_state, save_state, normalize_route_strategy, get_proxy_api_key
 from backend.processes import start_device_login, stop_device_login, start_proxy, stop_proxy, restart_proxy, start_project, start_oauth_manager, stop_oauth_manager, restart_oauth_manager, start_openclaw_gateway, stop_openclaw_gateway, restart_openclaw_gateway, start_create_grok, stop_create_grok, restart_create_grok, start_chat77, stop_chat77, restart_chat77, start_media_proxy, stop_media_proxy, restart_media_proxy, start_grok2api, stop_grok2api, restart_grok2api, start_grok2api_backend, stop_grok2api_backend, restart_grok2api_backend, start_grok2api_frontend, stop_grok2api_frontend, restart_grok2api_frontend, current_status, ensure_firewall_access, ensure_custom_firewall_ports, remove_custom_firewall_ports, ensure_port_bindings, remove_port_bindings, set_ip_helper_service, stop_dashboard_panel, restart_dashboard_panel
 from backend.tools import run_tool, stop_tool, test_provider_models, test_image_models, test_auth_entry, clear_auth_test_cache, queue_provider_model_tests, clear_provider_model_test_state, stop_provider_model_tests, run_storage_cleanup, _proxy_request, reveal_generated_media
 from backend.terminals import open_terminal, open_desktop_terminal, close_terminal, list_terminals, write_terminal, resize_terminal
@@ -980,6 +980,39 @@ def handle_post(handler, parsed, data):
         if not isinstance(data, dict):
             send_json(handler, {'ok': False, 'message': 'Invalid payload.'}, status=400)
             return True
+
+        if data.get('stream'):
+            import json, urllib.request
+            api_key = get_proxy_api_key(load_state())
+            stream_url = 'http://127.0.0.1:8317/v1/chat/completions'
+            req = urllib.request.Request(
+                stream_url,
+                data=json.dumps(data).encode('utf-8'),
+                headers={
+                    'Authorization': f'Bearer {api_key}',
+                    'Content-Type': 'application/json',
+                },
+                method='POST',
+            )
+            try:
+                upstream_resp = urllib.request.urlopen(req, timeout=120)
+                handler.send_response(200)
+                handler.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+                handler.send_header('Cache-Control', 'no-cache')
+                handler.send_header('Connection', 'keep-alive')
+                handler.send_header('X-Accel-Buffering', 'no')
+                handler.end_headers()
+                try:
+                    for chunk in upstream_resp:
+                        handler.wfile.write(chunk)
+                        handler.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                finally:
+                    upstream_resp.close()
+                return True
+            except Exception:
+                pass
 
         # Proxy request to CLIProxyAPI
         result = _proxy_request('/v1/chat/completions', data)
