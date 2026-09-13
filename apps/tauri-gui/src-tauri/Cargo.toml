@@ -1,6 +1,6 @@
 [package]
 name = "cliproxyapi-tauri"
-version = "1.5.1"
+version = "1.5.2"
 description = "CLIProxyAPI Dashboard Tauri shell"
 authors = ["CLIProxyAPI"]
 edition = "2021"
