@@ -97,18 +97,61 @@ openai-compatibility:
   -> OpenAI-compatible 上游请求
 ```
 
+## 网络出口自适应与 4 模式架构
+
+### 问题背景与冲突根因
+在 Windows 环境下配合 Clash Verge / Mihomo / Sing-box 使用时：
+1. **TUN 虚拟网卡模式**：网络层已通过 L3 虚拟网卡接管所有出站流量，此时若代理内核强行设置本地混合端口（如 `http://127.0.0.1:7897`），流量会形成本地回环或导致网络死锁，外部请求报连接拒绝。
+2. **系统代理模式**：Go 原生代理内核默认忽略 Windows 注册表的代理配置，若不显式传入 `proxy-url`，请求将直连目标服务而失败。
+3. **网络模式切换**：用户在客户端频繁切换 TUN 与系统代理时，旧版本无法动态适配，需重启服务。
+
+### 架构与核心实现
+Dashboard 引入自适应出口感知中枢：
+1. **梯级探测算法 (`backend/local_proxy.py`)**：
+   - 第一梯队：检测活跃 TUN 虚拟网卡（Mihomo/WinTun/Clash），命中时内核使用 `direct`（由虚拟网卡透明接管）。
+   - 第二梯队：检测 Windows 注册表系统代理是否启用且端口监听，命中时内核绑定 `http://127.0.0.1:{port}`。
+   - 第三梯队：探测本地活跃代理端口（7897/7890/10090 等），命中时内核绑定该端口。
+   - 第四梯队：无任何代理时内核使用 `direct` 直连。
+2. **无感感知守护 (`backend/egress_watcher.py`)**：
+   - 3 秒轻量心跳后台线程，检测网络环境变动（如用户开关 Clash TUN）。
+   - 一旦状态变化，自动调用 `rebuild_runtime_config_from_state()` 重新生成运行态 YAML。
+   - Go 核心通过 fsnotify 0 重启即时热加载新出口配置。
+3. **控制台 4 模式控制 (`backend/system_proxy.py`)**：
+   - `auto`（自动感知）：启用上述自适应梯级探测与守护。
+   - `tun`（TUN 直连）：显式固定 `proxy-url: direct`，关闭系统代理。
+   - `system`（系统代理）：固定绑定本地监听代理端口，并同步 Windows 系统代理设置。
+   - `off`（停用代理）：关闭系统代理，内核恢复纯直连。
+
+## 内核升级与纯粹性守则 (Kernel Purity)
+
+- **核心原则**：`CLIProxyAPI/CLIProxyAPI/` 必须保持 100% 官方原生纯粹，严禁为定制功能侵入修改内核源码。
+- **升级命令**：运行 `.\update-core.ps1 -TargetVersion v7.x.x`（缺省自动探测最新 Tag）。
+- **自动化构建链路**：脚本自动拉取官方 Tag、检出 worktree、执行 robocopy 同步、运行单元测试、构建 `cli-proxy-api.exe`、级联构建三大扩展模块（AccessGateway / LocalPlugin / MediaProxy）并跑通 Dashboard 集成测试，最后在 `UPSTREAM_VERSION` 记录当前版本。
+- **Windows 敏感测试跳过**：Windows 下存在计时器精度（0s ttft）、文件重命名锁、短超时（1s）等平台脆弱单测，`update-core.ps1` 内置了 `$knownWindowsTests` 正则进行跳过保护。
+
 ## 维护检查清单
 
 - [ ] 修改生成规则后同步添加回归测试。
 - [ ] 不把运行态文件当作长期源文件提交或手改维护。
 - [ ] 不在日志、文档或记忆中记录 API Key、Cookie、Token 或完整 Authorization 值。
 - [ ] 内核升级后重新确认模型能力字段和 `thinking.levels` 的 YAML schema。
-- [ ] 运行 `git diff --check`，再运行 Dashboard 全量测试。
+- [ ] 运行 `git diff --check`，再运行 Dashboard 全量测试（`python -m pytest tests/`）。
+- [ ] 控制台按钮样式遵循胶囊内轻量透明文本标准，严禁引入厚重实心色块破坏全局视觉一致性。
 
-## 本次修复记录
+## 历史维护记录
 
-- 日期：2026-08-31。
-- 现象：`ung` OpenAI-compatible 路由的 `gpt-5.6-sol/terra` 请求中，入口 `max/xhigh` 被实际出站请求降为 `high`。
-- 根因：生成的模型条目缺少 `thinking.levels`，命中内核默认 `[low, medium, high]`。
-- 修复：Dashboard 生成器为 `gpt-5.6-sol/terra/luna` 写入 `[low, medium, high, xhigh, max]`，未知模型保持默认行为。
-- 验证：Dashboard 全量单元测试 153 项通过；运行态配置已重建并被内核热加载。
+### 2026-09-13
+- **内核升级**：升级官方 Go 原生内核至 `v7.2.159`，内核代码 100% 保持纯粹。
+- **出口自适应与 4 模式**：交付 `auto` / `tun` / `system` / `off` 4 模式切换与 `egress_watcher.py` 后台自适应守护。
+- **界面优化**：恢复控制台按钮轻量扁平透明样式，去除深蓝色块；移除旧版端口循环死代码。
+- **测试验证**：Dashboard 180 项单元测试 100% 全绿，API 连通测试通过。
+
+### 2026-09-11
+- **日志刷新与思考配置修复**：修复请求日志 5s 自动刷新卡顿及 `model-thinking.js` item 作用域缺失，支持多层 Provider 前缀继承。
+- **回归覆盖**：增加 14 项定向回归测试，全量测试达 168 项通过。
+
+### 2026-08-31
+- **现象**：`ung` OpenAI-compatible 路由的 `gpt-5.6-sol/terra` 请求中，入口 `max/xhigh` 被实际出站请求降为 `high`。
+- **根因**：生成的模型条目缺少 `thinking.levels`，命中内核默认 `[low, medium, high]`。
+- **修复**：Dashboard 生成器为 `gpt-5.6-sol/terra/luna` 写入 `[low, medium, high, xhigh, max]`，未知模型保持默认行为。
+- **验证**：Dashboard 全量单元测试 153 项通过；运行态配置已重建并被内核热加载。
